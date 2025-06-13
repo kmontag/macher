@@ -38,7 +38,7 @@
 ;;; Customization
 
 (defgroup macher nil
-  "LLM implementation toolset."
+  "Project-aware LLM implementation toolset."
   :group 'convenience
   :prefix "macher-")
 
@@ -675,6 +675,7 @@ Also updates the context's :buffers alist."
     (list
      (gptel-make-tool
       :name "edit_file_in_workspace"
+      :category "workspace"
       :function
       `,(lambda (path edits &optional dry-run)
           "Edit file specified by PATH within the workspace.
@@ -754,6 +755,7 @@ If DRY-RUN is non-nil, preview changes without applying them."
 
      (gptel-make-tool
       :name "write_file_in_workspace"
+      :category "workspace"
       :function
       `,(lambda (path content)
           "Create a new file or completely overwrite an existing file with CONTENT.
@@ -791,6 +793,7 @@ Use with caution as it will overwrite existing files without warning."
 
      (gptel-make-tool
       :name "read_file_in_workspace"
+      :category "workspace"
       :function
       `,(lambda (path)
           "Read the contents of a file specified by PATH within the workspace."
@@ -817,6 +820,7 @@ Use with caution as it will overwrite existing files without warning."
 
      (gptel-make-tool
       :name "move_file_in_workspace"
+      :category "workspace"
       :function
       `,(lambda (source destination)
           "Move or rename files within the workspace.
@@ -867,6 +871,7 @@ If the destination exists, the operation will fail."
 
      (gptel-make-tool
       :name "delete_file_in_workspace"
+      :category "workspace"
       :function
       `,(lambda (rel-path)
           "Delete a file specified by REL-PATH within the workspace.
