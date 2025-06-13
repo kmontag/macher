@@ -35,7 +35,7 @@
   (find-file temp-lib-file)
   (other-window 1))
 
-(demo-enter-key-sequence
+(macher--demo-enter-key-sequence
  (concat
   ;; Add a bit of buffer at the beginning, since we'll be trimming the video.
   "<pause> <pause> "
@@ -55,7 +55,7 @@
         (lambda (&rest args)
           (apply orig-patch-ready-fn args)
 
-          (demo-enter-key-sequence
+          (macher--demo-enter-key-sequence
            (concat
             ;; Scroll around.
             "<pause> <down> <down> <down> <down> C-n <pause> C-n <pause> "
@@ -66,13 +66,13 @@
             ;; Run `macher-revise'.
             "M-x m a c h e r - r TAB <pause> RET <pause> "
             ;; Enter revision request.
-            (demo-text-to-key-sequence "get n as a cli arg") " <pause> RET "))
+            (macher--demo-text-to-key-sequence "get n as a cli arg") " <pause> RET "))
 
           ;; Catch the next and final patch-ready event.
           (setq macher-patch-ready-function
                 (lambda (&rest args)
                   (apply orig-patch-ready-fn args)
-                  (demo-enter-key-sequence
+                  (macher--demo-enter-key-sequence
                    (concat
                     ;; Scroll around.
                     "<pause> <down> <down> <down> <down> <down> <down> <down> <down> <pause> "

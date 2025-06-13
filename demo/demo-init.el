@@ -67,7 +67,7 @@
 
 ;;; Helper Functions for Screen Recording
 
-(defun demo-enter-key-sequence (key-sequence &optional callback)
+(defun macher--demo-enter-key-sequence (key-sequence &optional callback)
   "Enter KEY-SEQUENCE as if it were actually being entered by the user.
 
 Once the key sequence has been received as input, call CALLBACK.
@@ -98,7 +98,7 @@ keys. Use \"<pause>\" to insert a delay."
             ;; Schedule processing of the remaining keys with a very brief wait between keystrokes.
             (run-at-time 0.06 nil continue-fn)))))))
 
-(defun demo-text-to-key-sequence (text)
+(defun macher--demo-text-to-key-sequence (text)
   "Convert TEXT to a key sequence format for demo input.
 
 Converts text like \"foo bar\" to the form

@@ -9,15 +9,34 @@ FFMPEG := ffmpeg
 # Note this also installs eask dependencies via the package's postinstall script.
 $(EASK) .eask: package.json package-lock.json Eask
 	"$(NPM)" install
-	[ -f "$(EASK)" ] && touch "$(EASK)"
+	[ -f "$(EASK)" ] && touch "$(EASK)" && touch .eask/
+
+# Analyze the Eask file itself for inconsistencies, and exit unsuccessfully if any are found.
+.PHONY: analyze
+analyze: $(EASK) .eask
+# This always seems to exit with status 0, and it's unclear whether output will be expected on
+# stdout or stderr, see https://github.com/emacs-eask/cli/issues/276. But in the successful case,
+# the output will be exactly "(Checked 1 file)" (possibly with blank lines and color encodings around
+# it, even when --no-color is passed - we strip these using sed and tr).
+	@OUTPUT=$$($(EASK) --strict --no-color analyze --json 2>&1); \
+	echo "$$OUTPUT"; \
+	CLEANED_OUTPUT=$$(echo "$$OUTPUT" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\n' ); \
+	if [ "$$CLEANED_OUTPUT" != "(Checked 1 file)" ]; then \
+		echo "Error: eask analyze output was '$$CLEANED_OUTPUT', expected '(Checked 1 file)'" >&2; \
+		exit 1; \
+	fi
+
+# Generic target for lint commands that take a list of files.
+.PHONY: lint.%
+lint.%: $(EASK) .eask
+	$(EASK) --strict lint $* *.el demo/*.el test/*.el
 
 .PHONY: lint
-lint: $(EASK) .eask
-	$(EASK) lint package
+lint: analyze lint.declare lint.package lint.regexps
 
 .PHONY: test.%
 test.%: $(EASK) .eask
-	$(EASK) test ert test/macher-$*-tests.el
+	$(EASK) --strict test ert test/macher-$*-tests.el
 
 .PHONY: test
 test: test.unit test.functional test.integration
