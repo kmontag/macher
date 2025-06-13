@@ -242,8 +242,9 @@ BUFFERS is an alist of (filename . (orig-buffer . new-buffer)) pairs.
 WORKSPACE is the workspace information (same format as 'macher--workspace').
 PROMPT is the original prompt sent to the LLM.
 CALLBACK is a function to call when the request completes (with error or nil).
-DATA is an arbitrary user-defined data object."
- (buffers nil) (workspace nil) (prompt nil) (callback nil) (data nil))
+DATA is an arbitrary user-defined data object.
+TOOL-CATEGORY is a unique category name for the tools created for this request."
+ (buffers nil) (workspace nil) (prompt nil) (callback nil) (data nil) (tool-category nil))
 
 ;;; Internal Functions
 
@@ -624,6 +625,28 @@ context won't change before it can edit them."
             (when in-workspace-p
               (macher-context-buffers-for-file full-path macher-context))))))))
 
+(defun macher--generate-tool-category ()
+  "Generate a unique category name for macher workspace tools.
+Returns a string like 'workspace-1234' where the last four characters
+are random alphanumeric characters."
+  (let ((chars "abcdef0123456789")
+        (result "macher-workspace-"))
+    ;; Generate 4 random alphanumeric characters.
+    (dotimes (_ 4 result)
+      (let ((idx (random (length chars))))
+        (setq result (concat result (substring chars idx (1+ idx))))))))
+
+(defun macher--cleanup-tools (category)
+  "Clean up gptel tools for the given CATEGORY.
+Removes all tools from `gptel--known-tools' and 'gptel-tools' that
+have the specified category.
+
+See `gptel-mcp-disconnect' for an example of something similar."
+  (when (and category (stringp category))
+    ;; The tools should never have been added to the global 'gptel-tools' (just the tools list for
+    ;; the request), so we don't need to do any cleanup there. Just remove them from registry.
+    (setf (alist-get category gptel--known-tools nil t #'equal) nil)))
+
 ;; The workspace tools roughly mirror the standard filesystem MCP interface, of which many LLMs
 ;; already have some understanding. See
 ;; https://github.com/modelcontextprotocol/servers/blob/main/src/filesystem/README.md.
@@ -637,6 +660,7 @@ around and modify the context throughout the implementation process."
          (workspace-type (car workspace))
          (workspace-id (cdr workspace))
          (workspace-name (macher--workspace-name workspace))
+         (category (macher-context-tool-category context))
          ;; Shared function to resolve full paths from relative paths.
          (resolve-workspace-path
           (lambda (rel-path)
@@ -675,7 +699,7 @@ Also updates the context's :buffers alist."
     (list
      (gptel-make-tool
       :name "edit_file_in_workspace"
-      :category "workspace"
+      :category category
       :function
       `,(lambda (path edits &optional dry-run)
           "Edit file specified by PATH within the workspace.
@@ -755,7 +779,7 @@ If DRY-RUN is non-nil, preview changes without applying them."
 
      (gptel-make-tool
       :name "write_file_in_workspace"
-      :category "workspace"
+      :category category
       :function
       `,(lambda (path content)
           "Create a new file or completely overwrite an existing file with CONTENT.
@@ -793,7 +817,7 @@ Use with caution as it will overwrite existing files without warning."
 
      (gptel-make-tool
       :name "read_file_in_workspace"
-      :category "workspace"
+      :category category
       :function
       `,(lambda (path)
           "Read the contents of a file specified by PATH within the workspace."
@@ -820,7 +844,7 @@ Use with caution as it will overwrite existing files without warning."
 
      (gptel-make-tool
       :name "move_file_in_workspace"
-      :category "workspace"
+      :category category
       :function
       `,(lambda (source destination)
           "Move or rename files within the workspace.
@@ -871,7 +895,7 @@ If the destination exists, the operation will fail."
 
      (gptel-make-tool
       :name "delete_file_in_workspace"
-      :category "workspace"
+      :category category
       :function
       `,(lambda (rel-path)
           "Delete a file specified by REL-PATH within the workspace.
@@ -947,17 +971,22 @@ was not."
       (plist-put info :tracking-marker tracking-marker))))
 
 (defun macher--context-cleanup (context)
-  "Clean up buffers associated with CONTEXT.
+  "Clean up buffers and tools associated with CONTEXT.
 CONTEXT is a `macher-context' struct."
-  (let ((buffers (macher-context-buffers context)))
+  (let ((buffers (macher-context-buffers context))
+        (category (macher-context-tool-category context)))
+    ;; Clean up buffers.
     (dolist (entry buffers)
       (let ((orig-buffer (car (cdr entry)))
             (new-buffer (cdr (cdr entry))))
         ;; Kill the original buffer if it exists.
         (when orig-buffer
           (kill-buffer orig-buffer))
-        ;; The new buffer should always exist.
-        (kill-buffer new-buffer)))))
+        ;; Kill the new buffer if it exists.
+        (when new-buffer
+          (kill-buffer new-buffer))))
+    ;; Clean up tools from this category.
+    (macher--cleanup-tools category)))
 
 (defun macher--fsm-cleanup (fsm)
   "Clean up buffers and other resources for the `macher-send' request managed by FSM."
@@ -1320,7 +1349,12 @@ two arguments:
       ((workspace (macher-workspace))
        ;; Create the context as a struct.
        (context
-        (macher--make-context :buffers nil :workspace workspace :prompt prompt :callback callback))
+        (macher--make-context
+         :buffers nil
+         :workspace workspace
+         :prompt prompt
+         :callback callback
+         :tool-category (macher--generate-tool-category)))
        (output-buffer (macher--output-buffer nil t))
 
        ;; We need information about the gptel context to generate rich workspace information. To

@@ -788,5 +788,63 @@ Returns t if all checks pass."
       (when setup-info
         (macher-test--cleanup-context-test setup-info (list buffer-buffer))))))
 
+;;; Tool cleanup tests:
+
+(ert-deftest macher-test-tool-lifecycle ()
+  "Test that tools are properly created and cleaned up during requests.
+
+For now this needs to peek into 'gptel--known-tools'."
+  (let ((callback-called nil)
+        (response-received nil)
+        (temp-dir (make-temp-file "macher-test-" t))
+        (test-buffer nil))
+    (unwind-protect
+        (macher-test-with-stubbed-backend '("Test response")
+          ;; Create a test.txt file in the temp directory (no .project file).
+          (let ((test-file (expand-file-name "test.txt" temp-dir)))
+            (with-temp-file test-file
+              (insert "Test content\n"))
+
+            (setq test-buffer (find-file-noselect test-file))
+            (with-current-buffer test-buffer
+              ;; Verify initial state has no tools.
+              (should (= (length gptel--known-tools) 0))
+              (should (= (length gptel-tools) 0))
+
+              ;; Start the request.
+              (macher-send
+               "Test prompt"
+               (lambda (error context)
+                 (setq callback-called t)
+                 (setq response-received (not error))))
+
+              ;; Verify exactly one workspace category was added during the request.
+              (let ((workspace-categories-during (mapcar #'car gptel--known-tools)))
+                (should workspace-categories-during)
+                (should (= (length workspace-categories-during) 1))
+                (should (string-prefix-p "macher-workspace-" (car workspace-categories-during))))
+
+              ;; Wait for the async response and cleanup.
+              (let ((timeout 0))
+                (while (and (not callback-called) (< timeout 100))
+                  (sit-for 0.1)
+                  (setq timeout (1+ timeout))))
+
+              ;; Wait a bit more for cleanup to complete.
+              (sleep-for 0.2)
+
+              ;; Verify callback was called and response received.
+              (should callback-called)
+              (should response-received)
+
+              ;; Verify tools are cleaned up after callback - back to empty state.
+              (should (= (length gptel--known-tools) 0))
+              (should (= (length gptel-tools) 0)))))
+      ;; Clean up.
+      (when test-buffer
+        (kill-buffer test-buffer))
+      (when (and temp-dir (file-exists-p temp-dir))
+        (delete-directory temp-dir t)))))
+
 (provide 'macher-integration-tests)
 ;;; macher-integration-tests.el ends here
