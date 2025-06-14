@@ -1,0 +1,36 @@
+---
+name: Release
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  # Run the validation workflow before running the deploy.
+  validate:
+    uses: ./.github/workflows/validate.yml
+
+  # Release workflow adapted from
+  # https://semantic-release.gitbook.io/semantic-release/recipes/ci-configurations/github-actions.
+  release:
+    runs-on: ubuntu-latest
+    # Make sure all validation steps pass.
+    needs:
+      - validate
+    permissions:
+      # Allow publishing releases and committing to the repo.
+      contents: write
+      # Allow filing issues if the run fails.
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      - name: Verify the integrity of installed dependencies
+        run: npm audit signatures
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release

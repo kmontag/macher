@@ -1,7 +1,5 @@
 # macher
 
-[![Lint & Test](https://github.com/kmontag/macher/actions/workflows/validate.yml/badge.svg)](https://github.com/kmontag/macher/actions/workflows/validate.yml)
-
 A project-aware LLM implementation toolset for Emacs, built on
 [gptel](https://github.com/karthink/gptel).
 

@@ -40,6 +40,10 @@ resource "github_repository" "default" {
   has_issues    = true
   has_projects  = false
   has_wiki      = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 data "github_rest_api" "rulesets" {
@@ -92,13 +96,15 @@ resource "github_repository_ruleset" "main" {
     # Prevent force-pushes to the default branch.
     non_fast_forward = true
 
-    # Require validation workflow to pass before merging to main.
-    required_status_checks {
-      strict_required_status_checks_policy = true
-      required_check {
-        context = "validate"
-      }
-    }
+    # It would be nice to force status checks to pass before merging to main, but this complicates
+    # the semantic-release commit process. There are some workarounds if needed in the future, see
+    # for example https://github.com/semantic-release/git/issues/210#issuecomment-739880155.
+    # required_status_checks {
+    #   strict_required_status_checks_policy = true
+    #   required_check {
+    #     context = "validate_and_release"
+    #   }
+    # }
   }
   # Allow repository admins to bypass these checks.
   bypass_actors {

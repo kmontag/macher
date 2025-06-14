@@ -1,40 +1,34 @@
 ---
 name: Lint & Test
-
 on:
-  push:
-    branches: [main]
+  # Allow this workflow to be called from other workflows. See
+  # https://stackoverflow.com/questions/58457140/dependencies-between-workflows-on-github-actions.
+  workflow_call:
   pull_request:
     branches: [main]
 
-# Cancel in-progress jobs on PRs when new commits are pushed. For pushes directly to main, we base
-# the concurrency group on the sha instead, so that new commits don't cancel running workflows -
-# cancellations are treated as failures, so this would mess with the status badge.
+# Cancel in-progress jobs on PRs when new commits are pushed.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
-  cancel-in-progress: true
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  # Only cancel concurrent requests when we're running from a PR; otherwise, behavior is generally
+  # more predictable if we allow existing jobs (e.g. validation triggered during release) to
+  # complete.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  validate:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
 
-      # Eask dependencies are installed via an npm postinstall hook, so Emacs needs to be installed
-      # first.
-      - name: Setup Emacs
-        uses: purcell/setup-emacs@v6.0
-        with:
-          version: 30.1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-          cache: "npm"
-
-      - name: Install npm dependencies
-        run: npm ci
+      - name: Check formating
+        run: make lint
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
 
       # Note this also starts the ollama server.
       - name: Install Ollama
@@ -52,9 +46,6 @@ jobs:
         run: |
           MODEL_NAME=$(grep -o 'macher-test--gptel-model "[^"]*"' test/macher-functional-tests.el | cut -d'"' -f2)
           ollama pull "$MODEL_NAME"
-
-      - name: Run linting
-        run: make lint
 
       - name: Run tests
         run: make test

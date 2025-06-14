@@ -8,6 +8,11 @@
     "postinstall": "eask install-deps"
   },
   "devDependencies": {
-    "@emacs-eask/cli": "^0.11.1"
+    "@emacs-eask/cli": "^0.11.1",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/exec": "^7.1.0",
+    "@semantic-release/git": "^10.0.1",
+    "@tsconfig/node-lts": "^22.0.1",
+    "semantic-release": "^24.2.5"
   }
 }
