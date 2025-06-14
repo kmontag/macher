@@ -16,6 +16,9 @@ jobs:
   # https://semantic-release.gitbook.io/semantic-release/recipes/ci-configurations/github-actions.
   release:
     runs-on: ubuntu-latest
+    # semantic-release doesn't support releases with major version 0, disable the actual release
+    # workflow until we're ready to release 1.0.0.
+    if: false
     # Make sure all validation steps pass.
     needs:
       - validate
