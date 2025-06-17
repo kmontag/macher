@@ -889,7 +889,7 @@ This tests the case mentioned in the TODO comment in 'macher--add-patch-metadata
               (should patch-text)
 
               ;; Verify the empty patch contains the expected message.
-              (should (string-match-p "# No changes were made to any files\." patch-text))
+              (should (string-match-p "# No changes were made to any files." patch-text))
 
               ;; Verify it still includes metadata like patch ID and timestamp.
               (should (string-match-p "# Patch ID: [a-z0-9]+" patch-text))
