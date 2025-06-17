@@ -14,19 +14,19 @@
 
 ;; Uncomment for debugging output.
 ;;
-;; (advice-add
-;;  #'gptel--handle-post-insert
-;;  :before
-;;  (lambda (fsm)
-;;    (when-let* ((info (gptel-fsm-info fsm))
-;;                (start-marker (plist-get info :position))
-;;                (tracking-marker (plist-get info :tracking-marker))
-;;                (output-buffer (marker-buffer start-marker)))
-;;      (with-current-buffer output-buffer
-;;        (let ((newly-inserted-text
-;;               (buffer-substring-no-properties
-;;                (marker-position start-marker) (marker-position tracking-marker))))
-;;          (message newly-inserted-text))))))
+(advice-add
+ #'gptel--handle-post-insert
+ :before
+ (lambda (fsm)
+   (when-let* ((info (gptel-fsm-info fsm))
+               (start-marker (plist-get info :position))
+               (tracking-marker (plist-get info :tracking-marker))
+               (output-buffer (marker-buffer start-marker)))
+     (with-current-buffer output-buffer
+       (let ((newly-inserted-text
+              (buffer-substring-no-properties
+               (marker-position start-marker) (marker-position tracking-marker))))
+         (message newly-inserted-text))))))
 ;; ;; Logs will be printed by `with-macher-test-gptel' if enabled.
 ;; (setopt gptel-log-level 'info)
 
