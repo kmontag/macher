@@ -846,5 +846,68 @@ For now this needs to peek into 'gptel--known-tools'."
       (when (and temp-dir (file-exists-p temp-dir))
         (delete-directory temp-dir t)))))
 
+(ert-deftest macher-test-empty-patch-generation ()
+  "Test that empty patches (no file changes) generate appropriate message.
+
+This tests the case mentioned in the TODO comment in 'macher--add-patch-metadata'."
+  (let ((callback-called nil)
+        (patch-text nil)
+        (context-received nil)
+        (temp-dir (make-temp-file "macher-test-empty-patch-" t))
+        (test-buffer nil))
+    (unwind-protect
+        (macher-test-with-stubbed-backend '("No changes needed.")
+          ;; Create a simple project with a test file.
+          (let ((test-file (expand-file-name "test.txt" temp-dir)))
+            (with-temp-file test-file
+              (insert "Original content\n"))
+
+            ;; Create .project file to ensure it's detected as a project.
+            (with-temp-file (expand-file-name ".project" temp-dir)
+              (insert ""))
+
+            (setq test-buffer (find-file-noselect test-file))
+            (with-current-buffer test-buffer
+              ;; Use macher-edit to get a patch.
+              (macher-edit
+               "Test prompt that should result in no changes"
+               (lambda (error context)
+                 (setq callback-called t)
+                 (setq context-received context)
+                 ;; Generate patch text using the same function as the real implementation.
+                 (setq patch-text (macher--patch-text context))))
+
+              ;; Wait for the async response.
+              (let ((timeout 0))
+                (while (and (not callback-called) (< timeout 100))
+                  (sleep-for 0.1)
+                  (setq timeout (1+ timeout))))
+
+              (should callback-called)
+              (should context-received)
+              (should (macher-context-p context-received))
+              (should patch-text)
+
+              ;; Verify the empty patch contains the expected message.
+              (should (string-match-p "# No changes were made to any files\." patch-text))
+
+              ;; Verify it still includes metadata like patch ID and timestamp.
+              (should (string-match-p "# Patch ID: [a-z0-9]+" patch-text))
+              (should
+               (string-match-p "# Generated: [0-9]+-[0-9]+-[0-9]+ [0-9]+:[0-9]+:[0-9]+" patch-text))
+
+              ;; Verify it includes the project name.
+              (should
+               (string-match-p (format "Project: %s" (file-name-nondirectory temp-dir)) patch-text))
+
+              ;; Verify the prompt is included in the patch comments.
+              (should
+               (string-match-p "# Test prompt that should result in no changes" patch-text)))))
+      ;; Clean up.
+      (when test-buffer
+        (kill-buffer test-buffer))
+      (when (and temp-dir (file-exists-p temp-dir))
+        (delete-directory temp-dir t)))))
+
 (provide 'macher-integration-tests)
 ;;; macher-integration-tests.el ends here

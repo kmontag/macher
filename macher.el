@@ -1088,20 +1088,17 @@ Returns the text to be passed to the next function in the hook."
             (dotimes (_ 8 result)
               (let ((idx (random (length chars))))
                 (setq result (concat result (substring chars idx (1+ idx))))))))
-         (result text))
+         (result
+          ;; Always start with the patch metadata header.
+          (format "# Patch ID: %s\n# Generated: %s | Project: %s\n"
+                  patch-id
+                  (format-time-string "%Y-%m-%d %H:%M:%S")
+                  proj-name)))
 
-    ;; If the patch is empty, add a message.
-    (if (string-empty-p result)
-        "# No changes were made to any files."
-
-      ;; Otherwise, add the patch header.
-      (setq result
-            (concat
-             (format "# Patch ID: %s\n# Generated: %s | Project: %s\n"
-                     patch-id
-                     (format-time-string "%Y-%m-%d %H:%M:%S")
-                     proj-name)
-             result)))
+    ;; If the original patch text is empty, add a message; otherwise add the diff content.
+    (if (string-empty-p text)
+        (setq result (concat result "# No changes were made to any files."))
+      (setq result (concat result text)))
 
     ;; Add the current prompt to the patch, if available.
     (when-let ((prompt (macher-context-prompt context)))
