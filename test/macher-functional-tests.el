@@ -53,7 +53,7 @@ Always creates a file named 'main.txt'."
 (defconst macher-test--system-message
   "You are a software engineer. Edit code directly using the tools provided. Do not ask for clarification or permission.")
 
-(defconst macher-test--gptel-model "qwen2.5-coder:3b"
+(defconst macher-test--gptel-model "llama3.2:3b"
   "The ollama model to use in gptel requests. Must be installed locally.")
 ;; (add-hook
 ;;  'gptel-prompt-transform-functions
@@ -61,8 +61,9 @@ Always creates a file named 'main.txt'."
 ;;    ;; Prompt modifications to help the current model.
 ;;    (save-excursion
 ;;      (goto-char (point-max))
-;;      ;; (insert "/no_think")
-;;      (insert "\nDon't wait for confirmation to use tools."))))
+;;      (insert "\n/no_think")
+;;      ;; (insert "\nDon't wait for confirmation to use tools.")
+;;      )))
 
 ;; Macro to set up gptel configuration for tests and execute body within the context.
 (defmacro with-macher-test-gptel (&rest body)
