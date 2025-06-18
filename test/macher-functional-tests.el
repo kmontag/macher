@@ -59,7 +59,7 @@ Always creates a file named 'main.txt'."
    (save-excursion
      (goto-char (point-max))
      ;; (insert "\n/no_think")
-     (insert "\nDO NOT wrap your response in a ```json block."))))
+     (insert "\nUse the standard tool calling API."))))
 
 ;; Macro to set up gptel configuration for tests and execute body within the context.
 (defmacro with-macher-test-gptel (&rest body)
