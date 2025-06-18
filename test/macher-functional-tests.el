@@ -14,19 +14,19 @@
 
 ;; Uncomment for debugging output.
 ;;
-(advice-add
- #'gptel--handle-post-insert
- :before
- (lambda (fsm)
-   (when-let* ((info (gptel-fsm-info fsm))
-               (start-marker (plist-get info :position))
-               (tracking-marker (plist-get info :tracking-marker))
-               (output-buffer (marker-buffer start-marker)))
-     (with-current-buffer output-buffer
-       (let ((newly-inserted-text
-              (buffer-substring-no-properties
-               (marker-position start-marker) (marker-position tracking-marker))))
-         (message newly-inserted-text))))))
+;; (advice-add
+;;  #'gptel--handle-post-insert
+;;  :before
+;;  (lambda (fsm)
+;;    (when-let* ((info (gptel-fsm-info fsm))
+;;                (start-marker (plist-get info :position))
+;;                (tracking-marker (plist-get info :tracking-marker))
+;;                (output-buffer (marker-buffer start-marker)))
+;;      (with-current-buffer output-buffer
+;;        (let ((newly-inserted-text
+;;               (buffer-substring-no-properties
+;;                (marker-position start-marker) (marker-position tracking-marker))))
+;;          (message newly-inserted-text))))))
 ;; ;; Logs will be printed by `with-macher-test-gptel' if enabled.
 ;; (setopt gptel-log-level 'info)
 
@@ -55,15 +55,6 @@ Always creates a file named 'main.txt'."
 
 (defconst macher-test--gptel-model "llama3.2:3b"
   "The ollama model to use in gptel requests. Must be installed locally.")
-;; (add-hook
-;;  'gptel-prompt-transform-functions
-;;  (lambda ()
-;;    ;; Prompt modifications to help the current model.
-;;    (save-excursion
-;;      (goto-char (point-max))
-;;      (insert "\n/no_think")
-;;      ;; (insert "\nDon't wait for confirmation to use tools.")
-;;      )))
 
 ;; Macro to set up gptel configuration for tests and execute body within the context.
 (defmacro with-macher-test-gptel (&rest body)
