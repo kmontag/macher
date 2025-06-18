@@ -50,35 +50,39 @@ Always creates a file named 'main.txt'."
 (defconst macher-test--main-file-contents "Hello from main file.\nNumber: 123"
   "The contents of main.txt, for test cases involving both projects and single-file edits.")
 
+(defconst macher-test--system-message
+  "You are a software engineer. Edit code directly using the tools provided. Do not ask for clarification or permission.")
+
 (defconst macher-test--gptel-model "qwen2.5-coder:1.5b"
   "The ollama model to use in gptel requests. Must be installed locally.")
-(add-hook
- 'gptel-prompt-transform-functions
- (lambda ()
-   ;; Prompt modifications to help the current model.
-   (save-excursion
-     (goto-char (point-max))
-     ;; (insert "\n/no_think")
-     (insert "\nUse the standard tool calling API."))))
+;; (add-hook
+;;  'gptel-prompt-transform-functions
+;;  (lambda ()
+;;    ;; Prompt modifications to help the current model.
+;;    (save-excursion
+;;      (goto-char (point-max))
+;;      ;; (insert "/no_think")
+;;      (insert "\nDon't wait for confirmation to use tools."))))
 
 ;; Macro to set up gptel configuration for tests and execute body within the context.
 (defmacro with-macher-test-gptel (&rest body)
   "Configure gptel with a local LLM and execute BODY within this context.
 Sets up appropriate let-bindings for 'gptel-model' and 'gptel-backend'."
-  `(let* ( ;; Use the simplest possible model that still gives correct responses.
-          (gptel-model macher-test--gptel-model)
-          ;; Set up the gptel backend for testing.
-          (gptel-backend
-           (gptel-make-ollama
-            "Test ollama"
-            :host (or (getenv "MACHER_TEST_OLLAMA_HOST") "localhost:11434")
-            :models `(,gptel-model)
-            ;; Use temperature 0 and a fixed seed to ensure that responses are identical
-            ;; across runs. When changing the model (which is expected to be rather weak),
-            ;; you might need to play around with different seeds to find one that works.
-            ;;
-            ;; See https://github.com/ollama/ollama/issues/1749.
-            :request-params '(:options (:temperature 0 :seed 7890)))))
+  `(let*
+       ( ;; Use the simplest possible model that still gives correct responses.
+        (gptel-model macher-test--gptel-model)
+        (gptel-directives `(default . ,macher-test--system-message)) ;; Set up the gptel backend for testing.
+        (gptel-backend
+         (gptel-make-ollama
+          "Test ollama"
+          :host (or (getenv "MACHER_TEST_OLLAMA_HOST") "localhost:11434")
+          :models `(,gptel-model)
+          ;; Use temperature 0 and a fixed seed to ensure that responses are identical
+          ;; across runs. When changing the model (which is expected to be rather weak),
+          ;; you might need to play around with different seeds to find one that works.
+          ;;
+          ;; See https://github.com/ollama/ollama/issues/1749.
+          :request-params '(:options (:temperature 0 :seed 7890)))))
      ,@body
 
      ;; If debugging output was enabled (otherwise the buffer won't exist), print it.
