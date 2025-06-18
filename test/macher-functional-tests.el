@@ -53,7 +53,7 @@ Always creates a file named 'main.txt'."
 (defconst macher-test--system-message
   "You are a software engineer. Edit code directly using the tools provided. Do not ask for clarification or permission.")
 
-(defconst macher-test--gptel-model "qwen2.5-coder:1.5b"
+(defconst macher-test--gptel-model "qwen2.5-coder:3b"
   "The ollama model to use in gptel requests. Must be installed locally.")
 ;; (add-hook
 ;;  'gptel-prompt-transform-functions
