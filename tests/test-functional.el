@@ -123,66 +123,79 @@ CALLBACK-TEST is a function that verifies the result."
            (test-dir (plist-get test-vars :dir))
            (test-files (plist-get test-vars :files))
            (main-file (car test-files))
+           (main-file-buffer)
            (patch-buffer nil)
            (test-complete nil)
            (test-result nil)
            ;; Allow project.el to detect projects with .project marker file in the root.
            (project-vc-extra-root-markers '(".project")))
+        (unwind-protect
+            ;; Set up the test environment.
+            (let ((test-timer nil))
 
-        ;; Visit the first file.
-        (find-file main-file)
+              ;; Visit the first file.
+              (find-file main-file)
+              (setq main-file-buffer (current-buffer))
 
-        ;; Set up the test environment.
-        (let ((test-timer nil))
+              ;; Use a callback to check the results.
+              (macher-implement
+               prompt
+               (lambda (error _execution _fsm)
+                 (setq test-complete t)
+                 (when test-timer
+                   (cancel-timer test-timer)
+                   (setq test-timer nil))
 
-          ;; Use a callback to check the results.
-          (macher-implement
-           prompt
-           (lambda (error _execution _fsm)
-             (setq test-complete t)
-             (when test-timer
-               (cancel-timer test-timer)
-               (setq test-timer nil))
+                 (if error
+                     (setq test-result (cons 'error error))
+                   ;; Test was successful.
+                   (setq patch-buffer (macher-patch-buffer))
+                   (setq test-result
+                         (if (and patch-buffer (buffer-live-p patch-buffer))
+                             (progn
+                               ;; The patch buffer should always include the prompt.
+                               (expect
+                                (with-current-buffer patch-buffer
+                                  (buffer-string))
+                                :to-match (regexp-quote prompt))
+                               ;; Run the specific test for this operation.
+                               (funcall callback-test patch-buffer test-files))
+                           (cons 'error "No patch buffer created"))))))
 
-             (if error
-                 (setq test-result (cons 'error error))
-               ;; Test was successful.
-               (setq patch-buffer (macher-patch-buffer))
-               (setq test-result
-                     (if (and patch-buffer (buffer-live-p patch-buffer))
-                         (progn
-                           ;; The patch buffer should always include the prompt.
-                           (expect
-                            (with-current-buffer patch-buffer
-                              (buffer-string))
-                            :to-match (regexp-quote prompt))
-                           ;; Run the specific test for this operation.
-                           (funcall callback-test patch-buffer test-files))
-                       (cons 'error "No patch buffer created"))))))
+              ;; Set a timer to handle the timeout case.
+              (setq test-timer
+                    (run-with-timer
+                     test-timeout nil
+                     (lambda ()
+                       (unless test-complete
+                         (setq test-complete t)
+                         (setq test-result (cons 'error "Test timed out"))))))
 
-          ;; Set a timer to handle the timeout case.
-          (setq test-timer
-                (run-with-timer
-                 test-timeout nil
-                 (lambda ()
-                   (unless test-complete
-                     (setq test-complete t)
-                     (setq test-result (cons 'error "Test timed out"))))))
+              ;; Wait for the test to complete by checking the flag.
+              (with-timeout (test-timeout nil)
+                (while (not test-complete)
+                  (sit-for 0.1)))
 
-          ;; Wait for the test to complete by checking the flag.
-          (with-timeout (test-timeout nil)
-            (while (not test-complete)
-              (sit-for 0.1))))
 
-        ;; Cleanup: kill any buffers (temp files will be cleaned up by after-each).
-        (when (buffer-live-p (get-file-buffer main-file))
-          (kill-buffer (get-file-buffer main-file)))
-        (when (and patch-buffer (buffer-live-p patch-buffer))
-          (kill-buffer patch-buffer))
-
-        ;; Check result.
-        (expect test-complete :to-be-truthy)
-        (expect (consp test-result) :to-be nil)))))
+              ;; Check result.
+              (expect test-complete :to-be-truthy)
+              (expect (consp test-result) :to-be nil))
+          ;; Cleanup: abort any ongoing requests and kill buffers
+          ;; (temp files will be cleaned up by after-each).
+          (when-let ((action-buffer (macher-action-buffer)))
+            (when (buffer-live-p action-buffer)
+              ;; If there are any running requests - assume that they would be happening in the
+              ;; action buffer, since the additional after-each expectation will catch issues if
+              ;; that's not the case.
+              (when gptel--request-alist
+                ;; This is expected to be reached if a test error occurs, but print a warning so
+                ;; it's fairly obvious if it somehow starts getting reached in other cases as well.
+                (warn "Aborting running gptel request in %s" action-buffer)
+                (gptel-abort action-buffer))))
+          (when (buffer-live-p main-file-buffer)
+            (kill-buffer main-file-buffer))
+          (when (and patch-buffer (buffer-live-p patch-buffer))
+            (kill-buffer patch-buffer)))))))
 
   (before-all
     ;; Allow project.el to detect projects with .project marker file in the root.
@@ -214,6 +227,9 @@ CALLBACK-TEST is a function that verifies the result."
            :request-params '(:options (:temperature 0 :seed 7890)))))
 
   (after-each
+    ;; Verify that all gptel requests have been aborted or terminated.
+    (expect gptel--request-alist :to-be nil)
+
     ;; Clean up temp files and directories
     (dolist (file temp-files-created)
       (when (and file (file-exists-p file))
@@ -406,7 +422,11 @@ CALLBACK-TEST is a function that verifies the result."
           ;; be no active request for this action buffer.
           (expect (funcall request-is-active-in-action-buffer) :to-be nil)
 
-          ;; Cleanup: kill buffer (temp files will be cleaned up by after-each).
+          ;; Cleanup: ensure all requests are terminated and kill buffers
+          ;; (temp files will be cleaned up by after-each).
+          (when-let ((action-buffer (macher-action-buffer)))
+            (when (buffer-live-p action-buffer)
+              (gptel-abort action-buffer)))
           (when (buffer-live-p (get-file-buffer temp-file))
             (kill-buffer (get-file-buffer temp-file)))
 
