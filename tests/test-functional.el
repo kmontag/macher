@@ -16,11 +16,40 @@
 (require 'gptel-ollama)
 (require 'project)
 
+;; Uncomment for debugging output.
+;;
+;; (advice-add
+;;  #'gptel--handle-post-insert
+;;  :before
+;;  (lambda (fsm)
+;;    (when-let* ((info (gptel-fsm-info fsm))
+;;                (start-marker (plist-get info :position))
+;;                (tracking-marker (plist-get info :tracking-marker))
+;;                (output-buffer (marker-buffer start-marker)))
+;;      (with-current-buffer output-buffer
+;;        (let ((newly-inserted-text
+;;               (buffer-substring-no-properties
+;;                (marker-position start-marker) (marker-position tracking-marker))))
+;;          (message newly-inserted-text))))))
+;;
+;; ;; Logs will be printed by `with-macher-test-gptel' if enabled.
+;; (setopt gptel-log-level 'info)
+
 (describe "functional tests"
   :var*
   (
    ;; The ollama model to use in gptel requests. Must be installed locally.
    (ollama-model "llama3.2:3b")
+
+   ;; Add a transform based on the specific ollama model, e.g. to turn off thinking.
+   (ollama-prompt-transform #'identity)
+
+   ;; Add a specific seed value to try and get consistent responses. This still doesn't make things
+   ;; perfectly replicable, as the output also depends on the OS and system tools, but it should
+   ;; make responses consistent within a particular environment.
+   ;;
+   ;; You might need to play around with this when changing the model.
+   (ollama-seed 1234)
 
    ;; The host where the ollama server is running.
    (ollama-host (or (getenv "MACHER_TEST_OLLAMA_HOST") "localhost:11434"))
@@ -139,7 +168,7 @@ CALLBACK-TEST is a function that verifies the result."
 
               ;; Use a callback to check the results.
               (macher-implement
-               prompt
+               (funcall ollama-prompt-transform prompt)
                (lambda (error _execution _fsm)
                  (setq test-complete t)
                  (when test-timer
@@ -224,7 +253,7 @@ CALLBACK-TEST is a function that verifies the result."
            ;; you might need to play around with different seeds to find one that works.
            ;;
            ;; See https://github.com/ollama/ollama/issues/1749.
-           :request-params '(:options (:temperature 0 :seed 7890)))))
+           :request-params `(:options (:temperature 0 :seed ,ollama-seed)))))
 
   (after-each
     ;; Verify that all gptel requests have been aborted or terminated.
