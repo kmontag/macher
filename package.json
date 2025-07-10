@@ -4,8 +4,8 @@
   "private": true,
   "description": "Development dependencies for macher.el",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "postinstall": "eask install-deps"
+    "test": "eask exec buttercup tests/",
+    "postinstall": "eask install-deps --dev"
   },
   "devDependencies": {
     "@emacs-eask/cli": "^0.11.1",

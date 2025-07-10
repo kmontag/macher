@@ -29,17 +29,21 @@ analyze: $(EASK) .eask
 # Generic target for lint commands that take a list of files.
 .PHONY: lint.%
 lint.%: $(EASK) .eask
-	$(EASK) --strict lint $* *.el demo/*.el test/*.el
+# Note we exclude files beginning with a non-alphanumeric character in the tests directory, since
+# the elisp-autofmt defs file shouldn't be checked.
+	$(EASK) --strict lint $* *.el demo/*.el tests/[a-z]*.el
 
 .PHONY: lint
 lint: analyze lint.declare lint.package lint.regexps
 
+# Convenience targets for running tests that match a pattern, e.g. `make test.unit`.
 .PHONY: test.%
 test.%: $(EASK) .eask
-	$(EASK) --strict test ert test/macher-$*-tests.el
+	$(EASK) exec buttercup -L . --no-skip -p "$*" tests/
 
 .PHONY: test
-test: test.unit test.functional test.integration
+test: $(EASK) .eask
+	$(NPM) test
 
 demo/output/%.cast: demo/demo-%.el macher.el demo/demo-init.el $(EASK) .eask
 	mkdir -p "$(@D)"
