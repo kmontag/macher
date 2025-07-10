@@ -44,7 +44,7 @@ jobs:
 
       - name: Pull Ollama model
         run: |
-          MODEL_NAME=$(grep -o 'macher-test--gptel-model "[^"]*"' test/macher-functional-tests.el | cut -d'"' -f2)
+          MODEL_NAME=$(grep -o 'ollama-model "[^"]*"' tests/test-functional.el | cut -d'"' -f2)
           ollama pull "$MODEL_NAME"
 
       - name: Run tests
