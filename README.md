@@ -3,7 +3,9 @@
 A project-aware LLM implementation toolset for Emacs, built on
 [gptel](https://github.com/karthink/gptel).
 
-https://github.com/user-attachments/assets/a6fd1dee-d0e8-4772-a192-5cb6ff8b0620
+
+https://github.com/user-attachments/assets/c9488e7a-db4c-4c40-a5c0-6da0ee089c45
+
 
 ## What is macher?
 
@@ -19,8 +21,8 @@ macher is a lightweight Emacs-native take on the editing workflows of more full-
 [Aider](https://aider.chat/) or [Plandex](https://plandex.ai/). It works with any gptel backend that
 supports tool use.
 
-macher takes inspiration from gptel's flexibility and visibility. The UI is easily customizable - or
-you can simply use gptel presets to integrate it into your existing gptel workflow.
+macher takes inspiration from gptel's flexibility and visibility. It aims for an unintrusive and
+easily-customizable UI - or you can simply add it to your existing workflow using gptel presets.
 
 The API is still very much under development and subject to change.
 
