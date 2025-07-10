@@ -34,12 +34,12 @@
 
 ;; Uncomment for finer-grained debugging output.
 ;;
-(advice-add
- #'gptel--insert-response
- :before
- (lambda (response &rest _)
-   (when (stringp response)
-     (message response))))
+;; (advice-add
+;;  #'gptel--insert-response
+;;  :before
+;;  (lambda (response &rest _)
+;;    (when (stringp response)
+;;      (message response))))
 
 ;; Logs will be printed by `with-macher-test-gptel' if enabled.
 ;;
@@ -393,16 +393,16 @@ CALLBACK-TEST is a function that verifies the result."
                 ;; Wait for the async response.
                 (with-timeout (test-timeout nil)
                   (while (not post-response)
-                    (sit-for 0.1)))
+                    (sit-for 0.1))))
 
-                ;; Validate the displayed diff, like with the other deletion tests.
-                (when-let ((patch-buffer (macher-patch-buffer)))
-                  (expect (buffer-live-p patch-buffer) :to-be-truthy)
-                  (with-current-buffer patch-buffer
-                    (let ((content (buffer-substring-no-properties (point-min) (point-max))))
-                      (expect content :to-match "diff --git")
-                      (expect content :to-match (regexp-quote "--- a/main.txt\n+++ /dev/null"))
-                      (expect content :to-match "Delete the file named main.txt"))))))
+              ;; Validate the displayed diff.
+              (when-let ((patch-buffer (macher-patch-buffer)))
+                (expect (buffer-live-p patch-buffer) :to-be-truthy)
+                (with-current-buffer patch-buffer
+                  (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+                    (expect content :to-match "diff --git")
+                    (expect content :to-match (regexp-quote "--- a/main.txt\n+++ /dev/null"))
+                    (expect content :to-match "Delete the file named main.txt")))))
           ;; Cleanup: kill the file buffer and abort any ongoing requests.
           (when (buffer-live-p project-file-buffer)
             (kill-buffer project-file-buffer))
