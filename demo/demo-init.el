@@ -11,6 +11,9 @@
 ;; Clear the "For more information..." startup message.
 (message "")
 
+;; Pre-load org mode.
+(require 'org)
+
 ;; Hide the menu bar.
 (menu-bar-mode -1)
 
@@ -61,9 +64,10 @@
 ;;       (gptel-make-ollama "Ollama" :host "localhost:11434" :stream t :models `(,gptel-model)))
 
 (require 'macher)
+(setopt macher-action-buffer-ui 'org)
 
 ;; Focus the diff buffer on display for easier automation.
-(add-hook 'macher-patch-ready-hook (lambda () (select-window (get-buffer-window))))
+(add-hook 'macher-patch-ready-hook (lambda () (select-window (get-buffer-window))) 1)
 
 ;;; Helper Functions for Screen Recording
 
@@ -87,7 +91,8 @@ keys. Use \"<pause>\" to insert a delay."
       (let* ((key (car keys))
              (remaining-keys (cdr keys))
              (remaining-sequence (mapconcat #'identity remaining-keys " "))
-             (continue-fn (lambda () (demo-enter-key-sequence remaining-sequence callback))))
+             (continue-fn
+              (lambda () (macher--demo-enter-key-sequence remaining-sequence callback))))
         (if (string= key "<pause>")
             ;; Handle pause by waiting and then continuing.
             (run-at-time 0.8 nil continue-fn)

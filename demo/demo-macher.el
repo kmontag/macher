@@ -50,38 +50,40 @@
 
 ;; Catch the next patch-ready event. Note the initial key sequence above hasn't been entered at this
 ;; point, so the request hasn't actually been fired off yet.
-(let ((orig-patch-ready-fn macher-patch-ready-function))
-  (setq macher-patch-ready-function
-        (lambda (&rest args)
-          (apply orig-patch-ready-fn args)
+(let ((hook-idx 0))
+  (add-hook 'macher-patch-ready-hook
+            (lambda ()
+              (cond
+               ((eq hook-idx 0)
 
-          (macher--demo-enter-key-sequence
-           (concat
-            ;; Scroll around.
-            "<pause> <down> <down> <down> <down> C-n <pause> C-n <pause> "
-            ;; Apply changes.
-            "M-x d i f f - a p p l y - b TAB <pause> RET <pause> "
-            ;; Close the diff window.
-            "C-x 0 <pause> "
-            ;; Run `macher-revise'.
-            "M-x m a c h e r - r TAB <pause> RET <pause> "
-            ;; Enter revision request.
-            (macher--demo-text-to-key-sequence "get n as a cli arg") " <pause> RET "))
+                ;; Catch the first patch-ready event.
+                (macher--demo-enter-key-sequence
+                 (concat
+                  ;; Scroll around.
+                  "<pause> <down> <down> <down> <down> C-n <pause> C-n <pause> "
+                  ;; Apply changes.
+                  "M-x d i f f - a p p l y - b TAB <pause> RET <pause> "
+                  ;; Close the diff window.
+                  "C-x 0 <pause> "
+                  ;; Run `macher-revise'.
+                  "M-x m a c h e r - r TAB <pause> RET <pause> "
+                  ;; Enter revision request.
+                  (macher--demo-text-to-key-sequence "get n as a cli arg") " <pause> RET ")))
+               ((eq hook-idx 1)
 
-          ;; Catch the next and final patch-ready event.
-          (setq macher-patch-ready-function
-                (lambda (&rest args)
-                  (apply orig-patch-ready-fn args)
-                  (macher--demo-enter-key-sequence
-                   (concat
-                    ;; Scroll around.
-                    "<pause> <down> <down> <down> <down> <down> <down> <down> <down> <pause> "
-                    ;; Apply changes
-                    "M-x d i f f - a p p l y - b TAB <pause> RET "
-                    ;; Scroll around.
-                    "<pause> <pause> C-x o <pause> <pause> "
-                    ;; Exit the demo.
-                    "C-x C-c")))))))
+                ;; Catch the next and final patch-ready event.
+                (macher--demo-enter-key-sequence
+                 (concat
+                  ;; Scroll around.
+                  "<pause> <down> <down> <down> <down> <down> <down> <down> <down> <pause> "
+                  ;; Apply changes
+                  "M-x d i f f - a p p l y - b TAB <pause> RET "
+                  ;; Scroll around.
+                  "<pause> <pause> C-x o <pause> <pause> "
+                  ;; Exit the demo.
+                  "C-x C-c"))))
+              (setq hook-idx (1+ hook-idx)))
+            1))
 
 (provide 'demo-macher)
 ;;; demo-macher.el ends here
