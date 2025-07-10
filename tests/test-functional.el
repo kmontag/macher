@@ -83,7 +83,7 @@
    (main-file-contents "Hello from main file.\nNumber: 123")
 
    (system-message
-    "You are editing the contents of a repository. Edit files directly using the tools provided. Do not ask for clarification or permission.")
+    "You are editing the contents of a repository. Edit/write files directly using the tools provided. Do not ask for clarification or permission.")
 
    ;; Helper functions as lambdas
    (create-temp-file
@@ -299,7 +299,9 @@ CALLBACK-TEST is a function that verifies the result."
   (describe "replace-file operation"
     :var*
     ((replace-file-prompt
-      (concat "Replace the entire contents of main.txt with exactly this text: \"Hi there.\""))
+      (concat
+       "Use the \"write_file_in_workspace\" tool to replace the entire contents "
+       "of main.txt with exactly this text: \"Hi there.\""))
      (verify-replace-file
       (lambda (patch-buffer test-files)
         "Verify that PATCH-BUFFER displays a proper replacement diff for TEST-FILES."
