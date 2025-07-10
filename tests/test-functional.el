@@ -179,7 +179,7 @@ CALLBACK-TEST is a function that verifies the result."
 
               ;; Check result.
               (expect test-complete :to-be-truthy)
-              (expect (consp test-result) :to-be nil))
+              (expect test-result :to-be t))
           ;; Cleanup: abort any ongoing requests and kill buffers
           ;; (temp files will be cleaned up by after-each).
           (when-let ((action-buffer (macher-action-buffer)))
