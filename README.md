@@ -3,9 +3,7 @@
 A project-aware LLM implementation toolset for Emacs, built on
 [gptel](https://github.com/karthink/gptel).
 
-
 https://github.com/user-attachments/assets/c9488e7a-db4c-4c40-a5c0-6da0ee089c45
-
 
 ## What is macher?
 
@@ -105,9 +103,9 @@ request.
   `project` (meaning a project.el project) and `file` (meaning a single non-project file) workspaces
   are supported.
 
-    A workspace is represented as `(type . path)`. The current workspace for a buffer is determined
-    using the `macher-workspace-functions`. When making macher requests, reads and (proposed) writes
-    will be limited to files in the current buffer's workspace.
+    The current workspace for a buffer is determined using the `macher-workspace-functions`. When
+    making macher requests, reads and (proposed) writes will be limited to files in the current
+    buffer's workspace.
 
     See `macher-workspace-types-alist` for a more detailed description of the built-in workspace
     types, or to add custom workspace types.
@@ -122,7 +120,9 @@ request.
     - _Modified content_: Editable copies where the LLM makes changes using tools.
 
     The LLM uses tools to read/write the content stored on the `macher-context`. At the end of the
-    request, if changes were made, the content is used to generate a diff.
+    request, if changes were made, the content is used by the default
+    `macher-process-request-function` to generate and display a patch in the workspace's
+    `(macher-patch-buffer)`.
 
     The `macher-context` also supports a few additional fields - see the docstring for more details.
 
@@ -161,8 +161,8 @@ requests that follow a specific UI pattern:
 - one of the macher presets is applied - `@macher-ro` for `macher-discuss`, or `@macher` for the
   others. Note this will work regardless of whether the presets have been installed globally.
 
-- the request is sent from a shared buffer (`macher-action-buffer`) for the current workspace. The
-  UI for this buffer can be customized with `macher-action-buffer-ui` and the associated hooks - see
+- the request is sent from the current workspace's `(macher-action-buffer)`. The UI for this buffer
+  can be customized with `macher-action-buffer-ui` and the associated hooks - see
   [Customization](#customization).
 
 You can define your own actions by customizing `macher-actions-alist`. You can also just ignore
