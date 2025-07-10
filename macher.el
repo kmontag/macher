@@ -824,13 +824,13 @@ It adapts the prompt formatting based on the current major mode."
        (action-str (symbol-name action))
        (timestamp (macher--format-time))
        ;; Use some custom formatting if we're in org mode. Otherwise, format for markdown.
-       (org-mode-p (derived-mode-p 'org-mode))
+       (is-org-mode (derived-mode-p 'org-mode))
        (header-prefix
-        (if org-mode-p
+        (if is-org-mode
             ""
           (format "`%s` " action-str)))
        (header-postfix
-        (if org-mode-p
+        (if is-org-mode
             ;; Add the action as a tag at the end of the headline.
             (format " :%s:" action-str)
           ""))
@@ -847,12 +847,12 @@ It adapts the prompt formatting based on the current major mode."
        ;; Make the separation between prompt/response clearer using a foldable block in org-mode,
        ;; otherwise a markdown-style code block.
        (full-prompt-str
-        (if org-mode-p
+        (if is-org-mode
             (concat
              (format ":PROMPT:\n" truncated-input) (org-escape-code-in-string prompt) "\n:END:\n")
           (concat "```\n" prompt "\n```\n")))
        (timestamp-line
-        (if org-mode-p
+        (if is-org-mode
             ;; Inactive timestamp.
             (format "[%s]" timestamp)
           (format "<!-- %s -->" timestamp))))
@@ -873,7 +873,7 @@ It adapts the prompt formatting based on the current major mode."
     (insert full-prompt-str)
 
     ;; In org mode, fold the prompt immediately, like with tool-use output.
-    (when org-mode-p
+    (when is-org-mode
       (ignore-errors
         (save-excursion
           (search-backward ":PROMPT:")
