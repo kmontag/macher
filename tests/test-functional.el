@@ -377,18 +377,39 @@ CALLBACK-TEST is a function that verifies the result."
       (setq gptel-post-response-functions original-gptel-post-response-functions))
 
     (it "allows editing files using the inline macher preset"
-      (let ((post-response nil))
-        (with-temp-buffer
-          (text-mode)
-          (insert "@macher Delete the file named main.txt.")
-          (add-hook 'gptel-post-response-functions (lambda (&rest _) (setq post-response t)))
-          (gptel-send)
 
-          ;; Wait for the async response.
-          (let ((timeout 0))
-            (while (and (not post-response) (< timeout test-timeout))
-              (sleep-for 0.1)
-              (setq timeout (1+ timeout))))))))
+      (let* ((post-response nil)
+             (project (funcall create-temp-project))
+             (project-file (car (plist-get project :files)))
+             (project-file-buffer (find-file-noselect project-file)))
+        (unwind-protect
+            (with-current-buffer project-file-buffer
+              (with-temp-buffer
+                (text-mode)
+                (insert "@macher Delete the file named main.txt.")
+                (add-hook 'gptel-post-response-functions (lambda (&rest _) (setq post-response t)))
+                (gptel-send)
+
+                ;; Wait for the async response.
+                (with-timeout (test-timeout nil)
+                  (while (not post-response)
+                    (sit-for 0.1)))
+
+                ;; Validate the displayed diff, like with the other deletion tests.
+                (when-let ((patch-buffer (macher-patch-buffer)))
+                  (expect (buffer-live-p patch-buffer) :to-be-truthy)
+                  (with-current-buffer patch-buffer
+                    (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+                      (expect content :to-match "diff --git")
+                      (expect content :to-match (regexp-quote "--- a/main.txt\n+++ /dev/null"))
+                      (expect content :to-match "Delete the file named main.txt"))))))
+          ;; Cleanup: kill the file buffer and abort any ongoing requests.
+          (when (buffer-live-p project-file-buffer)
+            (kill-buffer project-file-buffer))
+          (when gptel--request-alist
+            (gptel-abort)
+            ;; Raise an expectation error, in case one wasn't already r
+            (expect "Unexpected - gptel request still running" :to-be nil))))))
 
   (describe "abort functionality"
     (it "properly aborts requests and calls the callback"
