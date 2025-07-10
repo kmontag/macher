@@ -6,9 +6,9 @@
 
 ;; Create a temporary directory and populate it with project files manually.
 (let* ((temp-parent-dir (make-temp-file "macher-demo-parent-" t))
-       (temp-dir (expand-file-name "macher-demo" temp-parent-dir))
-       (temp-main-file (expand-file-name "main.py" temp-dir))
-       (temp-lib-file (expand-file-name "lib.py" temp-dir))
+       (temp-dir (expand-file-name "macher-commands" temp-parent-dir))
+       (temp-main-file (expand-file-name "__main__.py" temp-dir))
+       (temp-lib-file (expand-file-name "wave_lib.py" temp-dir))
        (temp-project-file (expand-file-name ".project" temp-dir)))
   ;; Create the project subdirectory.
   (make-directory temp-dir)
@@ -18,14 +18,14 @@
 
   ;; Create lib.py file
   (with-temp-file temp-lib-file
-    (insert "# Library functions for the macher demo project.\n"))
+    (insert "# Library functions for wave.\n\n# TODO\n"))
 
   ;; Create main.py file with the TODO
   (with-temp-file temp-main-file
     (insert
-     "# Main file for the macher demo project.\n\n"
+     "# Wave.\n\n"
      "if __name__ == \"__main__\":\n"
-     "    # TODO: Print the 10th fibonacci number using a helper function in lib.\n"
+     "    # TODO: show a gnarly infinite wave animation. ctrl-c to quit.\n"
      "    pass\n"))
 
   ;; Open the main file and the lib file side by side.
@@ -60,27 +60,53 @@
                 (macher--demo-enter-key-sequence
                  (concat
                   ;; Scroll around.
-                  "<pause> <down> <down> <down> <down> C-n <pause> C-n <pause> "
+                  "<pause> M-n <pause> <down> <down> <pause> M-n <pause> <pause> "
                   ;; Apply changes.
                   "M-x d i f f - a p p l y - b TAB <pause> RET <pause> "
                   ;; Close the diff window.
                   "C-x 0 <pause> "
+                  ;; Open a terminal.
+                  "M-x t e r m <pause> RET <pause> RET <pause> "
+                  ;; Run the animation.
+                  (macher--demo-text-to-key-sequence "python __m")
+                  " TAB <pause> RET "
+                  ;; Switch to another buffer so the cursor doesn't look weird.
+                  "C-c o "
+                  ;; Wait, switch back, and quit animation.
+                  " <pause4> C-u - 1 C-x o C-c C-c <pause> "
+                  ;; Switch to the code buffer.
+                  "C-c o <pause> "
                   ;; Run `macher-revise'.
                   "M-x m a c h e r - r TAB <pause> RET <pause> "
                   ;; Enter revision request.
-                  (macher--demo-text-to-key-sequence "get n as a cli arg") " <pause> RET ")))
+                  (macher--demo-text-to-key-sequence "add a surfer and make the wave blue")
+                  " <pause> RET ")))
                ((eq hook-idx 1)
-
                 ;; Catch the next and final patch-ready event.
                 (macher--demo-enter-key-sequence
                  (concat
                   ;; Scroll around.
-                  "<pause> <down> <down> <down> <down> <down> <down> <down> <down> <pause> "
+                  "<pause> <down> <down> <down> <pause> M-n <pause> M-n <pause> "
                   ;; Apply changes
-                  "M-x d i f f - a p p l y - b TAB <pause> RET "
-                  ;; Scroll around.
-                  "<pause> <pause> C-x o <pause> <pause> "
-                  ;; Exit the demo.
+                  "M-x d i f f - a p p l y - b TAB <pause> RET <pause> "
+                  ;; Close the diff buffer.
+                  "C-x 0 <pause> "
+                  ;; We're now in the code buffer. Cycle to the other buffer.
+                  "C-x <left> <pause> "
+                  ;; Switch to the terminal.
+                  "C-u - 1 C-x o <pause> "
+                  ;; Start the animation.
+                  (macher--demo-text-to-key-sequence "clear")
+                  " <pause> RET <pause> "
+                  (macher--demo-text-to-key-sequence "python __m")
+                  " TAB <pause> RET "
+                  ;; Switch to another buffer so the cursor doesn't look weird.
+                  "C-c o "
+                  ;; Wait, switch back, and quit animation.
+                  " <pause5> C-u - 1 C-x o C-c C-c <pause> "
+                  ;; Exit the demo. The rest should happen fast enough that it gets cut off in the
+                  ;; video.
+                  "e x i t RET "
                   "C-x C-c"))))
               (setq hook-idx (1+ hook-idx)))
             1))
