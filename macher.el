@@ -2398,6 +2398,8 @@ for the action), and FSM (the `gptel-fsm' object for the request)."
            (macher--gptel-request request-callback
                                   (macher-action-execution-prompt execution)
                                   :context (macher-action-execution-context execution)
+                                  ;; Insert at the end of the buffer.
+                                  :position (point-max)
                                   :stream gptel-stream
                                   :transforms gptel-prompt-transform-functions
                                   :fsm (gptel-make-fsm :handlers gptel-send--handlers))))))))
