@@ -49,7 +49,7 @@
    ;; make responses consistent within a particular environment.
    ;;
    ;; You might need to play around with this when changing the model.
-   (ollama-seed 1234)
+   (ollama-seed 5678)
 
    ;; The host where the ollama server is running.
    (ollama-host (or (getenv "MACHER_TEST_OLLAMA_HOST") "localhost:11434"))
@@ -73,7 +73,7 @@
    (main-file-contents "Hello from main file.\nNumber: 123")
 
    (system-message
-    "You are a software engineer. Edit code directly using the tools provided. Do not ask for clarification or permission.")
+    "You are editing the contents of a repository. Edit files directly using the tools provided. Do not ask for clarification or permission.")
 
    ;; Helper functions as lambdas
    (create-temp-file
