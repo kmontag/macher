@@ -31,8 +31,18 @@
 ;;               (buffer-substring-no-properties
 ;;                (marker-position start-marker) (marker-position tracking-marker))))
 ;;          (message newly-inserted-text))))))
+
+;; Uncomment for finer-grained debugging output.
 ;;
-;; ;; Logs will be printed by `with-macher-test-gptel' if enabled.
+(advice-add
+ #'gptel--insert-response
+ :before
+ (lambda (response &rest _)
+   (when (stringp response)
+     (message response))))
+
+;; Logs will be printed by `with-macher-test-gptel' if enabled.
+;;
 ;; (setopt gptel-log-level 'info)
 
 (describe "functional tests"
