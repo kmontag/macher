@@ -1023,8 +1023,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
         (format (concat
                  ;; Header.
                  "### `%s` %s\n"
-                 ;; Timestamp and full prompt.
-                 "<!-- <TIMESTAMP1> -->\n```\n%s\n```\n"
+                 ;; Full prompt.
+                 "```\n%s\n```\n"
                  ;; Response.
                  "%s\n"
                  ;; Next prompt prefix.
@@ -1037,8 +1037,6 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
         (format (concat
                  ;; Org-mode header with action as tag.
                  "*** %s :%s:\n"
-                 ;; Inactive timestamp.
-                 "[<TIMESTAMP1>]\n"
                  ;; Prompt block.
                  ":PROMPT:\n%s\n:END:\n"
                  ;; Response.
@@ -1063,16 +1061,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       ;; Load the project file in an actual file buffer, to avoid unsaved files appearing during
       ;; `save-some-buffers'.
       (find-file project-file)
-      (setq project-file-buffer (current-buffer))
-
-      ;; Spy on the timestamp function to return predictable output.
-      (let ((format-time-idx 0))
-        (spy-on
-         'macher--format-time
-         :and-call-fake
-         (lambda (&rest _)
-           (setq format-time-idx (1+ format-time-idx))
-           (format "<TIMESTAMP%d>" format-time-idx)))))
+      (setq project-file-buffer (current-buffer)))
 
     (after-each
       (kill-buffer project-file-buffer))

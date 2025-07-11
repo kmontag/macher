@@ -817,45 +817,37 @@ buffer), including some headings to better distinguish between user and
 LLM content.
 
 It adapts the prompt formatting based on the current major mode."
-  (let*
-      ((prompt (macher-action-execution-prompt execution))
-       (input (macher-action-execution-input execution))
-       (action (macher-action-execution-action execution))
-       (action-str (symbol-name action))
-       (timestamp (macher--format-time))
-       ;; Use some custom formatting if we're in org mode. Otherwise, format for markdown.
-       (is-org-mode (derived-mode-p 'org-mode))
-       (header-prefix
-        (if is-org-mode
-            ""
-          (format "`%s` " action-str)))
-       (header-postfix
-        (if is-org-mode
-            ;; Add the action as a tag at the end of the headline.
-            (format " :%s:" action-str)
-          ""))
-       ;; Extract the first non-whitespace line from the prompt and truncate to fill-column
-       (truncated-input
-        (let*
-            ((lines (split-string input "\n" t "[[:space:]]*"))
-             (first-line (or (car lines) ""))
-             ;; Calculate available space: total fill-column minus prefix, action, timestamp, and spacing
-             (prefix (or (alist-get major-mode gptel-prompt-prefix-alist) ""))
-             (used-length (+ (length prefix) (length header-prefix) (length header-postfix)))
-             (available-length (max 10 (- (or fill-column 70) used-length))))
-          (truncate-string-to-width first-line available-length nil nil "...")))
-       ;; Make the separation between prompt/response clearer using a foldable block in org-mode,
-       ;; otherwise a markdown-style code block.
-       (full-prompt-str
-        (if is-org-mode
-            (concat
-             (format ":PROMPT:\n" truncated-input) (org-escape-code-in-string prompt) "\n:END:\n")
-          (concat "```\n" prompt "\n```\n")))
-       (timestamp-line
-        (if is-org-mode
-            ;; Inactive timestamp.
-            (format "[%s]" timestamp)
-          (format "<!-- %s -->" timestamp))))
+  (let* ((prompt (macher-action-execution-prompt execution))
+         (input (macher-action-execution-input execution))
+         (action (macher-action-execution-action execution))
+         (action-str (symbol-name action))
+         ;; Use some custom formatting if we're in org mode. Otherwise, format for markdown.
+         (is-org-mode (derived-mode-p 'org-mode))
+         (header-prefix
+          (if is-org-mode
+              ""
+            (format "`%s` " action-str)))
+         (header-postfix
+          (if is-org-mode
+              ;; Add the action as a tag at the end of the headline.
+              (format " :%s:" action-str)
+            ""))
+         ;; Extract the first non-whitespace line from the prompt and truncate to fill-column
+         (truncated-input
+          (let* ((lines (split-string input "\n" t "[[:space:]]*"))
+                 (first-line (or (car lines) ""))
+                 ;; Calculate available space: total fill-column minus prefix, action, and spacing
+                 (prefix (or (alist-get major-mode gptel-prompt-prefix-alist) ""))
+                 (used-length (+ (length prefix) (length header-prefix) (length header-postfix)))
+                 (available-length (max 10 (- (or fill-column 70) used-length))))
+            (truncate-string-to-width first-line available-length nil nil "...")))
+         ;; Make the separation between prompt/response clearer using a foldable block in org-mode,
+         ;; otherwise a markdown-style code block.
+         (full-prompt-str
+          (if is-org-mode
+              (concat
+               (format ":PROMPT:\n" truncated-input) (org-escape-code-in-string prompt) "\n:END:\n")
+            (concat "```\n" prompt "\n```\n"))))
 
     (goto-char (point-max))
 
@@ -865,9 +857,6 @@ It adapts the prompt formatting based on the current major mode."
 
     ;; Header string.
     (insert (format "%s%s%s\n" header-prefix truncated-input header-postfix))
-
-    ;; Add the timestamp.
-    (insert (format "%s\n" timestamp-line))
 
     ;; Add the demarcated prompt text.
     (insert full-prompt-str)
@@ -918,11 +907,6 @@ in an error. The marker info from the gptel FSM is used for placement."
                         prefix
                         (buffer-substring-no-properties (- (point) (length prefix)) (point))))
             (insert "\n" prefix)))))))
-
-(defun macher--format-time (&optional time)
-  "Format TIME (or current time if nil) as a readable timestamp.
-Returns a string in the format 'YYYY-MM-DD HH:MM:SS'."
-  (format-time-string "%Y-%m-%d %H:%M:%S" time))
 
 (defun macher--patch-buffer-setup-diff ()
   "Set up 'diff-mode' and related settings for patch buffers.
@@ -1763,10 +1747,7 @@ CALLBACK must be called when preparation is complete."
          (prompt (macher-context-prompt context))
          (header
           ;; Always start with the patch metadata header.
-          (format "# Patch ID: %s\n# Generated: %s | Project: %s\n"
-                  patch-id
-                  (format-time-string "%Y-%m-%d %H:%M:%S")
-                  proj-name)))
+          (format "# Patch ID: %s\n# Project: %s\n" patch-id proj-name)))
 
     (goto-char (point-min))
     (insert header)
