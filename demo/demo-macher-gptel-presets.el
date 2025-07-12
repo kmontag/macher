@@ -17,7 +17,7 @@
 (let* ((temp-parent-dir (make-temp-file "macher-parent-" t))
        (temp-dir (expand-file-name "presets-demo" temp-parent-dir))
        (temp-main-file (expand-file-name "__main__.py" temp-dir))
-       (temp-state-file (expand-file-name "orb_state.py" temp-dir))
+       (temp-state-file (expand-file-name "game_state.py" temp-dir))
        (temp-project-file (expand-file-name ".project" temp-dir)))
   ;; Create the project subdirectory.
   (make-directory temp-dir)
@@ -27,11 +27,12 @@
 
   ;; Create utils.py file
   (with-temp-file temp-state-file
-    (insert "# Orb state.\n\nclass OrbState:\n    pass\n"))
+    (insert "# Game state.\n\nclass GameState:\n    pass\n"))
 
   ;; Create calculator.py file with the TODO
   (with-temp-file temp-main-file
-    (insert "# Orb runner.\n\n" "if __name__ == \"__main__\":\n" "    pass\n"))
+    (insert
+     "# Pong animation (gptel presets demo).\n\n" "if __name__ == \"__main__\":\n" "    pass\n"))
 
   ;; Open the main file and the utils file side by side.
   (find-file temp-main-file)
@@ -43,11 +44,13 @@
 (macher--demo-enter-key-sequence
  (concat
   ;; Add a bit of buffer at the beginning, since we'll be trimming the video.
-  "<pause> <pause> "
+  "<pause3> <down> <pause> <pause> "
   ;; Open gptel.
   "M-x g p t e l <pause> RET <pause> RET <pause> "
   ;; Type the first request using @macher preset.
-  (macher--demo-text-to-key-sequence "@macher show a pulsing orb. ctrl-c to quit.") " <pause> "
+  (macher--demo-text-to-key-sequence
+   "@macher implement self-playing pong with randomized paddles. 20-character court width. ctrl-c to quit.")
+  " <pause> "
   ;; Send the request.
   "C-c RET"))
 
@@ -64,7 +67,7 @@
          ;; Wait for response to complete.
          "<down> <pause> "
          ;; Scroll around a bit.
-         "<down> M-n <pause> "
+         "<down> M-n <pause> M-n <pause> "
          ;; Apply changes.
          "M-x d i f f - a p p l y - b TAB <pause> RET <pause> "
          ;; "C-c RET a <pause> <pause> <pause> "
@@ -77,13 +80,13 @@
          ;; Switch to another buffer so the cursor doesn't look weird.
          "C-c o "
          ;; Wait, switch back, and quit animation.
-         " <pause4> C-u - 1 C-x o C-c C-c <pause> "
+         " <pause5> <pause5> C-u - 1 C-x o C-c C-c <pause> "
          ;; Switch back to gptel buffer.
          "C-c C-u - 1 C-c o "
          ;; Move to end of buffer.
          "M-> <pause> "
          ;; Type the revision request.
-         (macher--demo-text-to-key-sequence "@macher make it smoothly change colors")
+         (macher--demo-text-to-key-sequence "@macher add a second different-colored ball")
          ;; Send the revision request.
          "C-c RET")))
       ((eq hook-idx 1)
@@ -93,7 +96,7 @@
          ;; Wait for response to complete.
          "<down> <pause> "
          ;; Scroll around a bit.
-         "<down> M-n <pause> M-n <pause> <pause> "
+         "<down> <down> <down> M-n <pause> M-n <pause> <pause> "
          ;; Apply changes.
          "C-c RET a <pause> <pause> "
          ;; Close the patch buffer.
@@ -105,9 +108,9 @@
          ;; Run the animation.
          (macher--demo-text-to-key-sequence "python __m") " TAB RET "
          ;; Switch to another buffer so the cursor doesn't look weird.
-         "<pause> C-c o "
+         " C-c o "
          ;; Wait, switch back, and quit animation.
-         " <pause5> C-u - 1 C-x o C-c C-c <pause> <pause> "
+         " <pause5> <pause5> C-u - 1 C-x o C-c C-c <pause> <pause> "
          ;; The rest should happen fast enough that it gets cut off in the video.
          (macher--demo-text-to-key-sequence "exit") " RET "
          ;; Exit the demo.

@@ -58,8 +58,8 @@ demo/output/%.gif: demo/output/%.cast
 demo/output/%.mp4: demo/output/%.gif
 # Trim blank/loading screens that show up at the start and end of recordings. These values depend
 # somewhat on how fast the system responds to commands, but hopefully these work fine.
-	@START_TRIM=0.5; \
-	END_TRIM=4; \
+	@START_TRIM=2; \
+	END_TRIM=5; \
 	DURATION=$$($(FFMPEG) -y -i "$<" 2>&1 | grep "Duration" | cut -d ' ' -f 4 | sed s/,// | awk -F: '{ print $$1*3600 + $$2*60 + $$3 }'); \
 	TRIMMED_DURATION=$$(echo "$$DURATION - $$START_TRIM - $$END_TRIM" | bc); \
 	$(FFMPEG) -y -i "$<" -movflags +faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -ss $$START_TRIM -t $$TRIMMED_DURATION "$@"
