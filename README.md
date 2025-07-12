@@ -5,7 +5,6 @@ A project-aware LLM implementation toolset for Emacs, built on
 
 https://github.com/user-attachments/assets/82c822fe-35e9-47a2-87db-b4dba2432d1b
 
-
 ## What is macher?
 
 **macher** provides multi-file, project-aware LLM editing capabilities within Emacs. It allows you
@@ -70,7 +69,7 @@ Example configuration with elpaca + `use-package` integration:
 1. **Request revisions** if needed with `M-x macher-revise`.
 
 You can also use macher commands when editing files that aren't part of a project - see
-_[workspaces](#keyconcepts)_.
+_[workspaces](#key-concepts)_.
 
 ### Main commands
 
