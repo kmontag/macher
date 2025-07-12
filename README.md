@@ -87,11 +87,7 @@ After calling `(macher-install)`, you can use macher functionality in any gptel 
 - `@macher-ro`: Read-only - workspace context + tools to read files only
 - `@macher-notools`: Context only - workspace information without tools
 
-For example, in any gptel buffer you can type:
-
-```
-@macher create an eslint configuration with sensible defaults for this project
-```
+https://github.com/user-attachments/assets/32b0a9c5-c497-42be-9094-b771c57df1e7
 
 ## Details
 
