@@ -86,7 +86,8 @@ After calling `(macher-install)`, you can use macher functionality in any gptel 
 - `@macher-ro`: Read-only - workspace context + tools to read files only
 - `@macher-notools`: Context only - workspace information without tools
 
-https://github.com/user-attachments/assets/32b0a9c5-c497-42be-9094-b771c57df1e7
+https://github.com/user-attachments/assets/efbd04f8-fa05-4440-b541-fe2b13bea9a7
+
 
 ## Details
 
