@@ -55,7 +55,9 @@ demo/output/%.cast: demo/demo-%.el macher.el demo/setup.el $(EASK) .eask
 demo/output/%.gif: demo/output/%.cast
 	$(AGG) --theme=github-dark "$<" "$@"
 
-demo/output/%.mp4: demo/output/%.gif
+# Start by rendering to mkv. We do this instead of rendering directly to mp4 because the
+# direct-to-mp4 conversion sometimes leave some blank frames at the beginning of the video.
+demo/output/%.mkv: demo/output/%.gif
 # Trim blank/loading screens that show up at the start and end of recordings. These values depend
 # somewhat on how fast the system responds to commands, but hopefully these work fine.
 	@START_TRIM=2; \
@@ -63,3 +65,8 @@ demo/output/%.mp4: demo/output/%.gif
 	DURATION=$$($(FFMPEG) -y -i "$<" 2>&1 | grep "Duration" | cut -d ' ' -f 4 | sed s/,// | awk -F: '{ print $$1*3600 + $$2*60 + $$3 }'); \
 	TRIMMED_DURATION=$$(echo "$$DURATION - $$START_TRIM - $$END_TRIM" | bc); \
 	$(FFMPEG) -y -i "$<" -movflags +faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -ss $$START_TRIM -t $$TRIMMED_DURATION "$@"
+
+# After the mkv is rendered, we can get an mp4 in a more straightforward way that doesn't have the
+# blank-at-beginning issue. mp4's can be included inline in READMEs on GitHub.
+demo/output/%.mp4: demo/output/%.mkv
+	$(FFMPEG) -y -i "$<" "$@"
