@@ -32,7 +32,7 @@
   ;; Create calculator.py file with the TODO
   (with-temp-file temp-main-file
     (insert
-     "# Pong animation (gptel presets demo).\n\n" "if __name__ == \"__main__\":\n" "    pass\n"))
+     "# Game animation (gptel presets demo).\n\n" "if __name__ == \"__main__\":\n" "    pass\n"))
 
   ;; Open the main file and the utils file side by side.
   (find-file temp-main-file)
@@ -48,75 +48,55 @@
   ;; Open gptel.
   "M-x g p t e l <pause> RET <pause> RET <pause> "
   ;; Type the first request using @macher preset.
-  (macher--demo-text-to-key-sequence
-   "@macher implement self-playing pong with randomized paddles. 20-character court width. ctrl-c to quit.")
+  (macher--demo-text-to-key-sequence "what was the first commercially successful video game?")
   " <pause> "
   ;; Send the request.
   "C-c RET"))
 
 ;; Catch the next response completion. We'll use a hook to detect when the response is done.
 (let ((hook-idx 0))
-  (add-hook
-   'gptel-post-response-functions
-   (lambda (_start _end)
-     (cond
-      ((eq hook-idx 0)
-       ;; After first response, send revision request.
-       (macher--demo-enter-key-sequence
-        (concat
-         ;; Wait for response to complete.
-         "<down> <pause> "
-         ;; Scroll around a bit.
-         "<down> M-n <pause> M-n <pause> "
-         ;; Apply changes.
-         "M-x d i f f - a p p l y - b TAB <pause> RET <pause> "
-         ;; "C-c RET a <pause> <pause> <pause> "
-         ;; Close the patch buffer.
-         "C-x 0 <pause> "
-         ;; Open a terminal.
-         "M-x t e r m <pause> RET <pause> RET <pause> "
-         ;; Run the animation.
-         (macher--demo-text-to-key-sequence "python __m") " TAB <pause> RET "
-         ;; Switch to another buffer so the cursor doesn't look weird.
-         "C-c o "
-         ;; Wait, switch back, and quit animation.
-         " <pause5> <pause5> C-u - 1 C-x o C-c C-c <pause> "
-         ;; Switch back to gptel buffer.
-         "C-c C-u - 1 C-c o "
-         ;; Move to end of buffer.
-         "M-> <pause> "
-         ;; Type the revision request.
-         (macher--demo-text-to-key-sequence "@macher add a second different-colored ball")
-         ;; Send the revision request.
-         "C-c RET")))
-      ((eq hook-idx 1)
-       ;; After second response, show the results.
-       (macher--demo-enter-key-sequence
-        (concat
-         ;; Wait for response to complete.
-         "<down> <pause> "
-         ;; Scroll around a bit.
-         "<down> <down> <down> M-n <pause> M-n <pause> <pause> "
-         ;; Apply changes.
-         "C-c RET a <pause> <pause> "
-         ;; Close the patch buffer.
-         "C-x 0 <pause> "
-         ;; We're now looking at the terminal. Select the code window and cycle the visible buffer.
-         "C-c o <pause> C-x <left> <pause> "
-         ;; Select the terminal again.
-         "C-u - 1 C-x o <pause> "
-         ;; Run the animation.
-         (macher--demo-text-to-key-sequence "python __m") " TAB RET "
-         ;; Switch to another buffer so the cursor doesn't look weird.
-         " C-c o "
-         ;; Wait, switch back, and quit animation.
-         " <pause5> <pause5> C-u - 1 C-x o C-c C-c <pause> <pause> "
-         ;; The rest should happen fast enough that it gets cut off in the video.
-         (macher--demo-text-to-key-sequence "exit") " RET "
-         ;; Exit the demo.
-         "C-x C-c"))))
-     (setq hook-idx (1+ hook-idx)))
-   1))
+  (add-hook 'gptel-post-response-functions
+            (lambda (_start _end)
+              (cond
+               ((eq hook-idx 0)
+                (macher--demo-enter-key-sequence
+                 (concat
+                  ;; Short pause.
+                  "<pause> <pause> "
+                  ;; Go to end of buffer.
+                  "M-> <pause> "
+                  (macher--demo-text-to-key-sequence
+                   (concat
+                    "cool. @macher write a self-playing demo with randomized paddles, "
+                    "15 lines x 25 columns. use colors."))
+                  ;; Send the request.
+                  " <pause> C-c RET ")))
+               ((eq hook-idx 1)
+                ;; After second response, show the results.
+                (macher--demo-enter-key-sequence
+                 (concat
+                  ;; Wait for response to complete.
+                  "<down> <pause> "
+                  ;; Scroll around a bit.
+                  "<down> <down> <down> M-n <pause> M-n <pause> <pause> "
+                  ;; Apply changes.
+                  "M-x d i f f - a p p l y - b TAB <pause> RET <pause> "
+                  ;; Close the patch buffer.
+                  "C-x 0 <pause> "
+                  ;; Open a terminal.
+                  "M-x t e r m <pause> RET <pause> RET <pause> "
+                  ;; Run the animation.
+                  (macher--demo-text-to-key-sequence "python __m") " TAB RET "
+                  ;; Switch to another buffer so the cursor doesn't look weird.
+                  " C-c o "
+                  ;; Wait, switch back, and quit animation.
+                  " <pause5> <pause5> C-u - 1 C-x o C-c C-c <pause> <pause> "
+                  ;; The rest should happen fast enough that it gets cut off in the video.
+                  (macher--demo-text-to-key-sequence "exit") " RET "
+                  ;; Exit the demo.
+                  "C-x C-c"))))
+              (setq hook-idx (1+ hook-idx)))
+            1))
 
 (provide 'demo-macher-gptel-presets)
 ;;; demo-macher-gptel-presets.el ends here
