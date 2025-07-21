@@ -2022,18 +2022,11 @@ from the global gptel registry - it's for cases where you want to use a
 well-defined preset independent of how gptel is currently configured.
 
 CALLBACK takes no arguments."
-  ;; `gptel-with-preset' only works with presets that are globally registered. Momentarily add to
-  ;; the known presets list while executing the callback.
-  (let ((name (gensym "__macher-temp-preset-")))
-    (unwind-protect
-        (progn
-          (let ((spec
-                 (if (symbolp preset)
-                     (cdr (assq preset macher--presets-alist))
-                   preset)))
-            (apply #'gptel-make-preset name spec))
-          (eval `(gptel-with-preset ,name (funcall ,callback))))
-      (setq gptel--known-presets (assq-delete-all name gptel--known-presets)))))
+  (let ((spec
+         (if (symbolp preset)
+             (cdr (assq preset macher--presets-alist))
+           preset)))
+    (gptel-with-preset spec (funcall callback))))
 
 (defun macher--preset-default ()
   "Set up the default macher preset with full editing capabilities."

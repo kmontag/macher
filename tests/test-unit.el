@@ -712,40 +712,32 @@
       (setq gptel--known-presets original-presets))
 
     (it "applies macher preset with callback"
-      (let ((callback-called nil)
-            (callback-result nil))
+      (let ((callback-called nil))
         (expect gptel--known-presets :to-be nil)
         (expect gptel-tools :to-be nil)
         (macher--with-preset
          'macher
          (lambda ()
            (expect gptel-tools :not :to-be nil)
-           (setq callback-called t)
-           (setq callback-result gptel--known-presets)))
+           (setq callback-called t)))
         ;; Verify the callback was called.
         (expect callback-called :to-be-truthy)
-        ;; Verify the preset was temporarily registered during the callback.
-        (expect (length callback-result) :to-be 1)
-        ;; Verify global state is cleaned up after the callback.
+        ;; Verify global state was not modified by the callback.
         (expect gptel-tools :to-be nil)
         (expect gptel--known-presets :to-be nil)))
 
     (it "applies macher-ro preset with callback"
-      (let ((callback-called nil)
-            (callback-result nil))
+      (let ((callback-called nil))
         (expect gptel--known-presets :to-be nil)
         (expect gptel-tools :to-be nil)
         (macher--with-preset
          'macher-ro
          (lambda ()
            (expect gptel-tools :not :to-be nil)
-           (setq callback-called t)
-           (setq callback-result gptel--known-presets)))
+           (setq callback-called t)))
         ;; Verify the callback was called.
         (expect callback-called :to-be-truthy)
-        ;; Verify the preset was temporarily registered during the callback.
-        (expect callback-result :not :to-be nil)
-        ;; Verify the global state is cleaned up after the callback.
+        ;; Verify the global state was not modified by the callback.
         (expect gptel-tools :to-be nil)
         (expect gptel--known-presets :to-be nil)))
 
@@ -754,19 +746,16 @@
 
     (it "accepts raw preset spec"
       (let ((callback-called nil)
-            (callback-result nil)
+
             (gptel-use-tools nil))
         (macher--with-preset
          '(:use-tools t :description "Test preset")
          (lambda ()
            (expect gptel-use-tools :to-be t)
-           (setq callback-called t)
-           (setq callback-result gptel--known-presets)))
+           (setq callback-called t)))
         ;; Verify the callback was called.
         (expect callback-called :to-be-truthy)
-        ;; Verify the preset was temporarily registered during the callback.
-        (expect callback-result :not :to-be nil)
-        ;; Verify gptel--known-presets is cleaned up after the callback.
+        ;; Verify global state was not modified by the callback.
         (expect gptel-use-tools :to-be nil)
         (expect gptel--known-presets :to-be nil)))
 
