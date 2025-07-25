@@ -764,7 +764,65 @@
         (gptel-make-preset 'test :description "test")
         (expect (length gptel--known-presets) :to-be 1)
         (macher--with-preset 'macher (lambda ()))
-        (expect (length gptel--known-presets) :to-be 1))))
+        (expect (length gptel--known-presets) :to-be 1)))
+
+    (it "preserves existing prompt transforms"
+      (let* ((original-transforms gptel-prompt-transform-functions)
+             (existing-transform
+              (lambda ()
+                "Test transform function"
+                nil))
+             (captured-transforms nil)
+             ;; Set up the existing transforms list.
+             (gptel-prompt-transform-functions (list existing-transform)))
+        (macher--with-preset
+         'macher-notools
+         (lambda ()
+           ;; Capture the transforms list inside the preset context.
+           (setq captured-transforms gptel-prompt-transform-functions)
+           ;; Verify that the existing transform is preserved.
+           (expect (member existing-transform gptel-prompt-transform-functions) :to-be-truthy)
+           ;; Verify that macher transform is also present.
+           (expect
+            (member #'macher--prompt-transform-add-context gptel-prompt-transform-functions)
+            :to-be-truthy)))
+        ;; Verify that the global transforms list is restored after the preset.
+        (expect gptel-prompt-transform-functions :to-equal (list existing-transform))
+        ;; Verify that the existing transform was indeed in the captured transforms list.
+        (expect (member existing-transform captured-transforms) :to-be-truthy)))
+
+    (it "preserves existing tools"
+      (let* ((original-tools gptel-tools)
+             (existing-tool
+              (gptel-make-tool
+               :name "existing_tool"
+               :function (lambda () "existing")
+               :description "An existing tool"))
+             (captured-tools nil)
+             ;; Set up the existing tools list.
+             (gptel-tools (list existing-tool)))
+        (macher--with-preset
+         'macher-ro
+         (lambda ()
+           ;; Capture the tools list inside the preset context.
+           (setq captured-tools gptel-tools)
+           ;; Verify that the existing tool is preserved.
+           (expect
+            (cl-find-if
+             (lambda (tool) (string= (gptel-tool-name tool) "existing_tool")) gptel-tools)
+            :to-be-truthy)
+           ;; Verify that macher tools are also present.
+           (expect
+            (cl-find-if
+             (lambda (tool) (string= (gptel-tool-name tool) "read_file_in_workspace")) gptel-tools)
+            :to-be-truthy)))
+        ;; Verify that the global tools list is restored after the preset.
+        (expect gptel-tools :to-equal (list existing-tool))
+        ;; Verify that the existing tool was indeed in the captured tools list.
+        (expect
+         (cl-find-if
+          (lambda (tool) (string= (gptel-tool-name tool) "existing_tool")) captured-tools)
+         :to-be-truthy))))
 
   (describe "macher-install"
     :var (original-presets)
