@@ -430,6 +430,10 @@ To add a new workspace type, add an entry to this alist and update
   :type '(alist :key-type symbol :value-type (plist :key-type keyword :value-type function))
   :group 'macher)
 
+;;; Constants
+
+(defconst macher--max-read-length (* 1024 1024)
+  "Max number of bytes to return from the read tool.")
 
 ;;; Variables
 
@@ -535,7 +539,10 @@ Returns (file . FILENAME) if the buffer is visiting a file, nil otherwise."
   "Get the project root for PROJECT-ID, validating it's a real project root."
   (require 'project)
   ;; Verify that project-id is actually a valid project root directory.
-  (unless (and (stringp project-id) (file-directory-p project-id) (project-current nil project-id))
+  (unless (and (stringp project-id)
+               (file-name-absolute-p project-id)
+               (file-directory-p project-id)
+               (project-current nil project-id))
     (error "Project ID '%s' is not a valid project root directory" project-id))
   project-id)
 
@@ -578,8 +585,13 @@ it returns nil."
 
 (defun macher--workspace-root (workspace)
   "Get the workspace root for WORKSPACE.
+
 WORKSPACE is a cons cell (TYPE . ID) where TYPE is a workspace type.
-Returns the root directory path for the workspace."
+Returns the root directory path for the workspace.
+
+Uses the appropriate root function as configured in the
+'macher-workspace-types-alist', and validates that the result is an
+absolute path to a real directory."
   (let* ((workspace-type (car workspace))
          (workspace-id (cdr workspace))
          (type-config (alist-get workspace-type macher-workspace-types-alist))
@@ -590,7 +602,9 @@ Returns the root directory path for the workspace."
                   (error
                    "Root function for workspace type %s failed to return a root" workspace-type))
             (error "No root function configured for workspace type %s" workspace-type))))
-    ;; Verify that the root is a real directory
+    ;; Verify that the root is a real directory.
+    (unless (and root (file-name-absolute-p root))
+      (error "Workspace root '%s' is not an absolute path" root))
     (unless (and root (file-directory-p root))
       (error "Workspace root '%s' is not a valid directory" root))
     root))
@@ -618,7 +632,7 @@ Returns a list of absolute file paths."
          (root-path (macher--workspace-root workspace)))
     (when files-fn
       (let ((files (funcall files-fn workspace-id)))
-        ;; Ensure all paths are absolute
+        ;; Ensure all paths are absolute.
         (when files
           (mapcar
            (lambda (f)
@@ -639,90 +653,86 @@ Returns a workspace information string to be added to the request."
          (workspace-id (cdr workspace))
          (workspace-name (macher--workspace-name workspace))
          (workspace-files (macher--workspace-files workspace))
-         ;; Extract filenames from contexts for comparison.
-         (context-filenames
-          (let (filenames)
+         ;; Extract normalized file paths from contexts for comparison.
+         (context-file-paths
+          (let (file-paths)
             (dolist (context contexts)
               (let ((source (car context)))
                 (when (stringp source)
-                  (push (file-name-nondirectory source) filenames))))
-            filenames)))
+                  (push (file-truename source) file-paths))))
+            file-paths)))
 
     ;; Generate workspace description with context indicators.
     (when workspace-files
-      (with-temp-buffer
-        (insert "WORKSPACE CONTEXT:\n")
-        (insert "=========================\n\n")
-        (insert "IMPORTANT: This workspace contains files you can edit using workspace tools. ")
-        (when (and contexts (> (length contexts) 0))
+      ;; Separate files into two categories based on whether they're in the context.
+      (let ((files-in-context '())
+            (files-available-for-editing '()))
+        (dolist (file-path (sort (copy-sequence workspace-files) #'string<))
+          (let* ((rel-path (file-relative-name file-path (macher--workspace-root workspace)))
+                 (normalized-file-path
+                  (condition-case nil
+                      (file-truename file-path)
+                    (error
+                     file-path)))
+                 (in-context-p (member normalized-file-path context-file-paths)))
+            (if in-context-p
+                (push rel-path files-in-context)
+              (push rel-path files-available-for-editing))))
+
+        ;; Reverse to maintain original sort order.
+        (setq files-in-context (reverse files-in-context))
+        (setq files-available-for-editing (reverse files-available-for-editing))
+
+        (with-temp-buffer
+          (insert "\n")
+          (insert "=======================================================\n")
+          (insert "WORKSPACE CONTEXT:\n")
+          (insert "=======================================================\n")
+          (insert "\n")
           (insert
-           "Files marked with [*] below are already shown in the REQUEST CONTEXT above - "
-           "you do NOT need to read them again."))
-        (insert "\n\n")
-        (insert (format "Workspace: %s\n" workspace-name))
-        (insert
-         (format "Description: In-memory editing environment for '%s' workspace. " workspace-name))
-        (insert "Edit freely using workspace tools. ")
-        (insert "No permissions required - this is a safe virtual editing space.\n\n")
-        (insert "Files in workspace:\n---------\n")
+           "!!! IMPORTANT INFORMATION, READ AND UNDERSTAND THIS SECTION BEFORE USING TOOLS !!!\n")
+          (insert "\n")
+          (insert "The workspace is an in-memory editing environment containing files from ")
+          (insert (format "the user's current project, which is named `%s`.\n" workspace-name))
+          (insert "\n")
+          (insert "ONLY YOU, the LLM, have access to the files in the workspace. You DO NOT ")
+          (insert "need to check for external changes.\n")
+          (insert "\n")
+          (insert "Edit freely using workspace tools. ")
+          (insert "No permissions required - this is a safe virtual editing space.\n")
 
-        (let ((has-context-markers nil))
-          (dolist (file-path (sort (copy-sequence workspace-files) #'string<))
-            (let* ((rel-path (file-relative-name file-path (macher--workspace-root workspace)))
-                   (filename (file-name-nondirectory file-path))
-                   (in-context-p (member filename context-filenames))
-                   (marker
-                    (if in-context-p
-                        "[*] "
-                      "    ")))
-              (when in-context-p
-                (setq has-context-markers t))
-              (insert (format "%s%s\n" marker rel-path))))
+          (when files-in-context
+            (insert "\n")
+            (insert "!!! CRITICAL RULE: DO NOT RE-READ OR SEARCH THESE FILES !!!\n")
+            (insert
+             "Some files' contents have already been provided to you above in the REQUEST CONTEXT.\n")
+            (insert "You MUST NOT re-read or search the contents of these files.\n")
+            (insert "This is wasteful and unnecessary!\n")
 
-          (when has-context-markers
-            (insert "\n[*] = File contents already provided in REQUEST CONTEXT above\n"))
+            (insert "\n")
+            (insert
+             "== Files already provided above (DO NOT use read or search tools on these): ==\n")
+            (dolist (rel-path files-in-context)
+              (insert (format "    %s\n" rel-path))))
+
+          (when files-available-for-editing
+            (insert "\n")
+            (insert
+             (format "%s available for editing:\n"
+                     (if files-in-context
+                         "Other files"
+                       "Files")))
+            (dolist (rel-path files-available-for-editing)
+              (insert (format "    %s\n" rel-path)))
+            (insert "\n"))
+
+          (insert "\n")
+          (insert "=======================================================\n")
+          (insert "END WORKSPACE CONTEXT:\n")
+          (insert "=======================================================\n")
+          (insert "\n")
+
           (buffer-string))))))
-
-(defun macher--insert-file-string (path)
-  "Output information about the file at PATH for the context string.
-
-This behaves similarly to `gptel--insert-file-string', but it includes
-additional information about the file's workspace and its relative path
-from the workspace root.
-
-You might want to use this as follows to add more detailed information
-about files in the default gptel context string (though note the
-internal gptel API is subject to change without warning):
-
-  (advice-add #'gptel--insert-file-string
-              :override #'macher--insert-file-string)
-
-Hopefully at some point there will be a simple way to do this using
-public-facing gptel functionality, without re-implementing the entire
-context string generation."
-  (let* ((file-dir (file-name-directory path))
-         (workspace-info
-          (with-temp-buffer
-            (setq default-directory file-dir)
-            (cl-some #'funcall macher-workspace-functions)))
-         (workspace-path (cdr workspace-info))
-         (relpath
-          (if workspace-info
-              (file-relative-name path workspace-path)
-            (file-name-nondirectory path)))
-         ;; Create description based on workspace context.
-         (description
-          (if workspace-info
-              (format "In file `%s` in workspace `%s`:"
-                      relpath
-                      (macher--workspace-name workspace-info))
-            (format "In file `%s`:" relpath))))
-    ;; Insert the enhanced description.
-    (insert description "\n\n```\n")
-    ;; The rest is just copied from the original function.
-    (insert-file-contents path)
-    (goto-char (point-max))
-    (insert "\n```\n")))
 
 (defun macher--workspace-hash (workspace &optional length)
   "Generate a unique hash for WORKSPACE.
@@ -782,7 +792,7 @@ This function is called automatically when creating action buffers,
 before running the `macher-action-buffer-setup-hook'."
   (pcase macher-action-buffer-ui
     ('basic
-     ;; Basic UI: just hooks
+     ;; Basic UI: just hooks.
      (macher--action-buffer-setup-basic))
     ('default
      ;; Use the global gptel default mode (e.g., markdown-mode)
@@ -832,11 +842,11 @@ It adapts the prompt formatting based on the current major mode."
               ;; Add the action as a tag at the end of the headline.
               (format " :%s:" action-str)
             ""))
-         ;; Extract the first non-whitespace line from the prompt and truncate to fill-column
+         ;; Extract the first non-whitespace line from the prompt and truncate to fill-column.
          (truncated-input
           (let* ((lines (split-string input "\n" t "[[:space:]]*"))
                  (first-line (or (car lines) ""))
-                 ;; Calculate available space: total fill-column minus prefix, action, and spacing
+                 ;; Calculate available space: total fill-column minus prefix, action, and spacing.
                  (prefix (or (alist-get major-mode gptel-prompt-prefix-alist) ""))
                  (used-length (+ (length prefix) (length header-prefix) (length header-postfix)))
                  (available-length (max 10 (- (or fill-column 70) used-length))))
@@ -869,7 +879,7 @@ It adapts the prompt formatting based on the current major mode."
           (when (looking-at "^:PROMPT:")
             (org-cycle)))))
 
-    ;; Enter a selected-buffer context, so we preserve the currently-selected buffer after exiting
+    ;; Enter a selected-buffer context, so we preserve the currently-selected buffer after exiting.
     ;; (since `display-buffer' may change the selected buffer).
     (with-current-buffer (current-buffer)
       (display-buffer (current-buffer)))))
@@ -1056,7 +1066,7 @@ otherwise."
         ;; Set the context directory for operations like diff application or 'project.el'
         ;; lookups.
         (let ((base-dir (macher--workspace-root workspace)))
-          (setq-local default-directory (file-truename base-dir)))))
+          (setq-local default-directory base-dir))))
     (when target-buffer
       (cons target-buffer created-p))))
 
@@ -1138,43 +1148,1198 @@ context won't change before it can edit them."
                       ;; Single-file workspace: only include if it's the exact file.
                       (string= full-path workspace-id)
                     ;; General workspace: include if file is within the workspace root.
-                    (and workspace-root
-                         (string-prefix-p
-                          (file-truename workspace-root) (file-truename full-path))))))
+                    (and workspace-root (string-prefix-p workspace-root full-path)))))
             ;; If this context file is in the workspace, load implementation contents for it.
             (when in-workspace-p
               (macher-context--contents-for-file full-path macher-context))))))))
 
-;; The workspace tools roughly mirror the standard filesystem MCP interface, of which many LLMs
-;; already have some understanding. See
-;; https://github.com/modelcontextprotocol/servers/blob/main/src/filesystem/README.md.
-
 (defun macher--resolve-workspace-path (workspace rel-path)
   "Get the full path for REL-PATH within the WORKSPACE.
-Resolves paths according to workspace type.
-Signals an error if the resolved path is invalid for the current workspace."
-  (let ((workspace-type (car workspace))
-        (workspace-id (cdr workspace)))
-    (unless (consp workspace)
-      (error "Workspace must be a cons cell"))
-    (if (eq workspace-type 'file)
-        ;; Single-file workspace case.
-        (let* ((allowed-file workspace-id))
-          ;; In the single-file workspace, only allow operations on the specific file.
-          (if (string= rel-path (file-name-nondirectory allowed-file))
-              allowed-file
-            (error
-             "In a single-file workspace, only operations on '%s' are allowed, not '%s'"
-             (file-name-nondirectory allowed-file)
-             rel-path)))
-      ;; General workspace case.
-      (let ((workspace-root (macher--workspace-root workspace)))
-        (let ((full-path (expand-file-name rel-path workspace-root))
-              (true-root (file-truename workspace-root)))
-          ;; Verify the resolved path is inside the workspace root.
-          (unless (string-prefix-p true-root (file-truename full-path))
-            (error "Path '%s' resolves outside the workspace" rel-path))
-          full-path)))))
+
+The path will be resolved relative to the workspace root. '.' and '..'
+are handled as standard relative path segments.
+
+Raises an error if the LLM doesn't have permission to interact with the
+path. Specifically, an error is thrown if:
+
+- The path resolves somewhere outside the workspace root, and isn't
+  present in the workspace's files list.
+
+- The path resolves to a file which exists on the filesystem, but isn't
+  present in the workspace's files list (directories beneath the
+  workspace root are allowed).
+
+- The path contains an existing symbolic link as a non-final component
+  below the workspace root - that is, we don't follow allow following
+  directory symlinks within the workspace.
+
+- The path contains an existing file as a non-final component below the
+  workspace root - that is, we don't allow resolving paths that would
+  require treating an existing file as a directory.
+
+Absolute paths are allowed, though the rules above apply to the
+filename, and in practice it would be unexpected for the LLM to pass
+them in.
+
+Note also that paths outside the workspace root are allowed _if_ they
+appear in the workspace's files list. This won't be the case for the
+built-in workspace types, but might be relevant for custom workspace
+types."
+  (let* (
+         ;; We don't really want to deal with the `file-truename', as this would resolve symlinks
+         ;; and might mess up the path structure when dealing with relative paths like
+         ;; "../sibling-dir-in-custom-workspace/". However, we will be using `expand-file-name' to
+         ;; resolve the path, which expands some path components like "~" into real directories -
+         ;; so, in order to more easily check whether the resolved path is inside the workspace
+         ;; root, we expand these components immediately.
+         (workspace-root (expand-file-name (macher--workspace-root workspace)))
+         ;; Resolve the path relative to workspace root, handling . and ..
+         (full-path (expand-file-name rel-path workspace-root)))
+
+    ;; Check for files or symlinks in non-final path components below the workspace root
+    ;; Only perform this check for paths that are within the workspace directory - other files
+    (when (string-prefix-p workspace-root full-path)
+      (let* ((relative-path (file-relative-name full-path workspace-root))
+             ;; Use file-name-split for OS-independent path component splitting.
+             (path-components (file-name-split relative-path))
+             (current-path workspace-root))
+        ;; Check each component except the last one for files or symlinks (only below workspace
+        ;; root).
+        (when (> (length path-components) 1)
+          (dolist (component (butlast path-components))
+            (unless (string-empty-p component) ; Skip empty components
+              (setq current-path (expand-file-name component current-path))
+              (when (file-exists-p current-path)
+                (cond
+                 ((file-symlink-p current-path)
+                  (error "Path '%s' contains a symbolic link in a non-final component" rel-path))
+                 ((not (file-directory-p current-path))
+                  (error "Path '%s' contains a file in a non-final component" rel-path)))))))))
+
+    ;; Validate access permissions.
+    (let* ((raw-workspace-files (macher--workspace-files workspace))
+           ;; Process workspace files by expanding them relative to workspace root
+           (workspace-files
+            (when raw-workspace-files
+              (mapcar
+               (lambda (file-path)
+                 (if (file-name-absolute-p file-path)
+                     file-path
+                   (expand-file-name file-path workspace-root)))
+               raw-workspace-files)))
+           (is-outside-workspace
+            (not
+             (or
+              ;; Check whether the path is equal to the workspace root, i.e. '.'.
+              (string= (directory-file-name workspace-root) full-path)
+              ;; Check whether the path begins with the workspace root + the path separator.
+              (string-prefix-p (file-name-as-directory workspace-root) full-path))))
+           (file-exists (file-exists-p full-path)))
+
+      (when (and is-outside-workspace (not (member full-path workspace-files)))
+        (error "Path '%s' resolves outside the workspace" rel-path))
+
+      (when (and file-exists
+                 ;; Allow directories, but only within the workspace.
+                 (or is-outside-workspace (not (file-directory-p full-path)))
+                 (not (member full-path workspace-files)))
+        (error "File '%s' is not in the workspace files list" rel-path)))
+
+    ;; Return the resolved path
+    full-path))
+
+(defun macher--format-size (bytes)
+  "Format BYTES as a human-readable size string."
+  (let ((units '("B" "KB" "MB" "GB" "TB"))
+        (size (float bytes))
+        (unit-index 0))
+    (while (and (>= size 1024) (< unit-index (1- (length units))))
+      (setq size (/ size 1024.0))
+      (setq unit-index (1+ unit-index)))
+    (if (= unit-index 0)
+        (format "%d %s" (truncate size) (nth unit-index units))
+      (format "%.1f %s" size (nth unit-index units)))))
+
+(defun macher--read-string (content &optional offset limit show-line-numbers)
+  "Read string CONTENT with optional line-number OFFSET and LIMIT.
+
+- CONTENT is the full string content to read from.
+
+- OFFSET, if provided, specifies the line number to start reading
+  from (1-based). For negative values, starts at that many lines before
+  the end of the file.
+
+- LIMIT, if provided, specifies the number of lines to read from the
+  start position. For negative values, the actual limit is computed as
+  (total_lines + limit). For example, with a 100-line file: limit=10
+  reads 10 lines, limit=-10 reads 90 lines (100 + (-10)).
+
+- SHOW-LINE-NUMBERS, if non-nil, formats output in cat -n style with
+  line numbers. Lines are formatted as \"[spaces for alignment][line
+  number][tab][line content]\".
+
+If neither OFFSET nor LIMIT is provided, returns the full content.
+
+If only OFFSET is provided, returns content from that line to the end.
+
+If only LIMIT is provided, returns the first LIMIT lines.
+
+If both are provided, returns LIMIT lines starting from OFFSET.
+
+Returns the processed content as a string."
+  (if (and (not offset) (not limit) (not show-line-numbers))
+      ;; Return full content if no parameters provided.
+      content
+    (let* ((lines (split-string content "\n"))
+           (num-lines (length lines))
+           (start-idx
+            (if offset
+                (cond
+                 ;; Negative offset: start at that many lines before the end.
+                 ((< offset 0)
+                  (max 0 (+ num-lines offset)))
+                 ;; Zero or positive offset: 1-based indexing (treat 0 as 1).
+                 (t
+                  (max 0 (min (1- (max 1 offset)) num-lines))))
+              0))
+           (actual-limit
+            (when limit
+              (cond
+               ;; Negative limit: equivalent to total lines - (negative limit value).
+               ((< limit 0)
+                (max 0 (+ num-lines limit)))
+               ;; Zero or positive limit: use as-is.
+               (t
+                limit))))
+           (end-idx
+            (if actual-limit
+                (min num-lines (+ start-idx actual-limit))
+              num-lines))
+           (selected-lines (seq-subseq lines start-idx end-idx)))
+      (cond
+       (show-line-numbers
+        ;; Format with line numbers (cat -n style).
+        (let* ((actual-start-line (1+ start-idx))
+               ;; `cat -n` includes the trailing newline if present, but doesn't number it. We
+               ;; handle this as a special case. If:
+               ;;
+               ;; - the last line is empty
+               ;; - we're looking at the actual last line of the content (i.e. not a blank line in
+               ;;   the middle)
+               ;; - there's more than one line (since `cat -n` on a completely blank file does show
+               ;;   line number 1
+               ;;
+               ;; then exclude the last line from the list of lines to be numbered, and add it back
+               ;; at the end.
+               (should-exclude-final-empty
+                (and (= end-idx num-lines) ; processing to end.
+                     (> (length selected-lines) 1) ; we have more than one line.
+                     (string-empty-p (car (last selected-lines))))) ; last line is empty.
+               (lines-to-number
+                (if should-exclude-final-empty
+                    (butlast selected-lines)
+                  selected-lines))
+               (max-line-num (+ actual-start-line (length lines-to-number) -1))
+               (line-num-width
+                (if (> (length lines-to-number) 0)
+                    (length (number-to-string max-line-num))
+                  1))
+               (formatted-lines
+                (cl-loop
+                 for
+                 line
+                 in
+                 lines-to-number
+                 for
+                 line-num
+                 from
+                 actual-start-line
+                 collect
+                 (format (concat "%" (number-to-string line-num-width) "d\t%s") line-num line)))
+               (result (string-join formatted-lines "\n")))
+          ;; Add the final trailing newline if we excluded the final empty line
+          (if should-exclude-final-empty
+              (concat result "\n")
+            result)))
+       ;; Regular format without line numbers.
+       (t
+        (string-join selected-lines "\n"))))))
+
+(defun macher--with-workspace-file (context path callback &optional set-dirty-p)
+  "Helper function to execute CALLBACK with workspace file content.
+
+CONTEXT is a `macher-context' struct containing workspace information.
+
+PATH is the path to the file, relative to the workspace root.
+
+CALLBACK is called with arguments (full-path new-content) where:
+- full-path is the absolute path to the file
+- new-content is the current content string of the file
+
+If SET-DIRTY-P is non-nil, sets the dirty-p flag on the context."
+  (let* ((workspace (macher-context-workspace context))
+         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
+         (get-or-create-file-contents
+          (lambda (file-path)
+            "Get or create implementation contents for FILE-PATH, scoped to the current request.
+Returns a cons cell (orig-content . new-content) of strings for the file.
+Also updates the context's :contents alist."
+            (let ((full-path (funcall resolve-workspace-path file-path)))
+              (macher-context--contents-for-file full-path context))))
+         (full-path (funcall resolve-workspace-path path))
+         ;; Get implementation contents for this file.
+         (contents (funcall get-or-create-file-contents path))
+         (new-content (cdr contents)))
+    ;; Check if the file exists for editing.
+    (if (not new-content)
+        (error (format "File '%s' not found in workspace" path))
+      ;; Set the dirty flag to indicate changes are being made if requested.
+      (when set-dirty-p
+        (setf (macher-context-dirty-p context) t))
+      ;; Call the callback with the file content.
+      (funcall callback full-path new-content))))
+
+;; The workspace tools are somewhat inspired by the reference filesystem MCP. See
+;; https://github.com/modelcontextprotocol/servers/blob/main/src/filesystem/README.md.
+
+(defun macher--tool-read-file (context path &optional offset limit show-line-numbers)
+  "Read the contents of a file specified by PATH within the workspace.
+
+CONTEXT is a `macher-context' struct containing workspace information.
+
+PATH is the path to the file, relative to the workspace root.
+
+OFFSET, if provided, specifies the line number to start reading
+from (1-based).
+
+LIMIT, if provided, specifies the number of lines to read.
+
+SHOW-LINE-NUMBERS, if non-nil, formats output in cat -n style with line numbers.
+
+Returns the file contents as a string, with optional
+offset/limit/show-line-numbers processing. For symlinks, returns the target
+path instead of following the link. Signals an error if the file is not
+found in the workspace."
+  (let* ((workspace (macher-context-workspace context))
+         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
+         (full-path (funcall resolve-workspace-path path)))
+
+    ;; Check if this is a symlink first (only for existing files).
+    (if (file-symlink-p full-path)
+        ;; For symlinks, return the target path instead of following the link.
+        (let ((target (file-symlink-p full-path)))
+          (format "Symlink target: %s" target))
+
+      ;; Normal/non-symlink handling.
+      (macher--with-workspace-file
+       context
+       path
+       (lambda (_full-path new-content)
+         ;; Some LLMs (for example qwen3-coder at time of writing) seem to have trouble invoking
+         ;; tools with integer inputs - they'll always pass e.g. '1.0' instead of '1'. Therefore we
+         ;; need to support float inputs, which in general we handle by rounding to the nearest
+         ;; integer.
+         (let* ((parsed-offset
+                 (when offset
+                   (round offset)))
+                (parsed-limit
+                 (when limit
+                   (round limit)))
+                (processed-content
+                 (macher--read-string new-content parsed-offset parsed-limit show-line-numbers)))
+           ;; Check if the processed content exceeds the maximum read length.
+           (when (> (length processed-content) macher--max-read-length)
+             (error
+              "File content too large: %d bytes exceeds maximum read length of %d bytes"
+              (length processed-content)
+              macher--max-read-length))
+           processed-content))
+       nil))))
+
+(defun macher--tool-list-directory (context path &optional recursive sizes)
+  "List directory contents at PATH within the workspace.
+
+CONTEXT is a `macher-context' struct containing workspace information.
+
+PATH is the path to the directory, relative to the workspace root.
+
+RECURSIVE, if non-nil, recursively lists subdirectories.
+
+SIZES, if non-nil, includes file sizes in the output.
+
+Returns a formatted string listing the directory contents. Files are
+prefixed with 'file:' and directories with 'dir:' to be clear to LLMs.
+Signals an error if the directory is not found in the workspace."
+  (let* ((workspace (macher-context-workspace context))
+         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
+         (full-path (funcall resolve-workspace-path path))
+         (workspace-root (macher--workspace-root workspace))
+         (results '())
+         (context-contents (macher-context-contents context)))
+
+    ;; Check if this path exists as a file in our context (would indicate it's not a directory).
+    (when-let ((existing-entry (assoc (macher--normalize-path full-path) context-contents)))
+      (let ((contents (cdr existing-entry)))
+        ;; Has new-content, so it's a file.
+        (when (cdr contents)
+          (error (format "Path '%s' is a file, not a directory" path)))))
+
+    ;; Check if the directory exists on disk OR has files in the context.
+    ;; A directory is considered to exist if:
+    ;; 1. It exists on disk as a directory, OR
+    ;; 2. There are files in the context that have this directory as a parent
+    (let ((directory-has-context-files-p
+           (cl-some
+            (lambda (entry)
+              (let* ((file-path (car entry))
+                     (contents (cdr entry))
+                     (new-content (cdr contents)))
+                ;; Only consider files that have new content (not deleted files)
+                (when new-content
+                  (let ((file-dir (file-name-directory file-path)))
+                    ;; Check if this file's directory is or is a subdirectory of the requested path
+                    (string-prefix-p
+                     (file-name-as-directory full-path) (file-name-as-directory file-dir))))))
+            context-contents)))
+      (unless (or (file-directory-p full-path) directory-has-context-files-p)
+        (error (format "Directory '%s' not found in workspace" path))))
+
+    ;; Helper function to check if a file is deleted in the context.
+    (cl-labels
+        ((file-deleted-in-context-p
+          (file-path) "Check if FILE-PATH is marked as deleted in the context."
+          (when-let ((entry (assoc (macher--normalize-path file-path) context-contents)))
+            (let ((contents (cdr entry)))
+              (and
+               ;; Has original content...
+               (car contents)
+               ;; ...but no new content.
+               (not (cdr contents))))))
+
+         (get-file-content-size
+          (file-path) "Get the size of FILE-PATH, considering context modifications."
+          (if-let ((entry (assoc (macher--normalize-path file-path) context-contents)))
+            (let* ((contents (cdr entry))
+                   (new-content (cdr contents)))
+              (if new-content
+                  (length new-content)
+                ;; File is deleted in context, so size is 0.
+                0))
+            ;; Not in context, get size from disk.
+            (if (file-exists-p file-path)
+                (file-attribute-size (file-attributes file-path))
+              0)))
+
+         (collect-new-context-files
+          (current-path)
+          "Collect files that exist only in context (newly created) under CURRENT-PATH."
+          (let ((new-files '()))
+            (dolist (entry context-contents)
+              (let* ((file-path (car entry))
+                     (contents (cdr entry))
+                     (orig-content (car contents))
+                     (new-content (cdr contents)))
+                ;; This is a newly created file if it has new-content but no orig-content.
+                (when (and new-content (not orig-content))
+                  ;; Check if this file is a direct child of the current directory.
+                  (let ((file-dir (file-name-directory file-path))
+                        (normalized-current-path (file-name-as-directory current-path)))
+                    (when (string= (file-name-as-directory file-dir) normalized-current-path)
+                      (push (file-name-nondirectory file-path) new-files))))))
+            new-files))
+
+         (collect-new-context-directories
+          (current-path)
+          "Collect directory names that are implied by context files under CURRENT-PATH."
+          (let ((new-dirs '()))
+            (dolist (entry context-contents)
+              (let* ((file-path (car entry))
+                     (contents (cdr entry))
+                     (new-content (cdr contents)))
+                ;; Only consider files that have new content (not deleted files).
+                (when new-content
+                  ;; Check if this file creates any intermediate directories under current-path.
+                  (let* ((relative-path
+                          (file-relative-name file-path (file-name-as-directory current-path))))
+                    ;; Only process if the file is actually under the current path (not ..).
+                    (when (not (string-prefix-p ".." relative-path))
+                      ;; Split the path to find the first directory component
+                      (when (string-match "/" relative-path)
+                        (let ((first-component
+                               (substring relative-path 0 (match-beginning 0))))
+                          (unless (or (string-empty-p first-component)
+                                      (member first-component new-dirs))
+                            (push first-component new-dirs)))))))))
+            new-dirs))
+
+         (collect-entries
+          (current-path current-rel-path depth)
+          ;; Get all entries from the directory (if it exists on disk) plus any context files.
+          (let* ((workspace-files (macher--workspace-files workspace))
+                 ;; Only include disk entries that are in the workspace files list.
+                 (disk-entries
+                  (if (file-directory-p current-path)
+                      (let ((all-disk-files (directory-files current-path nil "^[^.]")))
+                        (cl-remove-if-not
+                         (lambda (entry)
+                           (let ((entry-full-path (expand-file-name entry current-path)))
+                             ;; Include if it's in the workspace files list OR it's a directory.
+                             (or (cl-some
+                                  (lambda (workspace-file)
+                                    ;; Handle both absolute and relative paths in workspace-files.
+                                    (let ((normalized-workspace-file
+                                           (if (file-name-absolute-p workspace-file)
+                                               workspace-file
+                                             (expand-file-name workspace-file workspace-root))))
+                                      (string= entry-full-path normalized-workspace-file)))
+                                  workspace-files)
+                                 (file-directory-p entry-full-path))))
+                         all-disk-files))
+                    '()))
+                 ;; Add any newly created files from the context.
+                 (context-new-files (collect-new-context-files current-path))
+                 ;; Add any directories implied by context files.
+                 (context-new-directories (collect-new-context-directories current-path))
+                 ;; Combine and deduplicate.
+                 (all-entries
+                  (cl-remove-duplicates
+                   (append disk-entries context-new-files context-new-directories)
+                   :test #'string=)))
+            ;; Process entries if we have any entries to process.
+            (when (> (length all-entries) 0)
+              (dolist (entry all-entries)
+                (let* ((entry-full-path (expand-file-name entry current-path))
+                       (entry-rel-path
+                        (if (string-empty-p current-rel-path)
+                            entry
+                          (concat current-rel-path "/" entry)))
+                       (entry-deleted-p (file-deleted-in-context-p entry-full-path))
+                       (entry-exists-on-disk-p (file-exists-p entry-full-path))
+                       (entry-is-symlink-p
+                        (and (not entry-deleted-p) (file-symlink-p entry-full-path)))
+                       (entry-exists-in-context-p
+                        (when-let ((entry
+                                    (assoc
+                                     (macher--normalize-path entry-full-path) context-contents)))
+                          (let ((contents (cdr entry)))
+                            ;; Has new content.
+                            (cdr contents))))
+                       (entry-exists-p
+                        (or entry-exists-on-disk-p
+                            entry-exists-in-context-p entry-is-symlink-p
+                            ;; Also exists if it's a directory implied by context files.
+                            (member entry context-new-directories)))
+                       (entry-is-dir-p
+                        (and entry-exists-p
+                             (not entry-deleted-p) (not entry-is-symlink-p)
+                             ;; A path is a directory if it exists on disk as a directory OR if it's
+                             ;; in our context-new-directories list.
+                             (or (file-directory-p entry-full-path)
+                                 (member entry context-new-directories))))
+                       (size-info "")
+                       (indent (make-string (* depth 2) ?\s)))
+
+                  ;; Skip deleted files.
+                  (unless entry-deleted-p
+                    ;; Get size information if requested (not for directories or symlinks).
+                    (when (and sizes (not entry-is-dir-p) (not entry-is-symlink-p))
+                      (let ((file-size (get-file-content-size entry-full-path)))
+                        (setq size-info (format " (%s)" (macher--format-size file-size)))))
+
+                    ;; Add symlink target info if it's a symlink.
+                    (when entry-is-symlink-p
+                      (let ((target (file-symlink-p entry-full-path)))
+                        (setq size-info (format " -> %s" target))))
+
+                    ;; Add entry to results.
+                    (push (format "%s%s: %s%s"
+                                  indent
+                                  (cond
+                                   (entry-is-symlink-p
+                                    "link")
+                                   (entry-is-dir-p
+                                    "dir")
+                                   (t
+                                    "file"))
+                                  entry-rel-path size-info)
+                          results)
+
+                    ;; Recurse into subdirectories if requested (but not into symlinked
+                    ;; directories).
+                    (when (and recursive entry-is-dir-p)
+                      (collect-entries entry-full-path entry-rel-path (1+ depth))))))))))
+
+      ;; Start collection.
+      (collect-entries full-path "" 0))
+
+    ;; Return formatted results.
+    (if results
+        (string-join (reverse results) "\n")
+      "Directory is empty")))
+
+(defun macher--tool-edit-file (context path old-text new-text &optional replace-all)
+  "Edit file specified by PATH within the workspace.
+
+CONTEXT is a `macher-context' struct containing workspace information.
+
+PATH is the path to the file, relative to the workspace root.
+
+OLD-TEXT is the exact text to replace.
+
+NEW-TEXT is the replacement text.
+
+REPLACE-ALL, if non-nil, replaces all occurrences; otherwise errors if
+multiple matches exist.
+
+Returns nil on success. Signals an error if the file is not found or if
+the edit operation fails. Sets the dirty-p flag on the context to
+indicate changes."
+  ;; Handle :json-false inputs for replace-all parameter.
+  (let ((replace-all (and replace-all (not (eq replace-all :json-false)))))
+    ;; Validate required parameters
+    (unless (and old-text new-text)
+      (error "Both old_text and new_text are required"))
+    ;; Use the helper function to perform the edit.
+    (macher--with-workspace-file context path
+                                 (lambda (full-path new-content)
+                                   (let ((result
+                                          (macher--edit-string new-content old-text new-text
+                                                               replace-all)))
+                                     ;; Update the content in the context.
+                                     (macher-context--set-new-content-for-file
+                                      full-path result context)
+                                     ;; Return nil to indicate success.
+                                     nil))
+                                 t)))
+
+(defun macher--tool-multi-edit-file (context path edits)
+  "Make multiple edits to a file specified by PATH within the workspace.
+
+CONTEXT is a `macher-context' struct containing workspace information.
+
+PATH is the path to the file, relative to the workspace root.
+
+EDITS is a vector of edit operations, each containing :old_string and
+:new_string. For compatibility with LLMs that don't support array
+arguments, a JSON string representing an array is also accepted.
+
+All edits are applied in sequence to the same file. Each edit requires
+exact whitespace matching. If any edit fails, the entire operation
+fails.
+
+Returns nil on success. Signals an error if the file is not found or if
+any edit operation fails. Sets the dirty-p flag on the context to
+indicate changes."
+  ;; Validate that edits is a vector, i.e. a JSON array. Ideally the argument should
+  ;; have been sent as an actual array, but some LLMs seem to have trouble with this,
+  ;; and instead send JSON strings which decode to an array. Allow both cases, as
+  ;; although the string case technically violates the tool signature, we can still
+  ;; handle it unambiguously.
+  (unless (vectorp edits)
+    (if (stringp edits)
+        ;; Try to decode JSON string to vector.
+        (condition-case nil
+            (let ((decoded (json-parse-string edits :array-type 'vector :object-type 'plist)))
+              (if (vectorp decoded)
+                  (setq edits decoded)
+                (error
+                 "The 'edits' parameter must be an array, but the decoded JSON is not an array")))
+          (error
+           (error
+            "The 'edits' parameter must be an array of objects, or a valid JSON string representing an array")))
+      ;; Not a vector or string - invalid input.
+      (error "The 'edits' parameter must be an array of objects, not %s" (type-of edits))))
+  ;; Use the helper function to perform the edits.
+  (macher--with-workspace-file context path
+                               (lambda (full-path new-content)
+                                 ;; Apply edits sequentially.
+                                 (cl-loop
+                                  for edit across edits do
+                                  (let ((old-text (plist-get edit :old_text))
+                                        (new-text (plist-get edit :new_text))
+                                        (replace-all (plist-get edit :replace_all)))
+
+                                    (unless (and old-text new-text)
+                                      (error
+                                       "Each edit must contain old_text and new_text properties"))
+                                    ;; Handle :json-false inputs for replace-all parameter.
+                                    (setq replace-all
+                                          (and replace-all (not (eq replace-all :json-false))))
+                                    (setq new-content
+                                          (macher--edit-string new-content old-text new-text
+                                                               replace-all))
+                                    ;; Update the content in the context after each edit.
+                                    (macher-context--set-new-content-for-file
+                                     full-path new-content context)))
+                                 ;; Return nil to indicate success.
+                                 nil)
+                               t))
+
+(defun macher--tool-write-file (context path content)
+  "Create a new file or completely overwrite an existing file with CONTENT.
+
+CONTEXT is a `macher-context' struct containing workspace information.
+
+PATH is the path to the file, relative to the workspace root.
+
+CONTENT is the complete new content for the file.
+
+Use with caution as it will overwrite existing files without warning.
+Handles text content with proper encoding.
+
+Returns nil on success. Sets the dirty-p flag on the context to indicate changes."
+  (let* ((workspace (macher-context-workspace context))
+         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
+         (full-path (funcall resolve-workspace-path path)))
+    ;; Set the dirty flag to indicate changes are being made.
+    (setf (macher-context-dirty-p context) t)
+    ;; Set the new content in the context (this will create the entry if needed).
+    (macher-context--set-new-content-for-file full-path content context)
+    nil))
+
+(defun macher--tool-move-file (context source-path destination-path)
+  "Move or rename files within the workspace.
+
+CONTEXT is a `macher-context' struct containing workspace information.
+
+SOURCE-PATH is the source path relative to the workspace root.
+
+DESTINATION-PATH is the destination path relative to the workspace root.
+
+Can move files between directories and rename them in a single operation.
+If the destination exists, the operation will fail. Works across different
+directories and can be used for simple renaming within the same directory.
+
+Returns nil on success. Signals an error if the source file is not found or
+if the destination already exists. Sets the dirty-p flag on the context to
+indicate changes."
+  (let* ((workspace (macher-context-workspace context))
+         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
+         (dest-full-path (funcall resolve-workspace-path destination-path)))
+    ;; Check if destination already exists.
+    (let ((dest-contents (macher-context--contents-for-file dest-full-path context)))
+      (when (cdr dest-contents)
+        (error (format "Destination '%s' already exists" destination-path))))
+    ;; Use the helper function to move the file.
+    (macher--with-workspace-file context source-path
+                                 (lambda (source-full-path source-new-content)
+                                   ;; Copy content from source to destination.
+                                   (macher-context--set-new-content-for-file
+                                    dest-full-path source-new-content context)
+                                   ;; Mark source for deletion by setting its content to nil.
+                                   (macher-context--set-new-content-for-file
+                                    source-full-path nil context)
+                                   ;; Return nil to indicate success.
+                                   nil)
+                                 t)))
+
+(defun macher--tool-delete-file (context rel-path)
+  "Delete a file specified by REL-PATH within the workspace.
+
+CONTEXT is a `macher-context' struct containing workspace information.
+
+REL-PATH is the path to the file, relative to the workspace root.
+
+The file must exist and will be marked for deletion in the patch.
+Permanently removes the file from the workspace.
+
+Returns nil on success. Signals an error if the file is not found.
+Sets the dirty-p flag on the context to indicate changes."
+  ;; Use the helper function to delete the file.
+  (macher--with-workspace-file context rel-path
+                               (lambda (full-path _editable-content)
+                                 ;; For deletion, set the new content to nil to indicate deletion.
+                                 (macher-context--set-new-content-for-file full-path nil context)
+                                 ;; Return nil to indicate success.
+                                 nil)
+                               t))
+
+(cl-defun macher--search-get-xref-matches (context pattern &key path file-regexp case-insensitive)
+  "Get raw xref matches as an alist of ((filename . matches)).
+
+CONTEXT is the macher-context, which will be taken into account when
+searching for matches (including new and deleted files).
+
+PATTERN is the regexp pattern to search for.
+
+PATH is the directory or file to search, defaulting to the context's
+workspace root.
+
+FILE-REGEXP is a regexp to specify which files should be included - it
+will be matched against each file's path relative to the search PATH.
+
+CASE-INSENSITIVE, if non-nil, performs a case-insensitive search.
+
+The search will be performed using `xref-matches-in-files', which uses
+the 'xref-search-program' to perform the search.
+
+Returns matches-alist with structure ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)."
+  (require 'xref)
+  (let* (
+         ;; Set case-fold-search to enable case-insensitive search when needed. Note: xref uses
+         ;; `grep-expand-template' to generate the command, which performs a case-insensitive search
+         ;; if/only if `case-fold-search' is truthy and `isearch-no-upper-case-p' is true for the
+         ;; regexp in question.
+         (case-fold-search case-insensitive)
+         (workspace (macher-context-workspace context))
+         (workspace-root (macher--workspace-root workspace))
+         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
+         (search-path (funcall resolve-workspace-path (or path ".")))
+         (context-contents (macher-context-contents context))
+         (workspace-files (macher--workspace-files workspace))
+         (path
+          (when path
+            (expand-file-name path workspace-root)))
+         ;; When case-insensitive is true, downcase the pattern so that `isearch-no-upper-case-p'
+         ;; returns true, which is required for grep's case-insensitive mode to activate.
+         (search-pattern
+          (if case-insensitive
+              (downcase pattern)
+            pattern))
+         (temp-files-alist '())
+         (results '()))
+
+    (let* (
+           ;; Create a list of files to search, filtering by path and glob.
+           (files-to-search
+            (cl-remove-if-not
+             (lambda (file-path)
+               (let ((full-path (expand-file-name file-path workspace-root)))
+                 (and
+                  ;; File is under the search path.
+                  (string-prefix-p search-path full-path)
+                  ;; File matches regexp if specified.
+                  (if file-regexp
+                      (let ((rel-path
+                             (if path
+                                 (file-relative-name full-path search-path)
+                               (file-relative-name full-path workspace-root))))
+                        (string-match-p file-regexp rel-path))
+                    t)
+                  ;; File exists or has content in context.
+                  (or (file-exists-p full-path)
+                      (let ((entry (assoc (macher--normalize-path full-path) context-contents)))
+                        (and entry (cdr (cdr entry))))))))
+             workspace-files))
+           ;; Add any context-only files that match our criteria.
+           (context-only-files
+            (cl-remove-if-not
+             (lambda (entry)
+               (let* ((file-path (car entry))
+                      (contents (cdr entry))
+                      (orig-content (car contents))
+                      (new-content (cdr contents)))
+                 (and
+                  ;; File has new content (not deleted).
+                  new-content
+                  ;; File is not already in workspace-files.
+                  (not
+                   (cl-find
+                    file-path
+                    files-to-search
+                    :test (lambda (a b) (string= a (expand-file-name b workspace-root)))))
+                  ;; File is under search path.
+                  (string-prefix-p search-path file-path)
+                  ;; File matches regexp if specified.
+                  (if file-regexp
+                      (let ((rel-path
+                             (if path
+                                 (file-relative-name file-path search-path)
+                               (file-relative-name file-path workspace-root))))
+                        (string-match-p file-regexp rel-path))
+                    t))))
+             context-contents))
+           ;; Combine and convert to absolute paths
+           (all-files-to-search
+            (append
+             (mapcar
+              (lambda (f)
+                (if (file-name-absolute-p f)
+                    f
+                  (expand-file-name f workspace-root)))
+              files-to-search)
+             (mapcar #'car context-only-files))))
+
+      ;; Create temporary files for context modifications.
+      (setq all-files-to-search
+            (mapcar
+             (lambda (file-path)
+               (let ((entry (assoc (macher--normalize-path file-path) context-contents)))
+                 (if entry
+                     (let* ((contents (cdr entry))
+                            (new-content (cdr contents)))
+                       (if new-content
+                           ;; Create temp file with modified content.
+                           (let ((temp-file (make-temp-file "macher-search")))
+                             (with-temp-buffer
+                               (insert new-content)
+                               (write-region (point-min) (point-max) temp-file nil 'silent))
+                             (push (cons temp-file file-path) temp-files-alist)
+                             temp-file)
+                         ;; File is deleted in context, skip it.
+                         nil))
+                   ;; No context modification, use original file.
+                   file-path)))
+             all-files-to-search))
+
+      ;; Remove nil entries (deleted files).
+      (setq all-files-to-search (cl-remove-if #'null all-files-to-search))
+
+      ;; Use xref-matches-in-files to search and clean up temp files afterwards.
+      (unwind-protect
+          (progn
+            (when all-files-to-search
+              (let* ((xref-matches (xref-matches-in-files search-pattern all-files-to-search)))
+                (dolist (match xref-matches)
+                  (let*
+                      ((location (xref-item-location match))
+                       (file-path (xref-file-location-file location))
+                       ;; Map temp file back to original file.
+                       (original-file (or (cdr (assoc file-path temp-files-alist)) file-path))
+                       ;; Ensure matched files are loaded into the macher-context, so their contents
+                       ;; won't change before they're accessed.
+                       (_ (macher-context--contents-for-file original-file context))
+                       ;; Always show results relative to workspace root (like grep relative to
+                       ;; cwd). Special case: if path points to a specific file, show the original
+                       ;; path parameter.
+                       (rel-path
+                        (if (and path
+                                 (file-exists-p search-path)
+                                 (not (file-directory-p search-path)))
+                            ;; Path is a specific file, use the original path parameter.
+                            path
+                          ;; Otherwise, always relative to workspace root.
+                          (file-relative-name original-file workspace-root))))
+
+                    ;; Group results by file for proper formatting.
+                    (let ((file-entry (assoc rel-path results)))
+                      (if file-entry
+                          ;; Add to the existing file's match list - file-entry structure is
+                          ;; (rel-path . xref-match-item-list).
+                          (setcdr file-entry (cons match (cdr file-entry)))
+                        ;; Create new file entry - structure is (rel-path . xref-match-item-list).
+                        (push (cons rel-path (list match)) results)))))))
+
+            ;; Return just the results - temp files are cleaned up in the unwind-protect.
+            results)
+
+        ;; Cleanup: delete temporary files.
+        (dolist (temp-entry temp-files-alist)
+          (when (file-exists-p (car temp-entry))
+            (delete-file (car temp-entry)))))
+
+      results)))
+
+(defun macher--search-format-files-mode (matches-alist)
+  "Format search results for files mode output.
+
+MATCHES-ALIST has structure ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)."
+  (let ((output "")
+        (total-matches
+         (apply #'+ (mapcar (lambda (file-entry) (length (cdr file-entry))) matches-alist))))
+    ;; Files mode: show file paths with match counts
+    (dolist (file-entry (reverse matches-alist))
+      (let ((file-path (car file-entry))
+            (matches (cdr file-entry)))
+        (setq output
+              (concat
+               output
+               (format "%s (%d %s)\n"
+                       file-path (length matches)
+                       (if (= (length matches) 1)
+                           "match"
+                         "matches"))))))
+    (when matches-alist
+      (setq output
+            (concat
+             output
+             (format "\nTotal: %d %s in %d %s"
+                     total-matches
+                     (if (= total-matches 1)
+                         "match"
+                       "matches")
+                     (length matches-alist)
+                     (if (= (length matches-alist) 1)
+                         "file"
+                       "files")))))
+    output))
+
+(defun macher--search-format-content-mode
+    (context matches-alist lines-before lines-after show-line-numbers)
+  "Format search results for content mode output.
+
+CONTEXT is the macher-context struct.
+
+LINES-BEFORE and LINES-AFTER specify additional lines of context to
+include.
+
+SHOW-LINE-NUMBERS toggles inclusion of line numbers in the output.
+
+MATCHES-ALIST has structure ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)."
+  (let* ((workspace (macher-context-workspace context))
+         (workspace-root (macher--workspace-root workspace))
+         (context-contents (macher-context-contents context))
+         (output ""))
+
+    ;; Content mode: show matching lines with grep-like format.
+    (dolist (file-entry (reverse matches-alist))
+      (let* ((file-path (car file-entry))
+             (matches (reverse (cdr file-entry))))
+
+        ;; For content mode with context lines, we need to read the file content.
+        (let* ((original-file (expand-file-name file-path workspace-root))
+               (entry (assoc (macher--normalize-path original-file) context-contents))
+               (file-content
+                (if entry
+                    ;; File is in context, use the current content (new-content). Note: deleted
+                    ;; files (where new-content is nil) are filtered out during the search phase, so
+                    ;; we should never encounter them here, but it doesn't really matter if we do -
+                    ;; we'll just have nil file-content in that case.
+                    (cdr (cdr entry))
+                  ;; File not in context, read from disk.
+                  (when (file-exists-p original-file)
+                    (with-temp-buffer
+                      (insert-file-contents original-file)
+                      (buffer-substring-no-properties (point-min) (point-max))))))
+               (lines
+                (when file-content
+                  (split-string file-content "\n")))
+               (has-context (or lines-before lines-after)))
+
+          (if (and lines has-context)
+              ;; Context mode: merge overlapping ranges and show continuous output.
+              (let* ((line-ranges '())
+                     (match-lines-set (make-hash-table :test 'eq)))
+                ;; First, collect all match line numbers in a hash set for quick lookup.
+                (dolist (match matches)
+                  (puthash (xref-file-location-line (xref-item-location match)) t match-lines-set))
+
+                ;; Calculate line ranges for each match (including context)
+                (dolist (match matches)
+                  (let* ((line-num (xref-file-location-line (xref-item-location match)))
+                         (start-line (max 1 (- line-num (or lines-before 0))))
+                         (end-line (min (length lines) (+ line-num (or lines-after 0)))))
+                    (push (list start-line end-line) line-ranges)))
+
+                ;; Sort ranges by start line.
+                (setq line-ranges (sort line-ranges (lambda (a b) (< (car a) (car b)))))
+
+                ;; Merge overlapping or adjacent ranges.
+                (let ((merged-ranges '())
+                      (current-start nil)
+                      (current-end nil))
+                  (dolist (range line-ranges)
+                    (let ((start (car range))
+                          (end (cadr range)))
+                      (if (or (null current-start)
+                              ;; ; Not overlapping/adjacent.
+                              (> start (1+ current-end)))
+                          (progn
+                            (when current-start
+                              (push (list current-start current-end) merged-ranges))
+                            (setq
+                             current-start start
+                             current-end end))
+                        ;; Overlapping or adjacent - merge.
+                        (setq current-end (max current-end end)))))
+                  (when current-start
+                    (push (list current-start current-end) merged-ranges))
+                  (setq merged-ranges (reverse merged-ranges))
+
+                  ;; Output merged ranges with separators between non-adjacent ranges.
+                  (let ((need-separator nil))
+                    (dolist (range merged-ranges)
+                      (let ((start-line (car range))
+                            (end-line (cadr range)))
+                        ;; Add separator between non-adjacent ranges.
+                        (when need-separator
+                          (setq output (concat output "--\n")))
+                        (setq need-separator t)
+
+                        ;; Output lines in this range.
+                        (let ((i start-line))
+                          (while (<= i end-line)
+                            (let* ((line (nth (1- i) lines))
+                                   (is-match (gethash i match-lines-set)))
+                              (let* ((separator
+                                      (if is-match
+                                          ":"
+                                        "-"))
+                                     (line-format
+                                      (if show-line-numbers
+                                          (format "%s%s%d%s%s\n"
+                                                  file-path
+                                                  separator
+                                                  i
+                                                  separator
+                                                  line)
+                                        (format "%s%s%s\n" file-path separator line))))
+                                (setq output (concat output line-format))
+                                (setq i (1+ i)))))))))))
+
+            ;; Simple content mode without context.
+            (dolist (match matches)
+              (let* ((line-num (xref-file-location-line (xref-item-location match)))
+                     (summary (xref-item-summary match))
+                     (line-format
+                      (if show-line-numbers
+                          (format "%s:%d:%s\n" file-path line-num summary)
+                        (format "%s:%s\n" file-path summary))))
+                (setq output (concat output line-format))))))))
+
+    output))
+
+(cl-defun macher--tool-search-helper
+    (context
+     pattern
+     &key
+     path
+     file-regexp
+     mode
+     case-insensitive
+     lines-after
+     lines-before
+     show-line-numbers
+     head-limit)
+  "Search for PATTERN within the workspace using grep-like functionality.
+
+CONTEXT is a `macher-context' struct containing workspace information.
+
+PATTERN is the regular expression to search for (required).
+
+Keyword arguments:
+- PATH: directory or file to search, relative to workspace root.
+  Defaults to workspace root if not provided.
+
+- GLOB: file pattern relative to PATH to filter results (e.g., \"*.js\",
+  \"**/docker-compose*.yml\").
+
+- MODE: output format - \"files\" (default) shows file paths with match
+  counts, \"content\" shows grep-style matching lines with context.
+
+- CASE-INSENSITIVE: if non-nil, performs a case-insensitive
+  search (default: nil).
+
+- LINES-AFTER: number of lines to show after each match (content mode only).
+
+- LINES-BEFORE: number of lines to show before each match (content mode only).
+- SHOW-LINE-NUMBERS: if non-nil, includes line numbers in output (content
+  mode only).
+
+- HEAD-LIMIT: limits output to first N lines (like `head -N`).
+
+Returns formatted search results as a string. Considers workspace context
+including any pending changes, creations, or deletions.
+
+HEAD-LIMIT applies to the final formatted output and works exactly like
+piping the results through `head -N`."
+  (let ((search-mode (or mode "files")))
+    ;; Validate parameters.
+    (unless (and pattern (not (string-empty-p pattern)))
+      (error "Pattern is required and cannot be empty"))
+
+    (when (and head-limit (< head-limit 0))
+      (error "Head-limit cannot be negative"))
+
+    ;; Handle float inputs by rounding to integers, like the read tool does. Some LLMs seem to have
+    ;; trouble invoking tools with integer inputs.
+    (let* ((parsed-lines-after
+            (when lines-after
+              (round lines-after)))
+           (parsed-lines-before
+            (when lines-before
+              (round lines-before)))
+           (parsed-head-limit
+            (when head-limit
+              (round head-limit))))
+
+      ;; Get raw xref matches.
+      (let* ((matches-alist
+              (macher--search-get-xref-matches
+               context
+               pattern
+               :path path
+               :file-regexp file-regexp
+               :case-insensitive case-insensitive))
+             (output "No matches found."))
+
+        ;; Check if any matches were found.
+        (when matches-alist
+          ;; Format results based on mode.
+          (cond
+           ((string= search-mode "files")
+            (setq output (macher--search-format-files-mode matches-alist)))
+
+           ((string= search-mode "content")
+            (setq output
+                  (macher--search-format-content-mode
+                   context matches-alist parsed-lines-before parsed-lines-after show-line-numbers)))
+
+           (t
+            (error "Mode must be either 'files' or 'content'"))))
+
+        ;; Apply head-limit if specified.
+        (when parsed-head-limit
+          (let ((lines (split-string output "\n")))
+            (when (> (length lines) parsed-head-limit)
+              (setq output (string-join (seq-take lines parsed-head-limit) "\n")))))
+        output))))
+
+(defun macher--tool-search
+    (context
+     pattern
+     &optional
+     path
+     file-regexp
+     mode
+     case-insensitive
+     lines-after
+     lines-before
+     show-line-numbers
+     head-limit)
+  "Search for PATTERN within the workspace using grep-like functionality.
+
+CONTEXT is a `macher-context' struct containing workspace information.
+
+PATTERN is the regular expression to search for (required).
+
+PATH is the directory or file to search, relative to workspace root.
+Defaults to workspace root if not provided.
+
+FILE-REGEXP is a regular expression to filter files by path relative to
+search path.
+
+MODE specifies output format:
+- \"files\" (default) - Show file paths with match counts
+- \"content\" - Show grep-style matching lines with context
+
+CASE-INSENSITIVE, if non-nil, performs a case-insensitive search (default: nil).
+
+LINES-AFTER specifies number of lines to show after each match (content
+mode only).
+
+LINES-BEFORE specifies number of lines to show before each
+match (content mode only).
+
+SHOW-LINE-NUMBERS, if non-nil, includes line numbers in output (content
+mode only).
+
+HEAD-LIMIT limits output to first N lines (equivalent to piping through
+`head -N`).
+
+Returns formatted search results as a string. Considers workspace
+context including any pending changes, creations, or deletions."
+  (macher--tool-search-helper
+   context
+   pattern
+   :path path
+   :file-regexp file-regexp
+   :mode mode
+   :case-insensitive case-insensitive
+   :lines-after lines-after
+   :lines-before lines-before
+   :show-line-numbers show-line-numbers
+   :head-limit head-limit))
 
 (defun macher--read-tools (context make-tool-function)
   "Generate read-only tools for workspace operations with CONTEXT.
@@ -1188,46 +2353,153 @@ in the workspace.
 
 Tools are created using MAKE-TOOL-FUNCTION so they can be properly removed from
 the global gptel registry when the request completes."
-  (let* ((workspace (macher-context-workspace context))
-         (workspace-type (car workspace))
-         (workspace-id (cdr workspace))
-         (workspace-name (macher--workspace-name workspace))
-         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
+  (list
+   (funcall
+    make-tool-function
+    :name "read_file_in_workspace"
+    :function (apply-partially #'macher--tool-read-file context)
+    :description
+    (concat
+     "Read file contents in the workspace.\n"
+     "\n"
+     "USAGE RULES:\n"
+     "1. NEVER re-read files that were already provided in the REQUEST CONTEXT\n"
+     "2. For files NOT in the REQUEST CONTEXT: try reading the ENTIRE file first "
+     "(no offset/limit) to understand its structure\n"
+     "\n"
+     "!!! CRITICAL: You MUST NOT use this tool to read files whose contents were already "
+     "provided to you in the REQUEST CONTEXT, except to resolve confusion or verify edits.\n"
+     "\n"
+     "Returns the file contents as a string.")
+    :confirm nil
+    :include nil
+    :args
+    `((:name "path" :type string :description "Path to the file, relative to workspace root")
+      (:name
+       "offset"
+       :type number
+       :optional t
+       :description
+       ,(concat
+         "Line number to start reading from (1-based). For negative values, starts at that many "
+         "lines before the end of the file. ONLY use for targeted re-reads - read entire file first!"))
+      (:name
+       "limit"
+       :type number
+       :optional t
+       :description
+       ,(concat
+         "Number of lines to read from the start position. For negative values, the actual "
+         "limit is computed as (total_lines + limit). For example, with a 100-line file: "
+         "limit=10 reads 10 lines, limit=-10 reads 90 lines (100 + (-10)). "
+         "ONLY use for targeted re-reads - read entire file first!"))
+      (:name
+       "show_line_numbers"
+       :type boolean
+       :optional t
+       :description
+       ,(concat
+         "Include line numbers in output (cat -n style: each line prefixed with right-aligned "
+         "line number and a tab character)"))))
 
-         ;; Shared helper to get or create implementation contents for a file.
-         (get-or-create-file-contents
-          (lambda (file-path)
-            "Get or create implementation contents for FILE-PATH, scoped to the current request.
-Returns a cons cell (orig-content . new-content) of strings for the file.
-Also updates the context's :contents alist."
-            (let ((full-path (funcall resolve-workspace-path file-path)))
-              (macher-context--contents-for-file full-path context)))))
-    (list
-     (funcall
-      make-tool-function
-      :name "read_file_in_workspace"
-      :function
-      `,(lambda (path)
-          "Read the contents of a file specified by PATH within the workspace."
-          (let* ((full-path (funcall resolve-workspace-path path))
-                 ;; Get implementation contents for this file.
-                 (contents (funcall get-or-create-file-contents path))
-                 (new-content (cdr contents)))
-            ;; Check if the file exists for reading.
-            (if (not new-content)
-                (error (format "File '%s' not found in workspace" path))
-              ;; Return the content directly.
-              new-content)))
-      :description
-      (concat
-       "Read file contents from the workspace. "
-       "Returns the current contents of a file. Use this ONLY when you need to see a file "
-       "that wasn't included in the initial context, or to verify changes after editing. "
-       "Do NOT use this to re-read files whose contents were already provided in the request context.")
-      :confirm nil
-      :include nil
-      :args
-      '((:name "path" :type string :description "Path to the file, relative to workspace root"))))))
+   (funcall make-tool-function
+            :name "list_directory_in_workspace"
+            :function (apply-partially #'macher--tool-list-directory context)
+            :description
+            (concat
+             "List directory contents in the workspace. "
+             "Shows files and directories with clear prefixes (file: or dir:). "
+             "Can optionally recurse into subdirectories and show file sizes. "
+             "Takes the current workspace state into account, including pending changes.\n\n"
+             "NOTE: The full workspace file listing is usually already provided in the "
+             "WORKSPACE CONTEXT. Only use this tool if you need specific directory "
+             "details or file sizes.")
+            :confirm nil
+            :include nil
+            :args
+            `((:name
+               "path"
+               :type string
+               :description "Path to the directory, relative to workspace root")
+              (:name
+               "recursive"
+               :type boolean
+               :optional t
+               :description "If true, recursively list subdirectories")
+              (:name
+               "sizes"
+               :type boolean
+               :optional t
+               :description "If true, include file sizes in the output")))
+
+   (funcall
+    make-tool-function
+    :name "search_in_workspace"
+    :function (apply-partially #'macher--tool-search context)
+    :description
+    (concat
+     "Search for patterns within the workspace using grep or something like it.\n"
+     "\n"
+     "Supports two output modes:\n"
+     "- 'files' (default): Shows file paths with match counts\n"
+     "- 'content': Shows matching lines with optional context\n"
+     "\n"
+     "!!! CRITICAL: You MUST NOT use this tool to search files whose contents were "
+     "already provided to you in the REQUEST CONTEXT. You already have their contents!")
+    :confirm nil
+    :include nil
+    :args
+    `((:name
+       "pattern"
+       :type string
+       :description "Regular expression pattern to search for (required)")
+      (:name
+       "path"
+       :type string
+       :optional t
+       :description "Directory or file to search, relative to workspace root (defaults to workspace root)")
+      (:name
+       "file_regexp"
+       :type string
+       :optional t
+       :description
+       ,(concat
+         "Filter files by regular expression matched against file path relative to search path. "
+         "Examples: '\\.py$' for Python files, 'src/.*\\.js$' for JS files in src/, "
+         "'test.*\\.py$' for test files"))
+      (:name
+       "mode"
+       :type string
+       :optional t
+       :description
+       ,(concat
+         "Output mode: 'files' (default, shows paths + counts) or "
+         "'content' (shows grep-style matching lines)"))
+      (:name
+       "case_insensitive"
+       :type boolean
+       :optional t
+       :description "If true, perform case-insensitive search (default: false)")
+      (:name
+       "lines_after"
+       :type number
+       :optional t
+       :description "Number of lines to show after each match (content mode only). Like `grep -A`.")
+      (:name
+       "lines_before"
+       :type number
+       :optional t
+       :description "Number of lines to show before each match (content mode only). Like `grep -B`.")
+      (:name
+       "show_line_numbers"
+       :type boolean
+       :optional t
+       :description "Include line numbers in output (content mode only). Like `grep -n`.")
+      (:name
+       "head_limit"
+       :type number
+       :optional t
+       :description "Limit output to first N lines (equivalent to piping through `head -N`)")))))
 
 (defun macher--edit-tools (context make-tool-function)
   "Generate file editing tools for workspace operations with CONTEXT.
@@ -1240,218 +2512,143 @@ Returns a list of tools that allow the LLM to edit files in the workspace.
 
 Tools are created using MAKE-TOOL-FUNCTION so they can be properly removed from
 the global gptel registry when the request completes."
-  (let* ((workspace (macher-context-workspace context))
-         (workspace-type (car workspace))
-         (workspace-id (cdr workspace))
-         (workspace-name (macher--workspace-name workspace))
-         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
-         ;; Shared helper to get or create implementation contents for a file.
-         (get-or-create-file-contents
-          (lambda (file-path)
-            "Get or create implementation contents for FILE-PATH, scoped to the current request.
-Returns a cons cell (orig-content . new-content) of strings for the file.
-Also updates the context's :contents alist."
-            (let ((full-path (funcall resolve-workspace-path file-path)))
-              (macher-context--contents-for-file full-path context))))
-         ;; Wrapper function that sets the dirty-p flag before calling the actual tool function.
-         (wrap-edit-fn
-          (lambda (tool-fn)
-            "Wrap TOOL-FN to set the dirty-p flag before calling it."
-            (lambda (&rest args)
-              "Set dirty-p flag and call the wrapped tool function."
-              ;; Set the dirty flag to indicate changes are being made.
-              (setf (macher-context-dirty-p context) t)
-              ;; Call the original tool function.
-              (apply tool-fn args)))))
-    (list
-     (funcall
-      make-tool-function
-      :name "edit_file_in_workspace"
-      :function
-      (funcall
-       wrap-edit-fn
-       (lambda (path edits &optional dry-run)
-         "Edit file specified by PATH within the workspace.
-EDITS is a vector of edit operations, each containing :oldText and :newText.
-If DRY-RUN is non-nil, preview changes without applying them."
-         (let* ((full-path (funcall resolve-workspace-path path))
-                ;; Get implementation contents for this file.
-                (contents (funcall get-or-create-file-contents path))
-                (new-content (cdr contents))
-                ;; Handle :json-false inputs for dry-run parameter.
-                (dry-run (and dry-run (not (eq dry-run :json-false)))))
-           ;; Check if the file exists for editing.
-           (if (not new-content)
-               (error (format "File '%s' not found in workspace" path))
-             ;; Validate that edits is a vector, i.e. a JSON array. Ideally the argument should
-             ;; have been sent as an actual array, but some LLMs seem to have trouble with this,
-             ;; and instead send JSON strings which decode to an array. Allow both cases, as
-             ;; although the string case technically violates the tool signature, we can still
-             ;; handle it unambiguously.
-             (unless (vectorp edits)
-               (if (stringp edits)
-                   ;; Try to decode JSON string to vector.
-                   (condition-case nil
-                       (let ((decoded
-                              (json-parse-string edits :array-type 'vector :object-type 'plist)))
-                         (if (vectorp decoded)
-                             (setq edits decoded)
-                           (error
-                            "The 'edits' parameter must be an array, but the decoded JSON is not an array")))
-                     (error
-                      (error
-                       "The 'edits' parameter must be an array of objects, or a valid JSON string representing an array")))
-                 ;; Not a vector or string - invalid input.
-                 (error
-                  "The 'edits' parameter must be an array of objects, not %s" (type-of edits))))
-             ;; Apply edits sequentially.
-             (let ((applied-edits 0))
-               (cl-loop
-                for edit across edits do
-                (let ((old-text (plist-get edit :oldText))
-                      (new-text (plist-get edit :newText)))
+  (list
+   (funcall
+    make-tool-function
+    :name "edit_file_in_workspace"
+    :function (apply-partially #'macher--tool-edit-file context)
+    :description
+    (concat
+     "Make exact string replacements in a text file. "
+     "The old_text must match exactly including all whitespace, newlines, and indentation. "
+     "Do NOT include line numbers in old_text or new_text - use only the actual file content. "
+     "If replace_all is false and multiple matches exist, the operation fails - "
+     "provide more specific context in old_text to make the match unique. "
+     "Returns null on success.")
+    :confirm nil
+    :include nil
+    :args
+    `((:name "path" :type string :description "Path to the file, relative to workspace root")
+      (:name
+       "old_text"
+       :type string
+       :description
+       ,(concat
+         "Exact text to find and replace. Must match precisely including whitespace and "
+         "newlines. Do NOT include line numbers."))
+      (:name "new_text" :type string :description "Text to replace the old_text with")
+      (:name
+       "replace_all"
+       :type boolean
+       :optional t
+       :description "If true, replace all occurrences. If false (default), error if multiple matches exist")))
 
-                  (unless (and old-text new-text)
-                    (error "Each edit must contain oldText and newText properties"))
-                  (unless dry-run
-                    (setq new-content (macher--edit-string new-content old-text new-text))
-                    ;; Update the content in the context.
-                    (macher-context--set-new-content-for-file full-path new-content context))
-                  (setq applied-edits (1+ applied-edits))))
-
-               (unless dry-run
-                 nil))))))
-      :description
-      (concat
-       "Make line-based edits to a text file within the workspace. "
-       "Each edit replaces exact line sequences with new content. "
-       "Returns null on success, or an error message if any edit fails.")
-      :confirm nil
-      :include nil
-      :args
-      '((:name "path" :type string :description "Path to the file, relative to workspace root")
-        (:name
-         "edits"
-         :type array
-         :description "Array of edit operations. Each element must be an object with oldText and newText properties."
-         :items
+   (funcall
+    make-tool-function
+    :name "multi_edit_file_in_workspace"
+    :function (apply-partially #'macher--tool-multi-edit-file context)
+    :description
+    (concat
+     "Make multiple exact string replacements in a single file. "
+     "Edits are applied sequentially in array order to the same file. "
+     "Each edit requires exact whitespace matching. Do NOT include line numbers in old_text or new_text. "
+     "If any edit fails, no changes are made. Returns null on success.")
+    :confirm nil
+    :include nil
+    :args
+    `((:name "path" :type string :description "Path to the file, relative to workspace root")
+      (:name
+       "edits"
+       :type array
+       :description "Array of edit operations to apply in sequence"
+       :items
+       (:type
+        object
+        :properties
+        (:old_text
          (:type
-          object
-          :properties
-          (:oldText
-           (:type string :description "Text to search for - must match exactly")
-           :newText (:type string :description "Text to replace with"))
-          :required ["oldText" "newText"]))
-        (:name
-         "dryRun"
-         :type boolean
-         :optional t
-         :description "Preview changes without applying them (optional)")))
+          string
+          :description
+          ,(concat
+            "Exact text to find and replace. Must match precisely including whitespace "
+            "and newlines. Do NOT include line numbers."))
+         :new_text (:type string :description "Text to replace the old_text with")
+         :replace_all
+         (:type
+          boolean
+          :description "If true, replace all occurrences. If false (default), error if multiple matches exist"))
+        :required ["old_text" "new_text"]))))
 
-     (funcall make-tool-function
-              :name "write_file_in_workspace"
-              :function
-              (funcall
-               wrap-edit-fn
-               (lambda (path content)
-                 "Create a new file or completely overwrite an existing file with CONTENT.
-Use with caution as it will overwrite existing files without warning."
-                 (let* ((full-path (funcall resolve-workspace-path path)))
-                   ;; Set the new content in the context (this will create the entry if needed).
-                   (macher-context--set-new-content-for-file full-path content context)
-                   nil)))
-              :description
-              (concat
-               "Create a new file or completely overwrite an existing file in the workspace. "
-               "Use with caution as it will overwrite existing files without warning. "
-               "Handles text content with proper encoding.")
-              :confirm nil
-              :include nil
-              :args
-              '((:name
-                 "path"
-                 :type string
-                 :description "Path to the file, relative to workspace root")
-                (:name "content" :type string :description "Complete new content for the file")))
+   (funcall make-tool-function
+            :name "write_file_in_workspace"
+            :function (apply-partially #'macher--tool-write-file context)
+            :description
+            (concat
+             "Create a new file or completely overwrite an existing file. "
+             "WARNING: This replaces ALL existing content without warning. "
+             "Use edit_file_in_workspace for partial changes. "
+             "Returns null on success.")
+            :confirm nil
+            :include nil
+            :args
+            '((:name
+               "path"
+               :type string
+               :description "Path to the file, relative to workspace root")
+              (:name
+               "content"
+               :type string
+               :description "Complete new content that will replace the entire file")))
 
-     (funcall
-      make-tool-function
-      :name "move_file_in_workspace"
-      :function
-      (funcall wrap-edit-fn
-               (lambda (source destination)
-                 "Move or rename files within the workspace.
-SOURCE and DESTINATION are both relative to the workspace root.
-If the destination exists, the operation will fail."
-                 (let* ((source-full-path (funcall resolve-workspace-path source))
-                        (dest-full-path (funcall resolve-workspace-path destination))
-                        ;; Get implementation contents for the source file.
-                        (source-contents (funcall get-or-create-file-contents source))
-                        (source-new-content (cdr source-contents)))
-                   ;; Check if the source file exists.
-                   (unless source-new-content
-                     (error (format "Source file '%s' not found in workspace" source)))
-                   ;; Check if destination already exists.
-                   (let ((dest-contents (macher-context--contents-for-file dest-full-path context)))
-                     (when (cdr dest-contents)
-                       (error (format "Destination '%s' already exists" destination))))
-                   ;; Copy content from source to destination.
-                   (macher-context--set-new-content-for-file
-                    dest-full-path source-new-content context)
-                   ;; Mark source for deletion.
-                   (macher-context--set-new-content-for-file source-full-path nil context)
-                   nil)))
-      :description
-      (concat
-       "Move or rename files within the workspace."
-       "Can move files between directories and rename them in a single operation. "
-       "If the destination exists, the operation will fail. Works across different "
-       "directories and can be used for simple renaming within the same directory.")
-      :confirm nil
-      :include nil
-      :args
-      '((:name "source" :type string :description "Source path relative to workspace root")
-        (:name
-         "destination"
-         :type string
-         :description "Destination path relative to workspace root")))
+   (funcall make-tool-function
+            :name "move_file_in_workspace"
+            :function (apply-partially #'macher--tool-move-file context)
+            :description
+            (concat
+             "Move or rename files within the workspace. "
+             "Can move files between directories and rename them in a single operation. "
+             "Fails if the destination already exists. "
+             "Returns null on success.")
+            :confirm nil
+            :include nil
+            :args
+            '((:name
+               "source_path"
+               :type string
+               :description "Current path of the file to move, relative to workspace root")
+              (:name
+               "destination_path"
+               :type string
+               :description "New path for the file, relative to workspace root")))
 
-     (funcall make-tool-function
-              :name "delete_file_in_workspace"
-              :function
-              (funcall
-               wrap-edit-fn
-               (lambda (rel-path)
-                 "Delete a file specified by REL-PATH within the workspace.
-The file must exist and will be marked for deletion in the patch."
-                 (let* ((full-path (funcall resolve-workspace-path rel-path))
-                        ;; Get implementation contents for this file to properly record deletion.
-                        (contents (funcall get-or-create-file-contents rel-path))
-                        (editable-content (cdr contents)))
-                   ;; Check if the file exists before deleting.
-                   (if (not editable-content)
-                       (error (format "File '%s' not found in workspace" rel-path))
-                     ;; For deletion, set the new content to nil to indicate deletion.
-                     (macher-context--set-new-content-for-file full-path nil context)
-                     nil))))
-              :description
-              (concat
-               "Delete a file from the workspace. "
-               "Permanently removes the file. The file must exist in the workspace.")
-              :confirm nil
-              :include nil
-              :args
-              '((:name
-                 "path"
-                 :type string
-                 :description "Path to the file, relative to workspace root"))))))
+   (funcall make-tool-function
+            :name "delete_file_in_workspace"
+            :function (apply-partially #'macher--tool-delete-file context)
+            :description
+            (concat
+             "Delete a file from the workspace. "
+             "Fails if the file does not exist. "
+             "Returns null on success.")
+            :confirm nil
+            :include nil
+            :args
+            '((:name
+               "path"
+               :type string
+               :description "Path to the file to delete, relative to workspace root")))))
 
-(defun macher--edit-string (content old-string new-string)
+(defun macher--edit-string (content old-string new-string &optional replace-all)
   "In CONTENT string, replace OLD-STRING with NEW-STRING.
+
+If REPLACE-ALL is non-nil, replace all occurrences. Otherwise, error if
+multiple matches exist and replace only single occurrences.
 
 Return the new content string if the replacement was successful, or signal
 an error if it was not."
   (let ((case-fold-search nil))
+    ;; Error if old-string and new-string are identical
+    (when (string-equal old-string new-string)
+      (error "No changes to make: old_string and new_string are exactly the same"))
     ;; Handle empty old-string specially.
     (if (string-empty-p old-string)
         (if (string-empty-p content)
@@ -1462,40 +2659,41 @@ an error if it was not."
       ;; Normal case: old-string is not empty.
       (let* ((start 0)
              (matches 0)
-             (match-pos nil))
-        ;; Count matches.
+             (match-positions '()))
+        ;; Count matches and collect positions.
         (while (setq start (string-search old-string content start))
           (setq matches (1+ matches))
-          (when (= matches 1)
-            (setq match-pos start))
+          (push start match-positions)
           (setq start (+ start (length old-string))))
 
         (cond
          ((= matches 0)
-          (error "Could not find text to replace in content"))
-         ((> matches 1)
-          (error "Found %d matches for the text to replace in content" matches))
+          (error "String to replace not found in file"))
+         ((and (> matches 1) (not replace-all))
+          (error
+           (concat
+            "Found %d matches of the string to replace, but replace_all is false. "
+            "To replace all occurrences, set replace_all to true. To replace only one "
+            "occurrence, please provide more context to uniquely identify the instance")
+           matches))
          (t
-          ;; Exactly one match, perform the replacement.
-          (concat
-           (substring content 0 match-pos)
-           new-string
-           (substring content (+ match-pos (length old-string))))))))))
-
-(defun macher--write (fsm text)
-  "Write TEXT to the buffer for the action request managed by FSM."
-  (let* ((info (gptel-fsm-info fsm))
-         ;; Buffer and position to display a message.
-         (gptel-buffer (plist-get info :buffer))
-         (start-marker (plist-get info :position))
-         (tracking-marker (or (plist-get info :tracking-marker) start-marker)))
-    (with-current-buffer gptel-buffer
-      (goto-char tracking-marker)
-      (insert text)
-      ;; Update stored point for insertion. Adapted from `gptel-curl--stream-insert-response'.
-      (setq tracking-marker (set-marker (make-marker) (point)))
-      (set-marker-insertion-type tracking-marker t)
-      (plist-put info :tracking-marker tracking-marker))))
+          ;; Perform replacement(s)
+          (if replace-all
+              ;; Replace all occurrences (work backwards to preserve positions)
+              (let ((result content))
+                (dolist (pos (sort match-positions '>))
+                  (setq result
+                        (concat
+                         (substring result 0 pos)
+                         new-string
+                         (substring result (+ pos (length old-string))))))
+                result)
+            ;; Replace single occurrence
+            (let ((match-pos (car (reverse match-positions))))
+              (concat
+               (substring content 0 match-pos)
+               new-string
+               (substring content (+ match-pos (length old-string))))))))))))
 
 (defun macher--generate-patch-diff (context)
   "Generate a raw diff to populate the patch buffer.
@@ -1567,9 +2765,13 @@ CONTEXT is the 'macher-context' object. Returns the generated diff text."
 
 (defun macher-context--set-new-content-for-file (path content context)
   "Set the new content for PATH to CONTENT in the given CONTEXT.
-PATH should be an absolute file path within the project.
+
+PATH is any absolute file path. By default, macher will only call this
+for paths within the CONTEXT's workspace..
+
 CONTENT is the string content to use for the file, or nil if the file
 is being deleted.
+
 CONTEXT must be a `macher-context' struct.
 
 Updates the CONTEXT's :contents alist with the new content mapping."
@@ -2210,7 +3412,7 @@ which might also be included."
            transforms
            (when prompt-transform
              (list prompt-transform)))))
-    (plist-put keys :transforms updated-transforms)
+    (setq keys (plist-put (copy-sequence keys) :transforms updated-transforms))
 
     (when-let* (
                 ;; Send the request and get the state machine.
