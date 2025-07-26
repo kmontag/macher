@@ -873,6 +873,24 @@
     (it "signals error when path is a file"
       (expect (macher--tool-list-directory context "file1.txt") :to-throw))
 
+    (it "includes real dotfiles but excludes . and .. meta-directories"
+      ;; Create test files including dotfiles
+      (write-region "gitignore content" nil (expand-file-name ".gitignore" temp-dir))
+      (write-region "prettierrc content" nil (expand-file-name ".prettierrc" temp-dir))
+      (make-directory (expand-file-name ".hidden" temp-dir) t)
+      (write-region "hidden dir file" nil (expand-file-name ".hidden/file.txt" temp-dir))
+
+      (let ((result (macher--tool-list-directory context ".")))
+        ;; Should include real dotfiles
+        (expect result :to-match "file: \\.gitignore")
+        (expect result :to-match "file: \\.prettierrc")
+        (expect result :to-match "dir: \\.hidden")
+        ;; Should NOT include . and .. meta-directories
+        (expect result :not :to-match "dir: \\.$")
+        (expect result :not :to-match "dir: \\.\\.$")
+        ;; Verify it doesn't cause infinite recursion by being able to complete
+        (expect (stringp result) :to-be-truthy)))
+
     (it "does not load files into context when listing directories"
       ;; Create additional subdirectories with files to test with.
       (let ((subdir2 (expand-file-name "subdir2" temp-dir))

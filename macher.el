@@ -1582,18 +1582,20 @@ Signals an error if the directory is not found in the workspace."
                       (let ((all-disk-files (directory-files current-path)))
                         (cl-remove-if-not
                          (lambda (entry)
-                           (let ((entry-full-path (expand-file-name entry current-path)))
-                             ;; Include if it's in the workspace files list OR it's a directory.
-                             (or (cl-some
-                                  (lambda (workspace-file)
-                                    ;; Handle both absolute and relative paths in workspace-files.
-                                    (let ((normalized-workspace-file
-                                           (if (file-name-absolute-p workspace-file)
-                                               workspace-file
-                                             (expand-file-name workspace-file workspace-root))))
-                                      (string= entry-full-path normalized-workspace-file)))
-                                  workspace-files)
-                                 (file-directory-p entry-full-path))))
+                           ;; Exclude . and .. meta-directories to prevent infinite recursion.
+                           (unless (or (string= entry ".") (string= entry ".."))
+                             (let ((entry-full-path (expand-file-name entry current-path)))
+                               ;; Include if it's in the workspace files list OR it's a directory.
+                               (or (cl-some
+                                    (lambda (workspace-file)
+                                      ;; Handle both absolute and relative paths in workspace-files.
+                                      (let ((normalized-workspace-file
+                                             (if (file-name-absolute-p workspace-file)
+                                                 workspace-file
+                                               (expand-file-name workspace-file workspace-root))))
+                                        (string= entry-full-path normalized-workspace-file)))
+                                    workspace-files)
+                                   (file-directory-p entry-full-path)))))
                          all-disk-files))
                     '()))
                  ;; Add any newly created files from the context.
