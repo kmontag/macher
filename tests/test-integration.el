@@ -206,9 +206,12 @@ Each element is a plist containing :model, :messages, :tools."
 
    (messages-of-type
     (lambda (requests type)
-      "Get a list of the actual content of messages filtered by type.
-Accepts a list of message plists, as returned by 'received-requests'.
-Returns a list of content strings."
+      "Get a list of the actual content of messages filtered by TYPE.
+
+Accepts a list of request plists, as returned by 'received-requests'.
+
+Returns a list of lists of content strings - that is, for each request,
+a list of the contents of messages whose role is TYPE."
       (seq-map
        (lambda (ms)
          (seq-map
@@ -680,7 +683,825 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
              (macher-context-contents macher-context)
              :to-equal `((,context-file . ("context content" . "context content")))))))))
 
-  (describe "tool lifecycle tests"
+  (describe "read_file_in_workspace"
+    (before-each
+      (funcall setup-project "read-tool" '(("test-file.txt" . "line1\nline2\nline3\nline4"))))
+
+    (it "returns full file content when called with no arguments"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function (:name "read_file_in_workspace" :arguments (:path "test-file.txt")))])
+                 "I read the file"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+
+          ;; Check that received-requests contains a tool response with the file contents.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            (expect (cadr tool-messages) :to-equal '("line1\nline2\nline3\nline4"))))))
+
+    (it "supports the offset/limit parameters"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "read_file_in_workspace"
+                     :arguments (:path "test-file.txt" :offset 2 :limit 2)))])
+                 "I read specific lines from the file"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with the limited file contents.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain lines 2-3 (offset 2, limit 2).
+            (expect (cadr tool-messages) :to-equal '("line2\nline3"))))))
+
+    (it "supports the numbered parameter for cat -n style output"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "read_file_in_workspace"
+                     :arguments (:path "test-file.txt" :show_line_numbers t)))])
+                 "I read the file with line numbers"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with numbered file contents.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain numbered lines (cat -n style).
+            (expect (cadr tool-messages) :to-equal '("1\tline1\n2\tline2\n3\tline3\n4\tline4"))))))
+
+    (it "returns error when file content exceeds max read length"
+      ;; Create a file with content that exceeds macher--max-read-length
+      (let* ((large-content (make-string (1+ macher--max-read-length) ?x))
+             (large-file-path (expand-file-name "large-file.txt" project-dir)))
+        (unwind-protect
+            (progn
+              ;; Create the large file in the existing project directory
+              (with-temp-file large-file-path
+                (insert large-content))
+              (funcall setup-backend
+                       '((:tool-calls
+                          [(:function
+                            (:name "read_file_in_workspace" :arguments (:path "large-file.txt")))])
+                         "I tried to read a large file"))
+              (let ((callback-called nil)
+                    (exit-code nil))
+                (with-temp-buffer
+                  (set-visited-file-name project-file)
+                  (macher-test--send
+                   'macher-ro "Test prompt"
+                   (lambda (cb-exit-code cb-fsm)
+                     (setq callback-called t)
+                     (setq exit-code cb-exit-code)))
+
+                  (let ((timeout 0))
+                    (while (and (not callback-called) (< timeout 100))
+                      (sleep-for 0.1)
+                      (setq timeout (1+ timeout))))
+
+                  (expect callback-called :to-be-truthy)
+
+                  ;; Check that received-requests contains a tool response with error message.
+                  (let* ((requests (funcall received-requests))
+                         (tool-messages (funcall messages-of-type requests "tool")))
+                    ;; We expect one element per received request.
+                    (expect (length tool-messages) :to-be 2)
+                    ;; No tool response included in the first request.
+                    (expect (car tool-messages) :to-be nil)
+                    ;; Second request should contain error message about file being too large.
+                    (let ((error-message (cadr tool-messages)))
+                      (expect (length error-message) :to-be 1)
+                      (expect "File content too large" :to-appear-once-in (car error-message))
+                      (expect
+                       "exceeds maximum read length"
+                       :to-appear-once-in (car error-message)))))))
+          ;; Clean up the large file
+          (when (file-exists-p large-file-path)
+            (delete-file large-file-path)))))
+
+    (it "handles float values for offset and limit parameters"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "read_file_in_workspace"
+                     :arguments (:path "test-file.txt" :offset 2.7 :limit 1.4)))])
+                 "I read specific lines with float parameters"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with the correctly rounded parameters.
+          ;; offset 2.7 should round to 3, limit 1.4 should round to 1
+          ;; So we should get line3 (1 line starting from offset 3)
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain line3 (offset 2.7 -> 3, limit 1.4 -> 1).
+            (expect (cadr tool-messages) :to-equal '("line3")))))))
+
+  (describe "edit_file_in_workspace"
+    (before-each
+      (funcall setup-project
+               "edit-tool"
+               '(("test-file.txt" . "hello world\nhello universe\nhello again"))))
+
+    (it "performs single edit without replace_all"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "edit_file_in_workspace"
+                     :arguments
+                     (:path "test-file.txt" :old_text "hello universe" :new_text "hi universe")))])
+                 "I edited the file"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with null (success).
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain null (success).
+            (expect (cadr tool-messages) :to-equal '("nil"))))))
+
+    (it "performs replace_all edit"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "edit_file_in_workspace"
+                     :arguments
+                     (:path "test-file.txt" :old_text "hello" :new_text "hi" :replace_all t)))])
+                 "I edited all occurrences in the file"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with null (success).
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain null (success).
+            (expect (cadr tool-messages) :to-equal '("nil")))))))
+
+  (describe "multi_edit_file_in_workspace"
+    (before-each
+      (funcall setup-project
+               "multi-edit-tool"
+               '(("test-file.txt" . "hello world\nhello universe\ngoodbye world"))))
+
+    (it "performs multiple edits without replace_all"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "multi_edit_file_in_workspace"
+                     :arguments
+                     (:path
+                      "test-file.txt"
+                      :edits
+                      [(:old_text "hello world" :new_text "hi world")
+                       (:old_text "goodbye world" :new_text "farewell world")])))])
+                 "I made multiple edits to the file"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with null (success).
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain null (success).
+            (expect (cadr tool-messages) :to-equal '("nil"))))))
+
+    (it "performs multiple edits with replace_all"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "multi_edit_file_in_workspace"
+                     :arguments
+                     (:path
+                      "test-file.txt"
+                      :edits
+                      [(:old_text "hello" :new_text "hi" :replace_all t)
+                       (:old_text "goodbye world" :new_text "farewell planet")])))])
+                 "I made multiple edits with replace_all"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with null (success).
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain null (success).
+            (expect (cadr tool-messages) :to-equal '("nil")))))))
+
+  (describe "delete_file_in_workspace"
+    (before-each
+      (funcall setup-project
+               "delete-tool"
+               '(("test-file.txt" . "This file will be deleted")
+                 ("keep-file.txt" . "This file should remain"))))
+
+    (it "deletes an existing file successfully"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name "delete_file_in_workspace" :arguments (:path "test-file.txt")))])
+                 "I deleted the file"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with null (success).
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain null (success).
+            (expect (cadr tool-messages) :to-equal '("nil"))))))
+
+    (it "returns error when trying to delete non-existent file"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name "delete_file_in_workspace" :arguments (:path "non-existent-file.txt")))])
+                 "I tried to delete a file that doesn't exist"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with error message.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain error message.
+            (let ((error-message (cadr tool-messages)))
+              (expect (length error-message) :to-be 1)
+              (expect
+               ;; When a tool raises an error, the quotes in the formatted string that gets returned
+               ;; apper to get changed, e.g. ' -> `.
+               "File .non-existent-file\.txt. not found in workspace"
+               :to-appear-once-in (car error-message)))))))
+
+    (it "generates proper diff when file is deleted"
+      (funcall setup-backend
+               `((:tool-calls
+                  [(:function
+                    (:name "delete_file_in_workspace" :arguments (:path "test-file.txt")))])
+                 "Finished deleting file"))
+      (let* ((callback-called nil)
+             (exit-code nil)
+             (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt to delete a file."
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          (with-current-buffer (macher-patch-buffer)
+            (let ((patch (buffer-string)))
+              ;; Should contain diff header for file deletion
+              (expect
+               (regexp-quote
+                (concat
+                 "diff --git a/test-file.txt b/test-file.txt\n"
+                 "--- a/test-file.txt\n"
+                 "+++ /dev/null\n"
+                 "@@ -1 +0,0 @@\n"
+                 "-This file will be deleted"))
+               :to-appear-once-in patch)
+
+              ;; Should contain the prompt for reference
+              (expect "Test prompt to delete a file" :to-appear-once-in patch)))))))
+
+  (describe "write_file_in_workspace"
+    (before-each
+      (funcall setup-project "write-tool" '(("existing-file.txt" . "existing content"))))
+
+    (it "creates a new file successfully"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "new-file.txt" :content "new file content")))])
+                 "I created a new file"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with null (success).
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain null (success).
+            (expect (cadr tool-messages) :to-equal '("nil"))))))
+
+    (it "overwrites existing file successfully"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "existing-file.txt" :content "overwritten content")))])
+                 "I overwrote the existing file"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with null (success).
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain null (success).
+            (expect (cadr tool-messages) :to-equal '("nil"))))))
+
+    (it "generates proper diff when file is created"
+      (funcall setup-backend
+               `((:tool-calls
+                  [(:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "created-file.txt" :content "created content")))])
+                 "Finished creating file"))
+      (let* ((callback-called nil)
+             (exit-code nil)
+             (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt to create a file."
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          (with-current-buffer (macher-patch-buffer)
+            (let ((patch (buffer-string)))
+              ;; Should contain diff header for file creation
+              (expect
+               (regexp-quote
+                (concat
+                 "diff --git a/created-file.txt b/created-file.txt\n"
+                 "--- /dev/null\n"
+                 "+++ b/created-file.txt\n"
+                 "@@ -0,0 +1 @@\n"
+                 "+created content"))
+               :to-appear-once-in patch)
+
+              ;; Should contain the prompt for reference
+              (expect "Test prompt to create a file" :to-appear-once-in patch)))))))
+
+  (describe "move_file_in_workspace"
+    (before-each
+      (funcall setup-project
+               "move-tool"
+               '(("source-file.txt" . "content to move") ("other-file.txt" . "other content"))))
+
+    (it "moves a file successfully"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "move_file_in_workspace"
+                     :arguments
+                     (:source_path "source-file.txt" :destination_path "destination-file.txt")))])
+                 "I moved the file"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with null (success).
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain null (success).
+            (expect (cadr tool-messages) :to-equal '("nil"))))))
+
+    (it "renames a file in the same directory successfully"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "move_file_in_workspace"
+                     :arguments
+                     (:source_path "source-file.txt" :destination_path "renamed-file.txt")))])
+                 "I renamed the file"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with null (success).
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain null (success).
+            (expect (cadr tool-messages) :to-equal '("nil"))))))
+
+    (it "returns error when source file doesn't exist"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "move_file_in_workspace"
+                     :arguments
+                     (:source_path "non-existent.txt" :destination_path "destination.txt")))])
+                 "I tried to move a non-existent file"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with error message.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain error message.
+            (let ((error-message (cadr tool-messages)))
+              (expect (length error-message) :to-be 1)
+              (expect
+               "File .non-existent\.txt. not found in workspace"
+               :to-appear-once-in (car error-message)))))))
+
+    (it "returns error when destination already exists"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "move_file_in_workspace"
+                     :arguments
+                     (:source_path "source-file.txt" :destination_path "other-file.txt")))])
+                 "I tried to move to an existing file"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with error message.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; We expect one element per received request.
+            (expect (length tool-messages) :to-be 2)
+            ;; No tool response included in the first request.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request should contain error message.
+            (let ((error-message (cadr tool-messages)))
+              (expect (length error-message) :to-be 1)
+              (expect
+               "Destination .other-file\.txt. already exists"
+               :to-appear-once-in (car error-message)))))))
+
+    (it "generates proper diff when file is moved"
+      (funcall setup-backend
+               `((:tool-calls
+                  [(:function
+                    (:name
+                     "move_file_in_workspace"
+                     :arguments
+                     (:source_path "source-file.txt" :destination_path "moved-file.txt")))])
+                 "Finished moving file"))
+      (let* ((callback-called nil)
+             (exit-code nil)
+             (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt to move a file."
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          (with-current-buffer (macher-patch-buffer)
+            (let ((patch (buffer-string)))
+              ;; Should contain diff header for file creation (destination)
+              (expect
+               (regexp-quote
+                (concat
+                 "diff --git a/moved-file.txt b/moved-file.txt\n"
+                 "--- /dev/null\n"
+                 "+++ b/moved-file.txt\n"
+                 "@@ -0,0 +1 @@\n"
+                 "+content to move"))
+               :to-appear-once-in patch)
+
+              ;; Should contain diff header for file deletion (source)
+              (expect
+               (regexp-quote
+                (concat
+                 "diff --git a/source-file.txt b/source-file.txt\n"
+                 "--- a/source-file.txt\n"
+                 "+++ /dev/null\n"
+                 "@@ -1 +0,0 @@\n"
+                 "-content to move"))
+               :to-appear-once-in patch)
+
+              ;; Should contain the prompt for reference
+              (expect "Test prompt to move a file" :to-appear-once-in patch)))))))
+
+  (describe "tool specs"
     (it "includes tools in request for macher presets"
       (funcall setup-backend '("Test response"))
       (funcall setup-project "tools")
@@ -726,7 +1547,79 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                    :to-be-truthy))))
           ;; Clean up.
           (when (file-exists-p temp-file)
-            (delete-file temp-file))))))
+            (delete-file temp-file)))))
+
+    ;; Anthropic expects an input_schema parameter, which contains a valid JSON schema describing
+    ;; the tool arguments. This parameter gets added in the custom `gptel--parse-tools'
+    ;; implementation for Anthropic backends.
+    ;;
+    ;; Other backends are a bit more flexible with non-conforming tool schemas, so there are some
+    ;; potential schema errors that wouldn't be picked up by other tests - for example, a
+    ;; ':required' array being present somewhere that it shouldn't be, maybe one level too deep.
+    ;; This test checks that we're able to generate a strictly correct JSON schema from our tool
+    ;; definitions, in particular for the Anthropic API, though this also validates that we aren't
+    ;; sending any unintentionally weird schemas to other backends.
+    (it "generates a valid input schema for anthropic backends"
+      (require 'gptel-anthropic)
+      (let* ( ;; Avoid modifications to the global registry.
+             (gptel--known-backends nil)
+             (anthropic (gptel-make-anthropic "Test Anthropic")))
+        (macher--with-preset
+         'macher
+         (lambda ()
+           (let ((parsed-tools (gptel--parse-tools anthropic gptel-tools)))
+             (expect (vectorp parsed-tools) :to-be-truthy)
+             (let ((tools-list (append parsed-tools nil)))
+               ;; The exact number of tools might change; just sanity check that there are at least
+               ;; several of them.
+               (expect (> (length tools-list) 4) :to-be-truthy)
+               (dolist (tool tools-list)
+                 (let ((input-schema (plist-get tool :input_schema)))
+                   (expect input-schema :to-be-truthy)
+                   (let*
+                       (
+                        ;; A schema that just inherits from the JSON schema "meta-schema" (i.e. the
+                        ;; schema for JSON schemas) expected by Anthropic.
+                        (meta-schema
+                         (concat
+                          "{\"$schema\": \"https://json-schema.org/draft/2020-12/schema\","
+                          "\"$ref\": \"https://json-schema.org/draft/2020-12/schema\"}"))
+                        (input-schema-json (gptel--json-encode input-schema))
+                        (meta-schema-file (make-temp-file "meta-schema" nil ".json"))
+                        (input-schema-file (make-temp-file "input-schema" nil ".json")))
+                     (unwind-protect
+                         (progn
+                           ;; Write the meta-schema to a temporary file.
+                           (with-temp-file meta-schema-file
+                             (insert meta-schema))
+                           ;; Write the input schema to a temporary file.
+                           (with-temp-file input-schema-file
+                             (insert input-schema-json))
+                           (with-temp-buffer
+                             ;; Validate using https://github.com/sourcemeta/jsonschema.
+                             (let ((exit-code
+                                    (call-process "npx"
+                                                  nil
+                                                  (current-buffer)
+                                                  nil
+                                                  "jsonschema"
+                                                  "validate"
+                                                  meta-schema-file
+                                                  input-schema-file)))
+
+                               ;; Add some additional context as warning output.
+                               (unless (eq exit-code 0)
+                                 (display-warning
+                                  'buttercup
+                                  (format "Error in schema for tool %s:\n\n%s"
+                                          (plist-get tool :name)
+                                          (buffer-string))))
+                               (expect exit-code :to-be 0))))
+                       ;; Clean up temporary files
+                       (when (file-exists-p meta-schema-file)
+                         (delete-file meta-schema-file))
+                       (when (file-exists-p input-schema-file)
+                         (delete-file input-schema-file)))))))))))))
 
   (describe "context string generation"
 
@@ -780,18 +1673,27 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (let ((system-content
                      (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
                 ;; Check for workspace description.
-                (expect "WORKSPACE CONTEXT" :to-appear-once-in system-content)
-                ;; Check that all files are present but not marked with [*] since nothing is in context.
-                (expect "    README.md" :to-appear-once-in system-content)
-                (expect "    src/main.el" :to-appear-once-in system-content)
-                (expect "    src/util.el" :to-appear-once-in system-content)
-                (expect "    test/test-main.el" :to-appear-once-in system-content)
-                ;; Check that no files are marked with [*] since nothing is in context.
-                (expect system-content :not :to-match "\\[\\*\\]")
+                (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
+                ;; Check that all files are listed as available for editing since nothing is in context.
+                (expect "Files available for editing:" :to-appear-once-in system-content)
+                ;; Check that files appear in the correct structural relationship to the header.
+                (expect
+                 system-content
+                 :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    README\\.md")
+                (expect
+                 system-content
+                 :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/main\\.el")
+                (expect
+                 system-content
+                 :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/util\\.el")
+                (expect
+                 system-content
+                 :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    test/test-main\\.el")
+                ;; Should not have an "already provided" section since nothing is in context.
+                (expect system-content :not :to-match "Files already provided above")
                 ;; Check that it mentions the project name in the description.
                 (expect
-                 (format "In-memory editing environment for '%s'"
-                         (file-name-nondirectory project-dir))
+                 (format "which is named `%s`" (file-name-nondirectory project-dir))
                  :to-appear-once-in system-content)))))))
 
     (it "includes workspace info when both files and buffers are in context"
@@ -855,19 +1757,30 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                     (let ((system-content
                            (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
                       ;; Check for workspace description.
-                      (expect "WORKSPACE CONTEXT" :to-appear-once-in system-content)
-                      ;; Check that the context file is marked with [*].
-                      (expect "\\[\\*\\] src/context.el" :to-appear-once-in system-content)
-                      ;; Check that other files are not marked, including the one that was loaded as a buffer.
-                      (expect "    src/buffer.el" :to-appear-once-in system-content)
-                      (expect "    docs/README.md" :to-appear-once-in system-content)
-                      (expect "    src/main.el" :to-appear-once-in system-content)
+                      (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
+                      ;; Check that files in context are in the "already provided" section.
+                      (expect "Files already provided above" :to-appear-once-in system-content)
+                      (expect
+                       system-content
+                       :to-match "Files already provided above.*\n    src/context\\.el")
+                      ;; Check that other files are in the "available for editing" section with proper structure.
+                      (expect
+                       "Other files available for editing:"
+                       :to-appear-once-in system-content)
+                      (expect
+                       system-content
+                       :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    src/buffer\\.el")
+                      (expect
+                       system-content
+                       :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    docs/README\\.md")
+                      (expect
+                       system-content
+                       :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    src/main\\.el")
                       ;; Check that buffer content appears in context (since buffer was added).
                       (expect "Buffer file content" :to-appear-once-in system-content)
                       ;; Check that it mentions the project name in the description.
                       (expect
-                       (format "In-memory editing environment for '%s'"
-                               (file-name-nondirectory project-dir))
+                       (format "which is named `%s`" (file-name-nondirectory project-dir))
                        :to-appear-once-in system-content))))))
           ;; Clean up the buffer.
           (when (buffer-live-p buffer-buffer)
@@ -927,17 +1840,24 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                 (let ((system-content
                        (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
                   ;; Check for workspace description.
-                  (expect "WORKSPACE CONTEXT" :to-appear-once-in system-content)
-                  ;; Check that all files are present with proper context markers.
-                  (expect "    README.md" :to-appear-once-in system-content)
-                  (expect "\\[\\*\\] src/main.el" :to-appear-once-in system-content)
-                  (expect "    test/test-file.el" :to-appear-once-in system-content)
+                  (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
+                  ;; Check that files are properly separated between context and available.
+                  (expect "Files already provided above" :to-appear-once-in system-content)
+                  (expect
+                   system-content
+                   :to-match "Files already provided above.*\n    src/main\\.el")
+                  (expect "Other files available for editing:" :to-appear-once-in system-content)
+                  (expect
+                   system-content
+                   :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    README\\.md")
+                  (expect
+                   system-content
+                   :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    test/test-file\\.el")
                   ;; Check that file content appears in context.
                   (expect "Main file content" :to-appear-once-in system-content)
                   ;; Check that it mentions the project name in the description.
                   (expect
-                   (format "In-memory editing environment for '%s'"
-                           (file-name-nondirectory project-dir))
+                   (format "which is named `%s`" (file-name-nondirectory project-dir))
                    :to-appear-once-in system-content))))))))
 
     (it "includes workspace info when only buffers are in context"
@@ -997,17 +1917,22 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                     (let ((system-content
                            (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
                       ;; Check for workspace description.
-                      (expect "WORKSPACE CONTEXT" :to-appear-once-in system-content)
-                      ;; Check that all files are present but not marked as context (including other.el, which
-                      ;; is present in context but only as a buffer).
-                      (expect "    first.el" :to-appear-once-in system-content)
-                      (expect "    src/second.el" :to-appear-once-in system-content)
-                      (expect "    src/third.el" :to-appear-once-in system-content)
+                      (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
+                      ;; Check that all files are listed (buffer context doesn't affect file listing).
+                      (expect "Files available for editing:" :to-appear-once-in system-content)
+                      (expect
+                       system-content
+                       :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    first\\.el")
+                      (expect
+                       system-content
+                       :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/second\\.el")
+                      (expect
+                       system-content
+                       :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/third\\.el")
                       (expect "second content" :to-appear-once-in system-content)
                       ;; Check that it mentions the project name in the description.
                       (expect
-                       (format "In-memory editing environment for '%s'"
-                               (file-name-nondirectory project-dir))
+                       (format "which is named `%s`" (file-name-nondirectory project-dir))
                        :to-appear-once-in system-content))))))
           (when context-buffer
             (kill-buffer context-buffer))))))
@@ -1175,8 +2100,506 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                ;; the prompt and the trailing prompt prefix.
                :to-equal (funcall action-buffer-content "Test abort request" "" 'discuss))))))))
 
-  (describe "patch generation tests"
+  (describe "search_in_workspace"
+    (before-each
+      (funcall setup-project
+               "search-tool"
+               '(("src/main.js"
+                  .
+                  "console.log('hello world');\nfunction test() {\n  return 'hello universe';\n}")
+                 ("src/utils.js" . "export function hello() {\n  return 'hello javascript';\n}")
+                 ("README.md" . "# Hello Project\n\nThis is a test project with hello examples.")
+                 ("tests/test.js" . "test('hello test', () => {\n  expect(true).toBe(true);\n});")
+                 ("config.yaml" . "name: hello-app\nversion: 1.0.0"))))
 
+    (after-each
+      ;; Clean up any file buffers that might have been created during search operations. The search
+      ;; tool may open files to search through them, and we need to clean those up.
+      (dolist (buffer (buffer-list))
+        (when (buffer-file-name buffer)
+          (let ((file-path (buffer-file-name buffer)))
+            ;; Only kill buffers for files within our test project directory.
+            (when (and project-dir (string-prefix-p project-dir file-path))
+              (kill-buffer buffer))))))
+
+    (it "searches with files mode (default)"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function (:name "search_in_workspace" :arguments (:pattern "hello")))])
+                 "I found hello in multiple files"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with search results.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            (expect (length tool-messages) :to-be 2)
+            (expect (car tool-messages) :to-be nil)
+            (let ((search-result (cadr tool-messages)))
+              (expect (length search-result) :to-be 1)
+              (expect (car search-result) :to-match "README.md (1 match)")
+              (expect (car search-result) :to-match "config.yaml (1 match)")
+              (expect (car search-result) :to-match "src/main.js (2 matches)")
+              (expect (car search-result) :to-match "src/utils.js (2 matches)")
+              (expect (car search-result) :to-match "tests/test.js (1 match)")
+              (expect (car search-result) :to-match "Total: 7 matches in 5 files"))))))
+
+    (it "searches with content mode and context lines"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "search_in_workspace"
+                     :arguments
+                     (:pattern
+                      "hello"
+                      :mode "content"
+                      :lines_before 1
+                      :lines_after 1
+                      :show_line_numbers t)))])
+                 "I found hello with context"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with content results.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            (expect (length tool-messages) :to-be 2)
+            (expect (car tool-messages) :to-be nil)
+            (let ((search-result (cadr tool-messages)))
+              (expect (length search-result) :to-be 1)
+              (expect
+               (car search-result)
+               :to-match "README.md:3:This is a test project with hello examples.")
+              (expect (car search-result) :to-match "config.yaml:1:name: hello-app")
+              (expect (car search-result) :to-match "src/main.js:1:console.log('hello world');")
+              (expect (car search-result) :to-match "src/main.js:3:  return 'hello universe';")
+              (expect (car search-result) :to-match "src/utils.js:1:export function hello() {")
+              (expect (car search-result) :to-match "src/utils.js:2:  return 'hello javascript';")
+              (expect
+               (car search-result)
+               :to-match "tests/test.js:1:test('hello test', () => {"))))))
+
+    (it "searches with regexp file filtering"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "search_in_workspace"
+                     :arguments (:pattern "hello" :file_regexp "\\.js$")))])
+                 "I found hello in JavaScript files"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that only JS files are included in results.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            (expect (length tool-messages) :to-be 2)
+            (expect (car tool-messages) :to-be nil)
+            (let ((search-result (cadr tool-messages)))
+              (expect (length search-result) :to-be 1)
+              ;; Should only match .js files with file_regexp "\\.js$".
+              (expect (car search-result) :to-match "src/main.js (2 matches)")
+              (expect (car search-result) :to-match "src/utils.js (2 matches)")
+              (expect (car search-result) :to-match "tests/test.js (1 match)")
+              ;; These should NOT match with .js file_regexp.
+              (expect (car search-result) :not :to-match "README.md")
+              (expect (car search-result) :not :to-match "config.yaml")
+              (expect (car search-result) :to-match "Total: 5 matches in 3 files"))))))
+
+    (it "searches case-insensitively"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "search_in_workspace"
+                     :arguments (:pattern "HElLO" :case_insensitive t)))])
+                 "I found HELLO case-insensitively"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that case-insensitive search found matches.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            (expect (length tool-messages) :to-be 2)
+            (expect (car tool-messages) :to-be nil)
+            (let ((search-result (cadr tool-messages)))
+              (expect (length search-result) :to-be 1)
+              ;; Should find matches despite case difference.
+              (expect (car search-result) :to-match "README.md (2 matches)")
+              (expect (car search-result) :to-match "config.yaml (1 match)")
+              (expect (car search-result) :to-match "src/main.js (2 matches)")
+              (expect (car search-result) :to-match "src/utils.js (2 matches)")
+              (expect (car search-result) :to-match "tests/test.js (1 match)")
+              (expect (car search-result) :to-match "Total: 8 matches in 5 files"))))))
+
+    (it "limits results with head_limit parameter"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name "search_in_workspace" :arguments (:pattern "hello" :head_limit 2)))])
+                 "I found hello with limited results"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that results are limited to 2 files.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            (expect (length tool-messages) :to-be 2)
+            (expect (car tool-messages) :to-be nil)
+            (let ((search-result (cadr tool-messages)))
+              (expect (length search-result) :to-be 1)
+              ;; Should have results limited to 2 lines (head_limit=2), just like `head -2`.
+              (let ((lines (split-string (car search-result) "\n")))
+                (expect (length lines) :to-be 2)))))))
+
+    (it "searches in specific directory path"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name "search_in_workspace" :arguments (:pattern "hello" :path "src")))])
+                 "I found hello in src directory"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that only src directory files are included
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            (expect (length tool-messages) :to-be 2)
+            (expect (car tool-messages) :to-be nil)
+            (let ((search-result (cadr tool-messages)))
+              (expect (length search-result) :to-be 1)
+              (expect (car search-result) :to-match "src/main.js (2 matches)")
+              (expect (car search-result) :to-match "src/utils.js (2 matches)")
+              (expect (car search-result) :not :to-match "README.md")
+              (expect (car search-result) :not :to-match "config.yaml")
+              (expect (car search-result) :not :to-match "tests/test.js")
+              (expect (car search-result) :to-match "Total: 4 matches in 2 files"))))))
+
+    (it "handles workspace context with modified files"
+      ;; Edit a file and then search to verify the changes show up.
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "edit_file_in_workspace"
+                     :arguments
+                     (:path
+                      "src/main.js"
+                      :old_text "'hello universe'"
+                      :new_text "'hello UNIQUEWORD'")))
+                   (:function
+                    (:name "search_in_workspace" :arguments (:pattern "hello" :mode "content")))])
+                 "I modified a file and searched for hello"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that search reflects the modified workspace context.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            (expect (length tool-messages) :to-be 2)
+            ;; First request is the prompt, and has no tool result content.
+            (expect (car tool-messages) :to-be nil)
+            ;; Second request is the response to the tool calls.
+            (let ((search-result (cadr tool-messages)))
+              ;; Both the edit call and the search call were included in a single response.
+              (expect (length search-result) :to-be 2)
+              (expect (car search-result) :to-equal "nil")
+              (let ((search-content (cadr search-result))
+                    (expected-content
+                     (concat
+                      "src/main.js:console.log('hello world');\n"
+                      "src/main.js:  return 'hello UNIQUEWORD';\n"
+                      "README.md:This is a test project with hello examples.\n"
+                      "config.yaml:name: hello-app\n"
+                      "src/utils.js:export function hello() {\n"
+                      "src/utils.js:  return 'hello javascript';\n"
+                      "tests/test.js:test('hello test', () => {\n")))
+                ;; This proves the edit worked: UNIQUEWORD present, universe absent
+                (expect search-content :to-equal expected-content))))))))
+
+  (describe "list_directory_in_workspace"
+    (before-each
+      (funcall setup-project
+               "list-dir-tool"
+               '(("file1.txt" . "content1")
+                 ("file2.el" . "content2")
+                 ("subdir/file3.md" . "content3")
+                 ("subdir/nested/file4.txt" . "content4"))))
+
+    (it "lists directory contents without recursion or sizes"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function (:name "list_directory_in_workspace" :arguments (:path ".")))])
+                 "I listed the directory"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with directory listing
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            (expect (length tool-messages) :to-be 2)
+            (expect (car tool-messages) :to-be nil)
+            (let ((listing (cadr tool-messages)))
+              (expect (length listing) :to-be 1)
+              (expect (car listing) :to-match "file: file1.txt")
+              (expect (car listing) :to-match "file: file2.el")
+              (expect (car listing) :to-match "dir: subdir")
+              (expect (car listing) :not :to-match "file3.md") ; Not recursive
+              (expect (car listing) :not :to-match "B)")))))) ; No sizes
+
+    (it "lists directory contents with sizes"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name "list_directory_in_workspace" :arguments (:path "." :sizes t)))])
+                 "I listed the directory with sizes"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with sizes
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            (expect (length tool-messages) :to-be 2)
+            (expect (car tool-messages) :to-be nil)
+            (let ((listing (cadr tool-messages)))
+              (expect (length listing) :to-be 1)
+              (expect (car listing) :to-match "file: file1.txt (8 B)")
+              (expect (car listing) :to-match "file: file2.el (8 B)")
+              (expect (car listing) :to-match "dir: subdir$")) ; No size for directory
+            ))))
+
+    (it "lists directory contents recursively"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name "list_directory_in_workspace" :arguments (:path "." :recursive t)))])
+                 "I listed the directory recursively"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with recursive listing
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            (expect (length tool-messages) :to-be 2)
+            (expect (car tool-messages) :to-be nil)
+            (let ((listing (cadr tool-messages)))
+              (expect (length listing) :to-be 1)
+              (expect (car listing) :to-match "file: file1.txt")
+              (expect (car listing) :to-match "dir: subdir")
+              (expect (car listing) :to-match "  file: subdir/file3.md")
+              (expect (car listing) :to-match "  dir: subdir/nested")
+              (expect (car listing) :to-match "    file: subdir/nested/file4.txt"))))))
+
+    (it "lists subdirectory contents"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function (:name "list_directory_in_workspace" :arguments (:path "subdir")))])
+                 "I listed the subdirectory"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with subdirectory listing
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            (expect (length tool-messages) :to-be 2)
+            (expect (car tool-messages) :to-be nil)
+            (let ((listing (cadr tool-messages)))
+              (expect (length listing) :to-be 1)
+              (expect (car listing) :to-match "file: file3.md")
+              (expect (car listing) :to-match "dir: nested")
+              (expect (car listing) :not :to-match "file1.txt")
+              (expect (car listing) :not :to-match "file2.el"))))))
+
+    (it "returns error when directory doesn't exist"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name "list_directory_in_workspace" :arguments (:path "nonexistent")))])
+                 "I tried to list a nonexistent directory"))
+      (let ((callback-called nil)
+            (exit-code nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-ro "Test prompt"
+           (lambda (cb-exit-code cb-fsm)
+             (setq callback-called t)
+             (setq exit-code cb-exit-code)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check that received-requests contains a tool response with error message
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            (expect (length tool-messages) :to-be 2)
+            (expect (car tool-messages) :to-be nil)
+            (let ((error-message (cadr tool-messages)))
+              (expect (length error-message) :to-be 1)
+              (expect
+               "Directory .nonexistent. not found"
+               :to-appear-once-in (car error-message))))))))
+
+  (describe "patch generation"
     (it "does not generate a patch when no changes are made"
       (funcall setup-backend '("No changes needed."))
       (funcall setup-project "empty-patch")
