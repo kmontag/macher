@@ -1,7 +1,7 @@
 ;;; macher.el --- LLM implementation toolset -*- lexical-binding: t -*-
 
 ;; Author: Kevin Montag
-;; Version: 0.2.1
+;; Version: 0.3.0
 ;; Package-Requires: ((emacs "30.1") (gptel "0.9.8.5"))
 ;; Keywords: convenience, gptel, llm
 ;; URL: https://github.com/kmontag/macher

@@ -1,5 +1,5 @@
 ;; -*- mode: lisp -*-
-(package "macher" "0.2.1" "LLM implementation toolset")
+(package "macher" "0.3.0" "LLM implementation toolset")
 
 (website-url "https://github.com/kmontag/macher")
 (keywords "convenience" "gptel" "llm")
