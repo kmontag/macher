@@ -1579,7 +1579,7 @@ Signals an error if the directory is not found in the workspace."
                  ;; Only include disk entries that are in the workspace files list.
                  (disk-entries
                   (if (file-directory-p current-path)
-                      (let ((all-disk-files (directory-files current-path nil "^[^.]")))
+                      (let ((all-disk-files (directory-files current-path)))
                         (cl-remove-if-not
                          (lambda (entry)
                            (let ((entry-full-path (expand-file-name entry current-path)))

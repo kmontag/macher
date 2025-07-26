@@ -1115,7 +1115,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect
                ;; When a tool raises an error, the quotes in the formatted string that gets returned
                ;; apper to get changed, e.g. ' -> `.
-               "File .non-existent-file\.txt. not found in workspace"
+               "File .non-existent-file.txt. not found in workspace"
                :to-appear-once-in (car error-message)))))))
 
     (it "generates proper diff when file is deleted"
@@ -1399,7 +1399,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (let ((error-message (cadr tool-messages)))
               (expect (length error-message) :to-be 1)
               (expect
-               "File .non-existent\.txt. not found in workspace"
+               "File .non-existent.txt. not found in workspace"
                :to-appear-once-in (car error-message)))))))
 
     (it "returns error when destination already exists"
@@ -1439,7 +1439,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (let ((error-message (cadr tool-messages)))
               (expect (length error-message) :to-be 1)
               (expect
-               "Destination .other-file\.txt. already exists"
+               "Destination .other-file.txt. already exists"
                :to-appear-once-in (car error-message)))))))
 
     (it "generates proper diff when file is moved"
