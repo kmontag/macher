@@ -213,6 +213,28 @@ indicators."
   :type '(function :tag "Workspace string function")
   :group 'macher)
 
+(defcustom macher-context-string-max-files 50
+  "Maximum number of files to include in the workspace context string.
+
+When generating the workspace context information, only up to this many
+files will be listed.
+
+Files from the gptel context are always included in the workspace
+context (even if their count exceeds this limit). Additional workspace
+files will be included up to the remaining limit.
+
+Files are listed in the same order as returned by the workspace's files
+function - for built-in workspace types, this means files are listed in
+alphabetical order.
+
+Set to nil to disable the limit entirely.
+
+Note: This value is used within the default `macher--context-string'
+function. If you customize 'macher-context-string-function' to use a
+different function, this value will have no effect."
+  :type '(choice (natnum :tag "Maximum number of files") (const :tag "No limit" nil))
+  :group 'macher)
+
 (defcustom macher-process-request-function #'macher--process-request
   "Function to handle changes during the macher request lifecycle.
 
@@ -665,9 +687,12 @@ Returns a workspace information string to be added to the request."
     ;; Generate workspace description with context indicators.
     (when workspace-files
       ;; Separate files into two categories based on whether they're in the context.
+      ;; Files from gptel context are always listed first and all included.
       (let ((files-in-context '())
             (files-available-for-editing '()))
-        (dolist (file-path (sort (copy-sequence workspace-files) #'string<))
+
+        ;; Single pass: collect files in original order, separating context vs non-context files.
+        (dolist (file-path workspace-files)
           (let* ((rel-path (file-relative-name file-path (macher--workspace-root workspace)))
                  (normalized-file-path
                   (condition-case nil
@@ -679,9 +704,17 @@ Returns a workspace information string to be added to the request."
                 (push rel-path files-in-context)
               (push rel-path files-available-for-editing))))
 
-        ;; Reverse to maintain original sort order.
+        ;; Reverse to maintain original order.
         (setq files-in-context (reverse files-in-context))
         (setq files-available-for-editing (reverse files-available-for-editing))
+
+        ;; Trim the available files list if there's a limit.
+        (when macher-context-string-max-files
+          (let ((remaining-limit
+                 (max 0 (- macher-context-string-max-files (length files-in-context)))))
+            (when (> (length files-available-for-editing) remaining-limit)
+              (setq files-available-for-editing
+                    (seq-take files-available-for-editing remaining-limit)))))
 
         (with-temp-buffer
           (insert "\n")
@@ -724,6 +757,17 @@ Returns a workspace information string to be added to the request."
                        "Files")))
             (dolist (rel-path files-available-for-editing)
               (insert (format "    %s\n" rel-path)))
+            ;; Add a note if files were truncated due to the limit.
+            (when macher-context-string-max-files
+              (let* ((total-files (length workspace-files))
+                     (listed-files
+                      (+ (length files-in-context) (length files-available-for-editing)))
+                     (truncated-files (- total-files listed-files)))
+                (when (> truncated-files 0)
+                  (insert
+                   (format "\n    ... and %d more files\n"
+                           truncated-files
+                           macher-context-string-max-files)))))
             (insert "\n"))
 
           (insert "\n")

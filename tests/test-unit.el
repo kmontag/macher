@@ -2484,96 +2484,240 @@
         (expect files :to-contain "subdir/file3.md"))))
 
   (describe "macher--context-string"
-    :var (temp-dir file1 file2 subdir file3 project-file)
+    (describe "main functionality"
+      :var (temp-dir file1 file2 subdir file3 project-file)
 
-    (before-each
-      (setq temp-dir (make-temp-file "macher-test-workspace" t))
-      (setq file1 (expand-file-name "file1.txt" temp-dir))
-      (setq file2 (expand-file-name "file2.el" temp-dir))
-      (setq subdir (expand-file-name "subdir" temp-dir))
-      (setq file3 (expand-file-name "file3.md" subdir))
-      (setq project-file (expand-file-name ".project" temp-dir))
-      ;; Create test files.
-      (make-directory subdir)
-      (write-region "test content" nil file1)
-      (write-region ";;; Elisp file content" nil file2)
-      (write-region "# Markdown content" nil file3)
-      ;; Write to the project file to make it a real project.
-      (write-region "" nil project-file))
+      (before-each
+        (setq temp-dir (make-temp-file "macher-test-workspace" t))
+        (setq file1 (expand-file-name "file1.txt" temp-dir))
+        (setq file2 (expand-file-name "file2.el" temp-dir))
+        (setq subdir (expand-file-name "subdir" temp-dir))
+        (setq file3 (expand-file-name "file3.md" subdir))
+        (setq project-file (expand-file-name ".project" temp-dir))
+        ;; Create test files.
+        (make-directory subdir)
+        (write-region "test content" nil file1)
+        (write-region ";;; Elisp file content" nil file2)
+        (write-region "# Markdown content" nil file3)
+        ;; Write to the project file to make it a real project.
+        (write-region "" nil project-file))
 
-    (after-each
-      (delete-directory temp-dir t))
+      (after-each
+        (delete-directory temp-dir t))
 
-    (it "generates context string for project workspace"
-      (let* ((macher--workspace (cons 'project temp-dir))
-             (contexts `((,file1) (,file2)))
-             (result (macher--context-string contexts)))
-        (expect (stringp result) :to-be-truthy)
-        ;; Should contain workspace information.
-        (expect result :to-match "WORKSPACE CONTEXT")
-        ;; Should contain our test files with full relative paths.
-        (expect result :to-match "file1.txt")
-        (expect result :to-match "file2.el")
-        (expect result :to-match "subdir/file3.md")
-        ;; Should distinguish between files in context and files available for editing.
-        ;; Files in context should be in "already provided" section with proper structure.
-        (expect
-         result
-         :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    file1\\.txt")
-        (expect
-         result
-         :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    file2\\.el")
-        ;; Files not in context should be in "available for editing" section.
-        (expect
-         result
-         :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    subdir/file3\\.md")
-        ;; Should contain workspace description.
-        (expect result :to-match "In-memory editing environment")))
+      (it "generates context string for project workspace"
+        (let* ((macher--workspace (cons 'project temp-dir))
+               (contexts `((,file1) (,file2)))
+               (result (macher--context-string contexts)))
+          (expect (stringp result) :to-be-truthy)
+          ;; Should contain workspace information.
+          (expect result :to-match "WORKSPACE CONTEXT")
+          ;; Should contain our test files with full relative paths.
+          (expect result :to-match "file1.txt")
+          (expect result :to-match "file2.el")
+          (expect result :to-match "subdir/file3.md")
+          ;; Should distinguish between files in context and files available for editing.
+          ;; Files in context should be in "already provided" section with proper structure.
+          (expect
+           result
+           :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    file1\\.txt")
+          (expect
+           result
+           :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    file2\\.el")
+          ;; Files not in context should be in "available for editing" section.
+          (expect
+           result
+           :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    subdir/file3\\.md")
+          ;; Should contain workspace description.
+          (expect result :to-match "In-memory editing environment")))
 
-    (it "generates context string for single-file workspace"
-      (let* ((macher--workspace (cons 'file file1))
-             (contexts `((,file1)))
-             (result (macher--context-string contexts)))
-        (expect (stringp result) :to-be-truthy)
-        ;; Should contain workspace information.
-        (expect result :to-match "WORKSPACE CONTEXT")
-        ;; Should contain only the single file.
-        (expect result :to-match "file1.txt")
-        ;; Should not contain other files.
-        (expect result :not :to-match "file2.el")
-        (expect result :not :to-match "file3.md")))
+      (it "generates context string for single-file workspace"
+        (let* ((macher--workspace (cons 'file file1))
+               (contexts `((,file1)))
+               (result (macher--context-string contexts)))
+          (expect (stringp result) :to-be-truthy)
+          ;; Should contain workspace information.
+          (expect result :to-match "WORKSPACE CONTEXT")
+          ;; Should contain only the single file.
+          (expect result :to-match "file1.txt")
+          ;; Should not contain other files.
+          (expect result :not :to-match "file2.el")
+          (expect result :not :to-match "file3.md")))
 
-    (it "properly categorizes files with same name in different directories"
-      (let* ((workspace '(project . "/test/project/"))
-             (workspace-files '("/test/project/test.txt" "/test/project/subdir/test.txt"))
-             (contexts '(("/test/project/test.txt")))
-             result)
-        ;; Mock workspace functions.
-        (spy-on 'macher--workspace-root :and-return-value "/test/project/")
+      (it "properly categorizes files with same name in different directories"
+        (let* ((workspace '(project . "/test/project/"))
+               (workspace-files '("/test/project/test.txt" "/test/project/subdir/test.txt"))
+               (contexts '(("/test/project/test.txt")))
+               result)
+          ;; Mock workspace functions.
+          (spy-on 'macher--workspace-root :and-return-value "/test/project/")
+          (spy-on 'macher--workspace-name :and-return-value "test-project")
+          (spy-on 'macher--workspace-files :and-return-value workspace-files)
+
+          ;; Set the test workspace.
+          (with-temp-buffer
+            (setq-local macher--workspace workspace)
+            (setq result (macher--context-string contexts)))
+
+          ;; Verify the result structure.
+          (expect (stringp result) :to-be-truthy)
+          (expect result :to-match "WORKSPACE CONTEXT")
+
+          ;; test.txt should be in the "already provided" section since it's in contexts
+          (expect
+           result
+           :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    test\\.txt")
+
+          ;; subdir/test.txt should be in "available for editing" since it's not in contexts
+          (expect
+           result
+           :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    subdir/test\\.txt")
+
+          ;; Should contain workspace description
+          (expect result :to-match "In-memory editing environment"))))
+
+    (describe "macher--context-string with max-files limit"
+      :var (temp-dir workspace all-files original-max-files)
+
+      (before-each
+        (setq temp-dir (make-temp-file "macher-context-test" t))
+        (setq workspace `(project . ,(directory-file-name temp-dir)))
+        (setq original-max-files macher-context-string-max-files)
+
+        ;; Create test files
+        (let ((file1 (expand-file-name "file1.txt" temp-dir))
+              (file2 (expand-file-name "file2.txt" temp-dir))
+              (file3 (expand-file-name "file3.txt" temp-dir))
+              (file4 (expand-file-name "file4.txt" temp-dir))
+              (file5 (expand-file-name "file5.txt" temp-dir)))
+          (write-region "content1" nil file1)
+          (write-region "content2" nil file2)
+          (write-region "content3" nil file3)
+          (write-region "content4" nil file4)
+          (write-region "content5" nil file5)
+          (setq all-files (list file1 file2 file3 file4 file5)))
+
+        ;; Create project marker
+        (write-region "" nil (expand-file-name ".project" temp-dir))
+
+        ;; Mock workspace functions
+        (spy-on 'macher-workspace :and-return-value workspace)
         (spy-on 'macher--workspace-name :and-return-value "test-project")
-        (spy-on 'macher--workspace-files :and-return-value workspace-files)
+        (spy-on 'macher--workspace-root :and-return-value temp-dir)
+        (spy-on 'macher--workspace-files :and-return-value all-files))
 
-        ;; Set the test workspace.
-        (with-temp-buffer
-          (setq-local macher--workspace workspace)
-          (setq result (macher--context-string contexts)))
+      (after-each
+        (setq macher-context-string-max-files original-max-files)
+        (when (and temp-dir (file-exists-p temp-dir))
+          (delete-directory temp-dir t)))
 
-        ;; Verify the result structure.
-        (expect (stringp result) :to-be-truthy)
-        (expect result :to-match "WORKSPACE CONTEXT")
+      (it "lists all files when max-files is nil (no limit)"
+        (setq macher-context-string-max-files nil)
+        (let ((result (macher--context-string '())))
+          (expect result :to-match "file1.txt")
+          (expect result :to-match "file2.txt")
+          (expect result :to-match "file3.txt")
+          (expect result :to-match "file4.txt")
+          (expect result :to-match "file5.txt")
+          (expect result :not :to-match "truncated")))
 
-        ;; test.txt should be in the "already provided" section since it's in contexts
-        (expect
-         result
-         :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    test\\.txt")
+      (it "respects max-files limit for non-context files"
+        (setq macher-context-string-max-files 3)
+        (let ((result (macher--context-string '())))
+          ;; Should show only first 3 files in workspace order
+          (expect result :to-match "file1.txt")
+          (expect result :to-match "file2.txt")
+          (expect result :to-match "file3.txt")
+          (expect result :not :to-match "file4.txt")
+          (expect result :not :to-match "file5.txt")
+          (expect result :to-match "2 more files")))
 
-        ;; subdir/test.txt should be in "available for editing" since it's not in contexts
-        (expect
-         result
-         :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    subdir/test\\.txt")
+      (it "always lists gptel context files first, even if they exceed the limit"
+        (setq macher-context-string-max-files 2)
+        ;; Create context with 3 files (more than the limit)
+        (let* ((file1 (nth 0 all-files))
+               (file3 (nth 2 all-files))
+               (file5 (nth 4 all-files))
+               (contexts `((,file1) (,file3) (,file5)))
+               (result (macher--context-string contexts)))
 
-        ;; Should contain workspace description
-        (expect result :to-match "In-memory editing environment"))))
+          ;; All 3 context files should be listed in the "already provided" section
+          (expect result :to-match "Files already provided above")
+          (expect result :to-match "file1.txt")
+          (expect result :to-match "file3.txt")
+          (expect result :to-match "file5.txt")
+
+          ;; No additional files should be listed since context files exceed the limit
+          (expect result :not :to-match "Other files available")
+          (expect result :not :to-match "file2.txt")
+          (expect result :not :to-match "file4.txt")))
+
+      (it "lists remaining files up to limit after context files"
+        (setq macher-context-string-max-files 4)
+        ;; Create context with 2 files, leaving room for 2 more
+        (let* ((file1 (nth 0 all-files))
+               (file3 (nth 2 all-files))
+               (contexts `((,file1) (,file3)))
+               (result (macher--context-string contexts)))
+          ;; Context files should be in "already provided" section
+          (expect result :to-match "Files already provided above")
+          (expect result :to-match "file1.txt")
+          (expect result :to-match "file3.txt")
+
+          ;; Should list 2 more files (file2.txt and file4.txt in workspace order)
+          (expect result :to-match "Other files available")
+          (expect result :to-match "file2.txt")
+          (expect result :to-match "file4.txt")
+
+          ;; file5.txt should be truncated
+          (expect result :not :to-match "file5.txt")
+          (expect result :to-match "1 more files")))
+
+      (it "shows correct truncation count when context files are included"
+        (setq macher-context-string-max-files 3)
+        ;; Context has 1 file, limit allows 2 more, but 4 files remain
+        (let* ((file1 (nth 0 all-files))
+               (contexts `((,file1)))
+               (result (macher--context-string contexts)))
+
+          ;; Should show file1 in context, file2 and file3 in available, truncate file4 and file5
+          (expect result :to-match "file1.txt")
+          (expect result :to-match "file2.txt")
+          (expect result :to-match "file3.txt")
+          (expect result :not :to-match "file4.txt")
+          (expect result :not :to-match "file5.txt")
+          (expect result :to-match "2 more files")))
+
+      (it "handles case where all files are in context"
+        (setq macher-context-string-max-files 3)
+        ;; All files are in context
+        (let* ((contexts (mapcar #'list all-files))
+               (result (macher--context-string contexts)))
+
+          ;; All files should be listed in "already provided" section
+          (expect result :to-match "Files already provided above")
+          (expect result :to-match "file1.txt")
+          (expect result :to-match "file2.txt")
+          (expect result :to-match "file3.txt")
+          (expect result :to-match "file4.txt")
+          (expect result :to-match "file5.txt")
+
+          ;; No "other files" section
+          (expect result :not :to-match "Other files available")
+          (expect result :not :to-match "more files")))
+
+      (it "shows no truncation message when limit is nil"
+        (setq macher-context-string-max-files nil)
+        (let* ((file1 (nth 0 all-files))
+               (contexts `((,file1)))
+               (result (macher--context-string contexts)))
+
+          (expect result :to-match "file1.txt")
+          (expect result :to-match "file2.txt")
+          (expect result :to-match "file3.txt")
+          (expect result :to-match "file4.txt")
+          (expect result :to-match "file5.txt")
+          (expect result :not :to-match "more files")))))
 
   (describe "Workspace detection functions"
     (before-each
