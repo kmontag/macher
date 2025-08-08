@@ -1204,12 +1204,20 @@
       (it "returns matches alist with correct structure"
         (let ((result (macher--search-get-xref-matches context "hello")))
           (expect (listp result) :to-be-truthy)
-          ;; Should have entries for files with matches (relative to workspace root).
-          (expect (assoc "file1.txt" result) :to-be-truthy)
-          (expect (assoc "file2.js" result) :to-be-truthy)
-          (expect (assoc "subdir/file3.py" result) :to-be-truthy)
           ;; Should not have entries for files without matches.
-          (expect (assoc "file4.txt" result) :to-be nil)))
+          (expect (assoc "file4.txt" result) :to-be nil)
+
+          ;; Check that the entire structure exactly matches the expected one.
+          (let ((expected-summaries-alist
+                 '(("file1.txt" ("hello world" "hello universe"))
+                   ("file2.js" ("hello javascript"))
+                   ("subdir/file3.py" ("hello python"))))
+                (actual-summaries-alist
+                 (mapcar
+                  (lambda (file-matches)
+                    (list (car file-matches) (mapcar #'xref-item-summary (cdr file-matches))))
+                  result)))
+            (expect actual-summaries-alist :to-equal expected-summaries-alist))))
 
       (it "handles basic regexp filtering"
         (let ((result (macher--search-get-xref-matches context "hello" :file-regexp "\\.js$")))
@@ -1832,29 +1840,84 @@
         (expect result :to-match "1 file"))))
 
   (describe "macher--search-format-content-mode"
-    :var (context temp-dir)
+    :var*
+    (context
+     temp-dir original-max-columns
+     ;; Local helper function to get matches without calling the full
+     ;; `macher--search-get-xref-matches'.
+     (get-matches-alist
+      (lambda (pattern)
+        (require 'xref)
+        (let* ((files (project-files (project-current nil temp-dir)))
+               (all-matches (xref-matches-in-files pattern files))
+               (matches-by-file (make-hash-table :test 'equal)))
+          ;; Group matches by relative file path.
+          (dolist (match all-matches)
+            (let* ((location (xref-item-location match))
+                   (file (xref-file-location-file location))
+                   (rel-path (file-relative-name file temp-dir)))
+              (push match (gethash rel-path matches-by-file))))
+          ;; Convert hash table to alist and reverse match lists to maintain order.
+          (let ((result-alist nil))
+            (maphash
+             (lambda (rel-path matches)
+               (push (cons rel-path (reverse matches)) result-alist))
+             matches-by-file)
+
+            (reverse result-alist))))))
 
     (before-each
       (setq temp-dir (make-temp-file "macher-test-content-dir" t))
       (setq context
             (macher--make-context :workspace (cons 'project (file-name-as-directory temp-dir))))
+      (setq original-max-columns macher-match-max-columns)
       (write-region
        "line1\nhello world\nhello universe\nline4" nil (expand-file-name "test.txt" temp-dir))
       ;; Add the project marker.
       (write-region "" nil (expand-file-name ".project" temp-dir)))
 
     (after-each
+      (setq macher-match-max-columns original-max-columns)
       (when (and temp-dir (file-exists-p temp-dir))
         (delete-directory temp-dir t)))
 
+    ;; Sanity-check test for the helper function.
+    (it "local helper returns matches in expected format (sanity check)"
+      ;; Create additional test files for proper grouping verification.
+      (write-region
+       "function hello() {\n  return 'hello from js';\n}\n// end hello"
+       nil
+       (expand-file-name "test.js" temp-dir))
+      (write-region
+       "# Hello markdown\nThis is a hello test file." nil (expand-file-name "test.md" temp-dir))
+      ;; Sanity check test for the helper function to verify it returns matches in expected format
+      ;; and properly groups everything by file.
+      (let* ((matches-alist (funcall get-matches-alist "hello")))
+        ;; Verify it returns an alist.
+        (expect (listp matches-alist) :to-be-truthy)
+        ;; Verify we have matches from multiple files (proper grouping).
+        (expect (length matches-alist) :to-be 3)
+        ;; Check that the entire structure exactly matches the expected one.
+        (let ((expected-summaries-alist
+               '(("test.js" ("function hello() {" "  return 'hello from js';" "// end hello"))
+                 ("test.md"
+                  ("# Hello markdown" "This is a hello test file."))
+                 ("test.txt" ("hello world" "hello universe"))))
+              (actual-summaries-alist
+               (mapcar
+                (lambda (file-matches)
+                  (list (car file-matches) (mapcar #'xref-item-summary (cdr file-matches))))
+                matches-alist)))
+          (expect actual-summaries-alist :to-equal expected-summaries-alist))))
+
     (it "formats content mode output without line numbers"
-      (let* ((matches-alist (macher--search-get-xref-matches context "hello"))
+      (let* ((matches-alist (funcall get-matches-alist "hello"))
              (result (macher--search-format-content-mode context matches-alist nil nil nil)))
         ;; Verify exact output structure: filename:matched_line for each match, separated by newlines.
         (expect result :to-equal (concat "test.txt:hello world\n" "test.txt:hello universe\n"))))
 
     (it "formats content mode output with line numbers"
-      (let* ((matches-alist (macher--search-get-xref-matches context "hello"))
+      (let* ((matches-alist (funcall get-matches-alist "hello"))
              (result (macher--search-format-content-mode context matches-alist nil nil t)))
         ;; Verify exact output with line numbers: filename:line_number:matched_line.
         (expect
@@ -1862,7 +1925,7 @@
          :to-equal (concat "test.txt:2:hello world\n" "test.txt:3:hello universe\n"))))
 
     (it "includes context lines when specified"
-      (let* ((matches-alist (macher--search-get-xref-matches context "hello world"))
+      (let* ((matches-alist (funcall get-matches-alist "hello world"))
              (result (macher--search-format-content-mode context matches-alist 1 1 nil)))
         ;; Verify exact output with context: before lines use '-', match lines use ':', after lines use '-'.
         (expect
@@ -1870,7 +1933,7 @@
          :to-equal (concat "test.txt-line1\n" "test.txt:hello world\n" "test.txt-hello universe\n"))))
 
     (it "merges overlapping context ranges"
-      (let* ((matches-alist (macher--search-get-xref-matches context "hello"))
+      (let* ((matches-alist (funcall get-matches-alist "hello"))
              (result (macher--search-format-content-mode context matches-alist 1 1 nil)))
         ;; Verify exact merged output: overlapping context should be merged into one continuous block.
         ;; Line 1 (before first match), Line 2 (first match), Line 3 (second match), Line 4 (after second match).
@@ -1891,7 +1954,7 @@
        nil
        (expand-file-name "separate.txt" temp-dir))
 
-      (let* ((matches-alist (macher--search-get-xref-matches context "hello"))
+      (let* ((matches-alist (funcall get-matches-alist "hello"))
              ;; Get just the matches from separate.txt.
              (separate-matches (assoc "separate.txt" matches-alist))
              (result (macher--search-format-content-mode context (list separate-matches) 1 1 nil)))
@@ -1911,67 +1974,356 @@
           "separate.txt-line8\n"))))
 
     (it "handles large files and complex match patterns"
-      ;; Create a large file with multiple overlapping and non-overlapping match ranges.
-      (let ((large-content
-             (concat
-              "line1\n"
-              "function test() {\n"
-              "  console.log('hello world');\n"
-              "  console.log('hello universe');\n"
-              "}\n"
-              "line6\n"
-              "line7\n"
-              "line8\n"
-              "line9\n"
-              "line10\n"
-              "function other() {\n"
-              "  console.log('hello there');\n"
-              "line13\n"
-              "  console.log('hello again');\n"
-              "}\n"
-              "line16\n"
-              "line17\n"
-              "line18\n"
-              "line19\n"
-              "line20\n"
-              "function final() {\n"
-              "  console.log('hello final');\n"
-              "}\n"
-              "line24\n")))
+      ;; Create a large file with multiple overlapping and non-overlapping match ranges, including multi-match lines.
+      ;; Include lines longer than macher-match-max-columns (300 characters) for both context lines and match lines.
+      (let* ((long-context-line (make-string (+ macher-match-max-columns 50) ?-))
+             (long-match-line
+              (concat
+               "console.log('hello " (make-string (+ macher-match-max-columns 20) ?x) " world');"))
+             (large-content
+              (concat
+               "large.js line1\n"
+               long-context-line
+               "\n"
+               "function test() {\n"
+               "  console.log('hello world and hello galaxy and hello universe');\n"
+               "  "
+               long-match-line
+               "\n"
+               "  console.log('hello there');\n"
+               "}\n"
+               "line8\n"
+               "line9\n"
+               "line10\n"
+               "line11\n"
+               "line12\n"
+               "function other() {\n"
+               "  console.log('hello again and hello once more');\n"
+               "line15\n"
+               "  console.log('hello final');\n"
+               "}\n"
+               "line18\n"
+               "line19\n"
+               "line20\n"
+               "line21\n"
+               "line22\n"
+               "function last() {\n"
+               "  console.log('hello end');\n"
+               "}\n"
+               "line26\n")))
         (write-region large-content nil (expand-file-name "large.js" temp-dir))
 
-        (let* ((matches-alist (macher--search-get-xref-matches context "hello"))
-               ;; Get just the matches from large.js.
-               (large-matches (assoc "large.js" matches-alist))
-               (result (macher--search-format-content-mode context (list large-matches) 2 2 nil)))
-          ;; Verify output structure:
-          ;; First range (overlapping): lines 1-6 covering first two hello matches
-          ;; Second range (overlapping): lines 10-15 covering next two hello matches
-          ;; Third range (non-overlapping): lines 20-24 covering final hello match
+        ;; Retrieve the full list of matches in the project (not just large.js).
+        (let* ((matches-alist (funcall get-matches-alist "hello"))
+               ;; Result with no before/after context lines.
+               (content-no-context
+                (macher--search-format-content-mode context matches-alist nil nil t))
+               ;; Result with 2 lines before and after matches.
+               (content-with-context
+                (macher--search-format-content-mode context matches-alist 2 2 t))
+               (expected-content-no-context
+                (concat
+                 "large.js:4:  console.log('hello world and hello galaxy and hello universe');\n"
+                 "large.js:5:[Omitted long line with 1 matches]\n"
+                 "large.js:6:  console.log('hello there');\n"
+                 "large.js:14:  console.log('hello again and hello once more');\n"
+                 "large.js:16:  console.log('hello final');\n"
+                 "large.js:24:  console.log('hello end');\n"
+                 "test.txt:2:hello world\n"
+                 "test.txt:3:hello universe\n"))
+               (expected-content-with-context
+                (concat
+                 "large.js-2-[Omitted long context line]\n"
+                 "large.js-3-function test() {\n"
+                 "large.js:4:  console.log('hello world and hello galaxy and hello universe');\n"
+                 "large.js:5:[Omitted long line with 1 matches]\n"
+                 "large.js:6:  console.log('hello there');\n"
+                 "large.js-7-}\n"
+                 "large.js-8-line8\n"
+                 "--\n"
+                 "large.js-12-line12\n"
+                 "large.js-13-function other() {\n"
+                 "large.js:14:  console.log('hello again and hello once more');\n"
+                 "large.js-15-line15\n"
+                 "large.js:16:  console.log('hello final');\n"
+                 "large.js-17-}\n"
+                 "large.js-18-line18\n"
+                 "--\n"
+                 "large.js-22-line22\n"
+                 "large.js-23-function last() {\n"
+                 "large.js:24:  console.log('hello end');\n"
+                 "large.js-25-}\n"
+                 "large.js-26-line26\n"
+                 "test.txt-1-line1\n"
+                 "test.txt:2:hello world\n"
+                 "test.txt:3:hello universe\n"
+                 "test.txt-4-line4\n")))
+          ;; Verify the results matches the expected content exactly.
+          (expect content-no-context :to-equal expected-content-no-context)
+          (expect content-with-context :to-equal expected-content-with-context))))
+
+    (it "renders lines with multiple matches only once in output without context"
+      ;; Test that lines with multiple matches are only rendered once.
+      (write-region
+       "normal line\nhello world and hello universe on same line\nanother line"
+       nil
+       (expand-file-name "multiple.txt" temp-dir))
+
+      (let* ((matches-alist (funcall get-matches-alist "hello"))
+             ;; Get just the matches from multiple.txt.
+             (multiple-matches (assoc "multiple.txt" matches-alist))
+             (result
+              (macher--search-format-content-mode context (list multiple-matches) nil nil nil)))
+        ;; Verify that the line with multiple matches appears exactly once.
+        (expect
+         "multiple.txt:hello world and hello universe on same line"
+         :to-appear-once-in result)
+        ;; Verify the result doesn't contain duplicate entries.
+        (expect result :to-equal "multiple.txt:hello world and hello universe on same line\n")))
+
+    (it "renders lines with multiple matches only once in output with context"
+      ;; Test that lines with multiple matches are only rendered once even with context lines.
+      (write-region
+       "before line\nhello world and hello universe and hello again\nafter line"
+       nil
+       (expand-file-name "multi-context.txt" temp-dir))
+
+      (let* ((matches-alist (funcall get-matches-alist "hello"))
+             ;; Get just the matches from multi-context.txt.
+             (multi-matches (assoc "multi-context.txt" matches-alist))
+             (result (macher--search-format-content-mode context (list multi-matches) 1 1 nil)))
+        ;; Verify that the line with multiple matches appears exactly once as a match line.
+        (expect
+         "multi-context.txt:hello world and hello universe and hello again"
+         :to-appear-once-in result)
+        ;; Verify context lines are included.
+        (expect result :to-match "before line")
+        (expect result :to-match "after line")
+        ;; Full expected output.
+        (expect
+         result
+         :to-equal
+         (concat
+          "multi-context.txt-before line\n"
+          "multi-context.txt:hello world and hello universe and hello again\n"
+          "multi-context.txt-after line\n"))))
+
+    (it "renders long lines with multiple matches only once with ripgrep-style placeholder"
+      ;; Test that long lines with multiple matches are only rendered once and show correct count.
+      (let* ((long-segment (make-string (+ macher-match-max-columns 50) ?x))
+             (content
+              (concat "hello start " long-segment " hello middle " long-segment " hello end")))
+        (write-region content nil (expand-file-name "long-multi.txt" temp-dir))
+
+        (let* ((matches-alist (funcall get-matches-alist "hello"))
+               ;; Get just the matches from long-multi.txt.
+               (long-matches (assoc "long-multi.txt" matches-alist))
+               (result
+                (macher--search-format-content-mode context (list long-matches) nil nil nil)))
+          ;; Verify the omitted line placeholder appears exactly once.
+          (expect "\\[Omitted long line with 3 matches\\]" :to-appear-once-in result)
+          ;; Verify the long content is not present.
+          (expect result :not :to-match (regexp-quote (substring long-segment 0 50)))
+          ;; Full expected output.
+          (expect result :to-equal "long-multi.txt:[Omitted long line with 3 matches]\n"))))
+
+    (it "renders long lines with multiple matches only once with context and ripgrep-style placeholder"
+      ;; Test that long lines with multiple matches in context mode are only rendered once.
+      (let* ((long-segment (make-string (+ macher-match-max-columns 30) ?y))
+             (content
+              (concat
+               "context before\nhello prefix "
+               long-segment
+               " hello suffix "
+               long-segment
+               " hello final\ncontext after")))
+        (write-region content nil (expand-file-name "long-context-multi.txt" temp-dir))
+
+        (let* ((matches-alist (funcall get-matches-alist "hello"))
+               ;; Get just the matches from long-context-multi.txt.
+               (long-context-matches (assoc "long-context-multi.txt" matches-alist))
+               (result
+                (macher--search-format-content-mode context (list long-context-matches) 1 1 nil)))
+          ;; Verify the omitted line placeholder appears exactly once.
+          (expect "\\[Omitted long line with 3 matches\\]" :to-appear-once-in result)
+          ;; Verify context lines are included.
+          (expect result :to-match "context before")
+          (expect result :to-match "context after")
+          ;; Verify the long content is not present.
+          (expect result :not :to-match (regexp-quote (substring long-segment 0 30)))
+          ;; Full expected output.
           (expect
            result
            :to-equal
            (concat
-            "large.js-line1\n"
-            "large.js-function test() {\n"
-            "large.js:  console.log('hello world');\n"
-            "large.js:  console.log('hello universe');\n"
-            "large.js-}\n"
-            "large.js-line6\n"
-            "--\n"
-            "large.js-line10\n"
-            "large.js-function other() {\n"
-            "large.js:  console.log('hello there');\n"
-            "large.js-line13\n"
-            "large.js:  console.log('hello again');\n"
-            "large.js-}\n"
-            "large.js-line16\n"
-            "--\n"
-            "large.js-line20\n"
-            "large.js-function final() {\n"
-            "large.js:  console.log('hello final');\n"
-            "large.js-}\n"
-            "large.js-line24\n"))))))
+            "long-context-multi.txt-context before\n"
+            "long-context-multi.txt:[Omitted long line with 3 matches]\n"
+            "long-context-multi.txt-context after\n")))))
+
+    (it "replaces long lines with ripgrep-style placeholder in content mode (context lines)"
+      ;; Test that long lines are replaced with ripgrep-style "[Omitted long line with N matches]" in context mode.
+      (let* ((long-line (make-string (+ macher-match-max-columns 100) ?x))
+             (content (concat "short line\n" "hello " long-line "\nshort line again")))
+        (write-region content nil (expand-file-name "longlines.txt" temp-dir))
+
+        (let* ((matches-alist (funcall get-matches-alist "hello"))
+               ;; Get just the matches from longlines.txt.
+               (longlines-matches (assoc "longlines.txt" matches-alist))
+               (result
+                (macher--search-format-content-mode context (list longlines-matches) 1 1 nil)))
+          ;; Verify that the long line is replaced with the ripgrep-style placeholder.
+          (expect result :to-match "\\[Omitted long line with 1 matches\\]")
+          ;; Verify that short lines are preserved.
+          (expect result :to-match "short line")
+          (expect result :to-match "short line again")
+          ;; Verify the long line content is not present.
+          (expect result :not :to-match (regexp-quote (substring long-line 0 100))))))
+
+    (it "replaces long lines with ripgrep-style placeholder in content mode (simple mode)"
+      ;; Test that long summaries are replaced with ripgrep-style "[Omitted long line with N matches]" in simple content mode.
+      (let* ((long-line (make-string (+ macher-match-max-columns 50) ?y))
+             (content (concat "match " long-line)))
+        (write-region content nil (expand-file-name "longmatch.txt" temp-dir))
+
+        (let* ((matches-alist (funcall get-matches-alist "match"))
+               ;; Get just the matches from longmatch.txt.
+               (longmatch-matches (assoc "longmatch.txt" matches-alist))
+               ;; Use simple content mode (no context lines).
+               (result
+                (macher--search-format-content-mode context (list longmatch-matches) nil nil nil)))
+          ;; Verify that the long line is replaced with the ripgrep-style placeholder.
+          (expect result :to-match "\\[Omitted long line with 1 matches\\]")
+          ;; Verify the long line content is not present.
+          (expect result :not :to-match (regexp-quote (substring long-line 0 100))))))
+
+    (it "preserves lines under the length limit"
+      ;; Test that lines just under the limit are preserved intact.
+      (let* ((prefix "test")
+             (just-under-limit (make-string (- macher-match-max-columns (+ 1 (length prefix))) ?z))
+             (content (concat prefix just-under-limit)))
+        (write-region content nil (expand-file-name "justunder.txt" temp-dir))
+
+        (let* ((matches-alist (funcall get-matches-alist prefix))
+               ;; Get just the matches from justunder.txt.
+               (justunder-matches (assoc "justunder.txt" matches-alist))
+               (result
+                (macher--search-format-content-mode context (list justunder-matches) nil nil nil)))
+          (expect (length matches-alist) :to-be 1)
+          ;; Verify that the line is preserved and not replaced with any omission placeholder.
+          (expect result :not :to-match "\\[Omitted long")
+          (expect result :to-match (regexp-quote just-under-limit)))))
+
+    (it "renders long lines when max-columns is nil (no before/after context)"
+      (let* (
+             ;; Much longer than the typical limit.
+             (very-long-line (make-string 2000 ?x))
+             (content (concat "match " very-long-line " end")))
+        ;; Set max-columns to nil to disable the limit.
+        (setq macher-match-max-columns nil)
+        (write-region content nil (expand-file-name "verylong.txt" temp-dir))
+
+        (let* ((matches-alist (funcall get-matches-alist "match"))
+               ;; Get just the matches from verylong.txt.
+               (verylong-matches (assoc "verylong.txt" matches-alist))
+               (result
+                (macher--search-format-content-mode context (list verylong-matches) nil nil nil)))
+          ;; Verify that the very long line is NOT replaced with any omission placeholder.
+          (expect result :not :to-match "Omitted")
+          ;; Verify that the full long line content is present in the result.
+          (expect result :to-match (regexp-quote very-long-line)))))
+
+    (it "renders long lines when max-columns is nil (with before/after context)"
+      (let* ((very-long-match-line (make-string 1500 ?m))
+             (very-long-context-line (make-string 1800 ?c))
+             (content
+              (concat
+               "short before\n"
+               very-long-context-line
+               "\n"
+               "match "
+               very-long-match-line
+               " end\n"
+               "short after")))
+        ;; Set max-columns to nil to disable the limit.
+        (setq macher-match-max-columns nil)
+        (write-region content nil (expand-file-name "longcontext.txt" temp-dir))
+
+        (let* ((matches-alist (funcall get-matches-alist "match"))
+               ;; Get just the matches from longcontext.txt.
+               (longcontext-matches (assoc "longcontext.txt" matches-alist))
+               (result
+                (macher--search-format-content-mode
+                 context (list longcontext-matches) 1 1 nil))) ; 1 line before/after
+          ;; Verify that neither match line nor context lines are truncated.
+          (expect result :not :to-match "Omitted")
+          ;; Verify that both very long lines are present in full.
+          (expect result :to-match (regexp-quote very-long-match-line))
+          (expect result :to-match (regexp-quote very-long-context-line)))))
+
+    (it "uses ripgrep-style placeholder for context lines"
+      ;; Test that long context lines (non-matching) get "[Omitted long context line]".
+      (let* ((long-context-line (make-string (+ macher-match-max-columns 50) ?c))
+             (content (concat long-context-line "\nhello world\nshort line")))
+        (write-region content nil (expand-file-name "contextlong.txt" temp-dir))
+
+        (let* ((matches-alist (funcall get-matches-alist "hello"))
+               ;; Get just the matches from contextlong.txt.
+               (contextlong-matches (assoc "contextlong.txt" matches-alist))
+               ;; Use context mode to include the long context line.
+               (result
+                (macher--search-format-content-mode context (list contextlong-matches) 1 1 nil)))
+          ;; Verify that the long context line is replaced with the ripgrep-style context placeholder.
+          (expect result :to-match "\\[Omitted long context line\\]")
+          ;; Verify that the matching line and short lines are preserved.
+          (expect result :to-match "hello world")
+          (expect result :to-match "short line")
+          ;; Verify the long context line content is not present.
+          (expect result :not :to-match (regexp-quote (substring long-context-line 0 100))))))
+
+    (it "counts multiple matches on same line for ripgrep-style placeholder"
+      ;; Test that lines with multiple matches show correct count in "[Omitted long line with N matches]".
+      (let* ((long-line (make-string (+ macher-match-max-columns 50) ?x))
+             ;; Create a line with "match" appearing twice.
+             (content (concat "match start " long-line " match end")))
+        (write-region content nil (expand-file-name "multimatches.txt" temp-dir))
+
+        (let* ((matches-alist (funcall get-matches-alist "match"))
+               ;; Get just the matches from multimatches.txt.
+               (multimatches-matches (assoc "multimatches.txt" matches-alist))
+               (result
+                (macher--search-format-content-mode
+                 context (list multimatches-matches) nil nil nil)))
+          ;; Verify that the long line with multiple matches shows the correct count.
+          (expect result :to-match "\\[Omitted long line with 2 matches\\]")
+          ;; Verify the long line content is not present.
+          (expect result :not :to-match (regexp-quote (substring long-line 0 100))))))
+
+    (it "handles multiple matches on same line in context mode"
+      ;; Test that context mode correctly counts multiple matches on the same line.
+      (let* ((long-line (make-string (+ macher-match-max-columns 50) ?x))
+             ;; Create a line with "test" appearing three times, with context.
+             (content
+              (concat
+               "before line\ntest start "
+               long-line
+               " test middle "
+               long-line
+               " test end\nafter line")))
+        (write-region content nil (expand-file-name "contextmulti.txt" temp-dir))
+
+        (let* ((matches-alist (funcall get-matches-alist "test"))
+               ;; Get just the matches from contextmulti.txt.
+               (contextmulti-matches (assoc "contextmulti.txt" matches-alist))
+               ;; Use context mode to include surrounding lines.
+               (result
+                (macher--search-format-content-mode context (list contextmulti-matches) 1 1 nil)))
+          ;; Verify that the long line with multiple matches shows the correct count.
+          (expect result :to-match "\\[Omitted long line with 3 matches\\]")
+          ;; Verify context lines are preserved.
+          (expect result :to-match "before line")
+          (expect result :to-match "after line")
+          ;; Verify the long line content is not present.
+          (expect result :not :to-match (regexp-quote (substring long-line 0 100)))))))
 
   (describe "macher--tool-search-helper"
     :var (context temp-dir)
@@ -2311,7 +2663,6 @@
       (let ((result (macher--tool-read-file context "test-file.txt")))
         (expect result :to-equal "test file content")))
 
-    ;; TODO: We can't use multiple spies.
     (it "returns symlink target for symlinks instead of following them"
       ;; Create a symlink to the test file.
       (let ((symlink-path (expand-file-name "test-symlink" temp-dir))
