@@ -2097,7 +2097,7 @@ MATCHES-ALIST has structure ((rel-path . (xref-match-item1 xref-match-item2 ...)
         (total-matches
          (apply #'+ (mapcar (lambda (file-entry) (length (cdr file-entry))) matches-alist))))
     ;; Files mode: show file paths with match counts
-    (dolist (file-entry (reverse matches-alist))
+    (dolist (file-entry matches-alist)
       (let ((file-path (car file-entry))
             (matches (cdr file-entry)))
         (setq output
