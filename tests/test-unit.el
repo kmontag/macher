@@ -2196,8 +2196,6 @@
 
     (it "preserves lines under the length limit"
       ;; Test that lines just under the limit are preserved intact.
-
-      ;; TODO: This test passes when I subtract 5 (instead of 1) from macher-match-columns, but fails when I subtract 1 as is being done currently. Fix the implementation, it should work with 1 under the match columns.
       (let* ((prefix "test")
              (just-under-limit (make-string (- macher-match-max-columns (+ 1 (length prefix))) ?z))
              (content (concat prefix just-under-limit)))
@@ -2616,7 +2614,6 @@
       (let ((result (macher--tool-read-file context "test-file.txt")))
         (expect result :to-equal "test file content")))
 
-    ;; TODO: We can't use multiple spies.
     (it "returns symlink target for symlinks instead of following them"
       ;; Create a symlink to the test file.
       (let ((symlink-path (expand-file-name "test-symlink" temp-dir))
