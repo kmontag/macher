@@ -2231,7 +2231,8 @@ The inner lists of the MATCHES-ALIST contain 'xref-match-item' structs."
                                    (line-match-list (gethash i line-matches))
                                    (match-count (length line-match-list))
                                    (is-match (> match-count 0))
-                                   ;; Replace line with ripgrep-style placeholder if it exceeds the maximum length.
+                                   ;; Replace line with ripgrep-style placeholder if it exceeds the
+                                   ;; maximum length.
                                    (truncated-line
                                     (if (> (length line) macher-match-max-columns)
                                         (if is-match
