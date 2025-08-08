@@ -1204,12 +1204,20 @@
       (it "returns matches alist with correct structure"
         (let ((result (macher--search-get-xref-matches context "hello")))
           (expect (listp result) :to-be-truthy)
-          ;; Should have entries for files with matches (relative to workspace root).
-          (expect (assoc "file1.txt" result) :to-be-truthy)
-          (expect (assoc "file2.js" result) :to-be-truthy)
-          (expect (assoc "subdir/file3.py" result) :to-be-truthy)
           ;; Should not have entries for files without matches.
-          (expect (assoc "file4.txt" result) :to-be nil)))
+          (expect (assoc "file4.txt" result) :to-be nil)
+
+          ;; Check that the entire structure exactly matches the expected one.
+          (let ((expected-summaries-alist
+                 '(("file1.txt" ("hello world" "hello universe"))
+                   ("file2.js" ("hello javascript"))
+                   ("subdir/file3.py" ("hello python"))))
+                (actual-summaries-alist
+                 (mapcar
+                  (lambda (file-matches)
+                    (list (car file-matches) (mapcar #'xref-item-summary (cdr file-matches))))
+                  result)))
+            (expect actual-summaries-alist :to-equal expected-summaries-alist))))
 
       (it "handles basic regexp filtering"
         (let ((result (macher--search-get-xref-matches context "hello" :file-regexp "\\.js$")))

@@ -1925,10 +1925,13 @@ will be matched against each file's path relative to the search PATH.
 
 CASE-INSENSITIVE, if non-nil, performs a case-insensitive search.
 
-The search will be performed using `xref-matches-in-files', which uses
-the 'xref-search-program' to perform the search.
+Returns an alist containing 'xref-match-item' structs for each file,
+with structure:
 
-Returns matches-alist with structure ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)."
+ ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)
+
+The search will be performed using `xref-matches-in-files', which uses
+the 'xref-search-program' to perform the search."
   (require 'xref)
   (let* (
          ;; Set case-fold-search to enable case-insensitive search when needed. Note: xref uses
@@ -2055,13 +2058,13 @@ Returns matches-alist with structure ((rel-path . (xref-match-item1 xref-match-i
                        ;; won't change before they're accessed.
                        (_ (macher-context--contents-for-file original-file context))
                        ;; Always show results relative to workspace root (like grep relative to
-                       ;; cwd). Special case: if path points to a specific file, show the original
+                       ;; cwd). Special case: if path points to a single file, show the original
                        ;; path parameter.
                        (rel-path
                         (if (and path
                                  (file-exists-p search-path)
                                  (not (file-directory-p search-path)))
-                            ;; Path is a specific file, use the original path parameter.
+                            ;; Path is a single file, use the original path parameter.
                             path
                           ;; Otherwise, always relative to workspace root.
                           (file-relative-name original-file workspace-root))))
@@ -2071,19 +2074,20 @@ Returns matches-alist with structure ((rel-path . (xref-match-item1 xref-match-i
                       (if file-entry
                           ;; Add to the existing file's match list - file-entry structure is
                           ;; (rel-path . xref-match-item-list).
-                          (setcdr file-entry (cons match (cdr file-entry)))
+                          (setcdr file-entry (append (cdr file-entry) (list match)))
                         ;; Create new file entry - structure is (rel-path . xref-match-item-list).
+                        ;; Note this pushes to the beginning of the list.
                         (push (cons rel-path (list match)) results)))))))
 
-            ;; Return just the results - temp files are cleaned up in the unwind-protect.
-            results)
+            ;; Return the results - temp files are cleaned up in the unwind-protect. Each entry was
+            ;; prepended to the results array, so we need to use `reverse' to restore the original
+            ;; order of the workspace's file list.
+            (reverse results))
 
         ;; Cleanup: delete temporary files.
         (dolist (temp-entry temp-files-alist)
           (when (file-exists-p (car temp-entry))
-            (delete-file (car temp-entry)))))
-
-      results)))
+            (delete-file (car temp-entry))))))))
 
 (defun macher--search-format-files-mode (matches-alist)
   "Format search results for files mode output.
