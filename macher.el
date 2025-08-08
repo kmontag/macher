@@ -2134,128 +2134,155 @@ include.
 
 SHOW-LINE-NUMBERS toggles inclusion of line numbers in the output.
 
-MATCHES-ALIST has structure ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)."
+MATCHES-ALIST is an alist of the form:
+
+   ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)
+
+The inner lists of the MATCHES-ALIST contain 'xref-match-item' structs."
   (let* ((workspace (macher-context-workspace context))
          (workspace-root (macher--workspace-root workspace))
          (context-contents (macher-context-contents context))
          (output ""))
 
     ;; Content mode: show matching lines with grep-like format.
-    (dolist (file-entry (reverse matches-alist))
+    (dolist (file-entry matches-alist)
       (let* ((file-path (car file-entry))
-             (matches (reverse (cdr file-entry))))
+             (matches (cdr file-entry)))
 
         ;; For content mode with context lines, we need to read the file content.
         (let* ((original-file (expand-file-name file-path workspace-root))
                (entry (assoc (macher--normalize-path original-file) context-contents))
-               (file-content
-                (if entry
-                    ;; File is in context, use the current content (new-content). Note: deleted
-                    ;; files (where new-content is nil) are filtered out during the search phase, so
-                    ;; we should never encounter them here, but it doesn't really matter if we do -
-                    ;; we'll just have nil file-content in that case.
-                    (cdr (cdr entry))
-                  ;; File not in context, read from disk.
-                  (when (file-exists-p original-file)
-                    (with-temp-buffer
-                      (insert-file-contents original-file)
-                      (buffer-substring-no-properties (point-min) (point-max))))))
-               (lines
-                (when file-content
-                  (split-string file-content "\n")))
                (has-context (or lines-before lines-after)))
 
-          (if (and lines has-context)
-              ;; Context mode: merge overlapping ranges and show continuous output.
-              (let* ((line-ranges '())
-                     (match-lines-set (make-hash-table :test 'eq)))
-                ;; First, collect all match line numbers in a hash set for quick lookup.
-                (dolist (match matches)
-                  (puthash (xref-file-location-line (xref-item-location match)) t match-lines-set))
+          ;; Create a hash table mapping line numbers to lists of matches.
+          (let ((line-matches (make-hash-table :test 'eq)))
+            (dolist (match matches)
+              (let ((line-num (xref-file-location-line (xref-item-location match))))
+                (push match (gethash line-num line-matches))))
 
-                ;; Calculate line ranges for each match (including context)
-                (dolist (match matches)
-                  (let* ((line-num (xref-file-location-line (xref-item-location match)))
-                         (start-line (max 1 (- line-num (or lines-before 0))))
-                         (end-line (min (length lines) (+ line-num (or lines-after 0)))))
-                    (push (list start-line end-line) line-ranges)))
+            (if has-context
+                ;; Context mode: merge overlapping ranges and show continuous output.
+                (let*
+                    ((file-content
+                      (if entry
+                          ;; File is in context, use the current content (new-content). Note: deleted
+                          ;; files (where new-content is nil) are filtered out during the search phase, so
+                          ;; we should never encounter them here, but it doesn't really matter if we do -
+                          ;; we'll just have nil file-content in that case.
+                          (cdr (cdr entry))
+                        ;; File not in context, read from disk.
+                        (when (file-exists-p original-file)
+                          (with-temp-buffer
+                            (insert-file-contents original-file)
+                            (buffer-substring-no-properties (point-min) (point-max))))))
+                     (lines
+                      (when file-content
+                        (split-string file-content "\n")))
 
-                ;; Sort ranges by start line.
-                (setq line-ranges (sort line-ranges (lambda (a b) (< (car a) (car b)))))
+                     (line-ranges '()))
 
-                ;; Merge overlapping or adjacent ranges.
-                (let ((merged-ranges '())
-                      (current-start nil)
-                      (current-end nil))
-                  (dolist (range line-ranges)
-                    (let ((start (car range))
-                          (end (cadr range)))
-                      (if (or (null current-start)
-                              ;; ; Not overlapping/adjacent.
-                              (> start (1+ current-end)))
-                          (progn
-                            (when current-start
-                              (push (list current-start current-end) merged-ranges))
-                            (setq
-                             current-start start
-                             current-end end))
-                        ;; Overlapping or adjacent - merge.
-                        (setq current-end (max current-end end)))))
-                  (when current-start
-                    (push (list current-start current-end) merged-ranges))
-                  (setq merged-ranges (reverse merged-ranges))
+                  ;; Calculate line ranges for each match (including context)
+                  (dolist (match matches)
+                    (let* ((line-num (xref-file-location-line (xref-item-location match)))
+                           (start-line (max 1 (- line-num (or lines-before 0))))
+                           (end-line (min (length lines) (+ line-num (or lines-after 0)))))
+                      (push (list start-line end-line) line-ranges)))
 
-                  ;; Output merged ranges with separators between non-adjacent ranges.
-                  (let ((need-separator nil))
-                    (dolist (range merged-ranges)
-                      (let ((start-line (car range))
-                            (end-line (cadr range)))
-                        ;; Add separator between non-adjacent ranges.
-                        (when need-separator
-                          (setq output (concat output "--\n")))
-                        (setq need-separator t)
+                  ;; Sort ranges by start line.
+                  (setq line-ranges (sort line-ranges (lambda (a b) (< (car a) (car b)))))
 
-                        ;; Output lines in this range.
-                        (let ((i start-line))
-                          (while (<= i end-line)
-                            (let* ((line (nth (1- i) lines))
-                                   (is-match (gethash i match-lines-set))
-                                   ;; Replace line with placeholder if it exceeds the maximum match
-                                   ;; length.
+                  ;; Merge overlapping or adjacent ranges.
+                  (let ((merged-ranges '())
+                        (current-start nil)
+                        (current-end nil))
+                    (dolist (range line-ranges)
+                      (let ((start (car range))
+                            (end (cadr range)))
+                        (if (or (null current-start)
+                                ;; ; Not overlapping/adjacent.
+                                (> start (1+ current-end)))
+                            (progn
+                              (when current-start
+                                (push (list current-start current-end) merged-ranges))
+                              (setq
+                               current-start start
+                               current-end end))
+                          ;; Overlapping or adjacent - merge.
+                          (setq current-end (max current-end end)))))
+                    (when current-start
+                      (push (list current-start current-end) merged-ranges))
+                    (setq merged-ranges (reverse merged-ranges))
+
+                    ;; Output merged ranges with separators between non-adjacent ranges.
+                    (let ((need-separator nil))
+                      (dolist (range merged-ranges)
+                        (let ((start-line (car range))
+                              (end-line (cadr range)))
+                          ;; Add separator between non-adjacent ranges.
+                          (when need-separator
+                            (setq output (concat output "--\n")))
+                          (setq need-separator t)
+
+                          ;; Output lines in this range.
+                          (let ((i start-line))
+                            (while (<= i end-line)
+                              (let*
+                                  ((line (nth (1- i) lines))
+                                   (line-match-list (gethash i line-matches))
+                                   (match-count (length line-match-list))
+                                   (is-match (> match-count 0))
+                                   ;; Replace line with ripgrep-style placeholder if it exceeds the maximum length.
                                    (truncated-line
                                     (if (> (length line) macher-match-max-columns)
-                                        "[Omitted long line]"
+                                        (if is-match
+                                            (format "[Omitted long line with %d matches]"
+                                                    match-count)
+                                          "[Omitted long context line]")
                                       line)))
-                              (let* ((separator
-                                      (if is-match
-                                          ":"
-                                        "-"))
-                                     (line-format
-                                      (if show-line-numbers
-                                          (format "%s%s%d%s%s\n"
-                                                  file-path
-                                                  separator
-                                                  i
-                                                  separator
-                                                  truncated-line)
-                                        (format "%s%s%s\n" file-path separator truncated-line))))
-                                (setq output (concat output line-format))
-                                (setq i (1+ i)))))))))))
+                                (let* ((separator
+                                        (if is-match
+                                            ":"
+                                          "-"))
+                                       (line-format
+                                        (if show-line-numbers
+                                            (format "%s%s%d%s%s\n"
+                                                    file-path
+                                                    separator
+                                                    i
+                                                    separator
+                                                    truncated-line)
+                                          (format "%s%s%s\n" file-path separator truncated-line))))
+                                  (setq output (concat output line-format))
+                                  (setq i (1+ i)))))))))))
 
-            ;; Simple content mode without context.
-            (dolist (match matches)
-              (let* ((line-num (xref-file-location-line (xref-item-location match)))
-                     (summary (xref-item-summary match))
-                     ;; Replace summary with placeholder if it exceeds the maximum match length.
-                     (truncated-summary
-                      (if (> (length summary) macher-match-max-columns)
-                          "[Omitted long line]"
-                        summary))
-                     (line-format
-                      (if show-line-numbers
-                          (format "%s:%d:%s\n" file-path line-num truncated-summary)
-                        (format "%s:%s\n" file-path truncated-summary))))
-                (setq output (concat output line-format))))))))
+              ;; Simple content mode without before/after lines. In this case, xref has already
+              ;; loaded enough information to render each line, so we don't need to read the entire
+              ;; file/split it into lines.
+              (let ((processed-lines (make-hash-table :test 'eq)))
+                ;; Loop over unique line numbers and output concatenated summaries.
+                (maphash
+                 (lambda (line-num line-match-list)
+                   (unless (gethash line-num processed-lines)
+                     (puthash line-num t processed-lines)
+                     (let* ((summaries
+                             (mapcar
+                              #'xref-item-summary
+                              ;; We need to reverse the list, since entries were prepended in order.
+                              (reverse line-match-list)))
+                            (combined-summary (substring-no-properties (string-join summaries "")))
+                            (match-count (length line-match-list))
+                            ;; Replace summary with ripgrep-style placeholder if it exceeds the
+                            ;; maximum length.
+                            (truncated-summary
+                             (if (> (length combined-summary) macher-match-max-columns)
+                                 (format "[Omitted long line with %d matches]" match-count)
+                               combined-summary))
+                            (line-format
+                             (if show-line-numbers
+                                 (format "%s:%d:%s\n" file-path line-num truncated-summary)
+                               (format "%s:%s\n" file-path truncated-summary))))
+                       (setq output (concat output line-format)))))
+                 line-matches)))))))
 
     output))
 
