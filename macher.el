@@ -398,8 +398,8 @@ added to the global gptel registry."
   "Maximum length in characters for individual lines in search matches.
 
 Any matches or context lines from the search tool which exceed this
-length will be replaced with an omission message, similar to (for
-example) ripgrep's '--max-columns' option."
+length will be replaced with an omission message, similar to ripgrep's
+'--max-columns' option."
   :type 'natnum
   :group 'macher)
 
