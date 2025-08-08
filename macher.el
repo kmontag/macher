@@ -394,6 +394,15 @@ added to the global gptel registry."
   :type 'function
   :group 'macher)
 
+(defcustom macher-match-max-columns 300
+  "Maximum length in characters for individual lines in search matches.
+
+Any matches or context lines from the search tool which exceed this
+length will be replaced with an omission message, similar to (for
+example) ripgrep's '--max-columns' option."
+  :type 'natnum
+  :group 'macher)
+
 (defcustom macher-workspace-functions '(macher--project-workspace macher--file-workspace)
   "Functions to determine the workspace for the current buffer.
 
@@ -2206,7 +2215,13 @@ MATCHES-ALIST has structure ((rel-path . (xref-match-item1 xref-match-item2 ...)
                         (let ((i start-line))
                           (while (<= i end-line)
                             (let* ((line (nth (1- i) lines))
-                                   (is-match (gethash i match-lines-set)))
+                                   (is-match (gethash i match-lines-set))
+                                   ;; Replace line with placeholder if it exceeds the maximum match
+                                   ;; length.
+                                   (truncated-line
+                                    (if (> (length line) macher-match-max-columns)
+                                        "[Omitted long line]"
+                                      line)))
                               (let* ((separator
                                       (if is-match
                                           ":"
@@ -2218,8 +2233,8 @@ MATCHES-ALIST has structure ((rel-path . (xref-match-item1 xref-match-item2 ...)
                                                   separator
                                                   i
                                                   separator
-                                                  line)
-                                        (format "%s%s%s\n" file-path separator line))))
+                                                  truncated-line)
+                                        (format "%s%s%s\n" file-path separator truncated-line))))
                                 (setq output (concat output line-format))
                                 (setq i (1+ i)))))))))))
 
@@ -2227,10 +2242,15 @@ MATCHES-ALIST has structure ((rel-path . (xref-match-item1 xref-match-item2 ...)
             (dolist (match matches)
               (let* ((line-num (xref-file-location-line (xref-item-location match)))
                      (summary (xref-item-summary match))
+                     ;; Replace summary with placeholder if it exceeds the maximum match length.
+                     (truncated-summary
+                      (if (> (length summary) macher-match-max-columns)
+                          "[Omitted long line]"
+                        summary))
                      (line-format
                       (if show-line-numbers
-                          (format "%s:%d:%s\n" file-path line-num summary)
-                        (format "%s:%s\n" file-path summary))))
+                          (format "%s:%d:%s\n" file-path line-num truncated-summary)
+                        (format "%s:%s\n" file-path truncated-summary))))
                 (setq output (concat output line-format))))))))
 
     output))

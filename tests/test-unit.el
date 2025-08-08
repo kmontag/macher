@@ -1971,7 +1971,62 @@
             "large.js-function final() {\n"
             "large.js:  console.log('hello final');\n"
             "large.js-}\n"
-            "large.js-line24\n"))))))
+            "large.js-line24\n")))))
+
+    (it "replaces long lines with placeholder in content mode (context lines)"
+      ;; Test that long lines are replaced with "[Omitted long line]" in context mode.
+      (let* ((long-line (make-string (+ macher-match-max-columns 100) ?x))
+             (content (concat "short line\n" "hello " long-line "\nshort line again")))
+        (write-region content nil (expand-file-name "longlines.txt" temp-dir))
+
+        (let* ((matches-alist (macher--search-get-xref-matches context "hello"))
+               ;; Get just the matches from longlines.txt.
+               (longlines-matches (assoc "longlines.txt" matches-alist))
+               (result
+                (macher--search-format-content-mode context (list longlines-matches) 1 1 nil)))
+          ;; Verify that the long line is replaced with the placeholder.
+          (expect result :to-match "\\[Omitted long line\\]")
+          ;; Verify that short lines are preserved.
+          (expect result :to-match "short line")
+          (expect result :to-match "short line again")
+          ;; Verify the long line content is not present.
+          (expect result :not :to-match (regexp-quote (substring long-line 0 100))))))
+
+    (it "replaces long lines with placeholder in content mode (simple mode)"
+      ;; Test that long summaries are replaced with "[Omitted long line]" in simple content mode.
+      (let* ((long-line (make-string (+ macher-match-max-columns 50) ?y))
+             (content (concat "match " long-line)))
+        (write-region content nil (expand-file-name "longmatch.txt" temp-dir))
+
+        (let* ((matches-alist (macher--search-get-xref-matches context "match"))
+               ;; Get just the matches from longmatch.txt.
+               (longmatch-matches (assoc "longmatch.txt" matches-alist))
+               ;; Use simple content mode (no context lines).
+               (result
+                (macher--search-format-content-mode context (list longmatch-matches) nil nil nil)))
+          ;; Verify that the long line is replaced with the placeholder.
+          (expect result :to-match "\\[Omitted long line\\]")
+          ;; Verify the long line content is not present.
+          (expect result :not :to-match (regexp-quote (substring long-line 0 100))))))
+
+    (it "preserves lines under the length limit"
+      ;; Test that lines just under the limit are preserved intact.
+
+      ;; TODO: This test passes when I subtract 5 (instead of 1) from macher-match-columns, but fails when I subtract 1 as is being done currently. Fix the implementation, it should work with 1 under the match columns.
+      (let* ((prefix "test")
+             (just-under-limit (make-string (- macher-match-max-columns (+ 1 (length prefix))) ?z))
+             (content (concat prefix just-under-limit)))
+        (write-region content nil (expand-file-name "justunder.txt" temp-dir))
+
+        (let* ((matches-alist (macher--search-get-xref-matches context prefix))
+               ;; Get just the matches from justunder.txt.
+               (justunder-matches (assoc "justunder.txt" matches-alist))
+               (result
+                (macher--search-format-content-mode context (list justunder-matches) nil nil nil)))
+          (expect (length matches-alist) :to-be 1)
+          ;; Verify that the line is preserved and not replaced with placeholder.
+          (expect result :not :to-match "\\[Omitted long line\\]")
+          (expect result :to-match (regexp-quote just-under-limit))))))
 
   (describe "macher--tool-search-helper"
     :var (context temp-dir)
