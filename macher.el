@@ -399,8 +399,10 @@ added to the global gptel registry."
 
 Any matches or context lines from the search tool which exceed this
 length will be replaced with an omission message, similar to ripgrep's
-'--max-columns' option."
-  :type 'natnum
+'--max-columns' option.
+
+Set to nil to disable the limit entirely."
+  :type '(choice (natnum :tag "Maximum number of characters") (const :tag "No limit" nil))
   :group 'macher)
 
 (defcustom macher-workspace-functions '(macher--project-workspace macher--file-workspace)
@@ -2234,7 +2236,8 @@ The inner lists of the MATCHES-ALIST contain 'xref-match-item' structs."
                                    ;; Replace line with ripgrep-style placeholder if it exceeds the
                                    ;; maximum length.
                                    (truncated-line
-                                    (if (> (length line) macher-match-max-columns)
+                                    (if (and macher-match-max-columns
+                                             (> (length line) macher-match-max-columns))
                                         (if is-match
                                             (format "[Omitted long line with %d matches]"
                                                     match-count)
@@ -2275,7 +2278,8 @@ The inner lists of the MATCHES-ALIST contain 'xref-match-item' structs."
                             ;; Replace summary with ripgrep-style placeholder if it exceeds the
                             ;; maximum length.
                             (truncated-summary
-                             (if (> (length combined-summary) macher-match-max-columns)
+                             (if (and macher-match-max-columns
+                                      (> (length combined-summary) macher-match-max-columns))
                                  (format "[Omitted long line with %d matches]" match-count)
                                combined-summary))
                             (line-format

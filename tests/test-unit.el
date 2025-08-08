@@ -1842,7 +1842,7 @@
   (describe "macher--search-format-content-mode"
     :var*
     (context
-     temp-dir
+     temp-dir original-max-columns
      ;; Local helper function to get matches without calling the full
      ;; `macher--search-get-xref-matches'.
      (get-matches-alist
@@ -1870,12 +1870,14 @@
       (setq temp-dir (make-temp-file "macher-test-content-dir" t))
       (setq context
             (macher--make-context :workspace (cons 'project (file-name-as-directory temp-dir))))
+      (setq original-max-columns macher-match-max-columns)
       (write-region
        "line1\nhello world\nhello universe\nline4" nil (expand-file-name "test.txt" temp-dir))
       ;; Add the project marker.
       (write-region "" nil (expand-file-name ".project" temp-dir)))
 
     (after-each
+      (setq macher-match-max-columns original-max-columns)
       (when (and temp-dir (file-exists-p temp-dir))
         (delete-directory temp-dir t)))
 
@@ -2210,6 +2212,53 @@
           ;; Verify that the line is preserved and not replaced with any omission placeholder.
           (expect result :not :to-match "\\[Omitted long")
           (expect result :to-match (regexp-quote just-under-limit)))))
+
+    (it "renders long lines when max-columns is nil (no before/after context)"
+      (let* (
+             ;; Much longer than the typical limit.
+             (very-long-line (make-string 2000 ?x))
+             (content (concat "match " very-long-line " end")))
+        ;; Set max-columns to nil to disable the limit.
+        (setq macher-match-max-columns nil)
+        (write-region content nil (expand-file-name "verylong.txt" temp-dir))
+
+        (let* ((matches-alist (funcall get-matches-alist "match"))
+               ;; Get just the matches from verylong.txt.
+               (verylong-matches (assoc "verylong.txt" matches-alist))
+               (result
+                (macher--search-format-content-mode context (list verylong-matches) nil nil nil)))
+          ;; Verify that the very long line is NOT replaced with any omission placeholder.
+          (expect result :not :to-match "Omitted")
+          ;; Verify that the full long line content is present in the result.
+          (expect result :to-match (regexp-quote very-long-line)))))
+
+    (it "renders long lines when max-columns is nil (with before/after context)"
+      (let* ((very-long-match-line (make-string 1500 ?m))
+             (very-long-context-line (make-string 1800 ?c))
+             (content
+              (concat
+               "short before\n"
+               very-long-context-line
+               "\n"
+               "match "
+               very-long-match-line
+               " end\n"
+               "short after")))
+        ;; Set max-columns to nil to disable the limit.
+        (setq macher-match-max-columns nil)
+        (write-region content nil (expand-file-name "longcontext.txt" temp-dir))
+
+        (let* ((matches-alist (funcall get-matches-alist "match"))
+               ;; Get just the matches from longcontext.txt.
+               (longcontext-matches (assoc "longcontext.txt" matches-alist))
+               (result
+                (macher--search-format-content-mode
+                 context (list longcontext-matches) 1 1 nil))) ; 1 line before/after
+          ;; Verify that neither match line nor context lines are truncated.
+          (expect result :not :to-match "Omitted")
+          ;; Verify that both very long lines are present in full.
+          (expect result :to-match (regexp-quote very-long-match-line))
+          (expect result :to-match (regexp-quote very-long-context-line)))))
 
     (it "uses ripgrep-style placeholder for context lines"
       ;; Test that long context lines (non-matching) get "[Omitted long context line]".
