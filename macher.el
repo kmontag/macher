@@ -3107,7 +3107,7 @@ patch buffer) are included in the generated prompt."
 (defun macher--discuss-prompt (input is-selected)
   "Generate a prompt for discussion based on INPUT.
 
-IS-SELECTED sepecifies whether the input comes from the selected region.
+IS-SELECTED specifies whether the input comes from the selected region.
 
 Currently this is just a no-op transformation."
   input)
