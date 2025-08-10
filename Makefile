@@ -33,6 +33,14 @@ lint.%: $(EASK) .eask
 # the elisp-autofmt defs file shouldn't be checked.
 	$(EASK) --strict lint $* *.el demo/*.el tests/[a-z]*.el
 
+# Special override for the `package-lint` linter to exclude the externals file, which doesn't follow
+# namespacing conventions. We need this override because at time of writing, it's not possible to
+# simply ignore namespacing errors on a single line - see
+# https://github.com/purcell/package-lint/issues/125.
+.PHONY: lint.package
+lint.package: $(EASK) .eask
+	$(EASK) --strict lint package $(filter-out macher-externals.el,$(wildcard *.el)) demo/*.el tests/[a-z]*.el
+
 .PHONY: lint
 lint: analyze lint.declare lint.package lint.regexps
 
