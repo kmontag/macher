@@ -3523,14 +3523,8 @@ CALLBACK takes no arguments."
 
 (defun macher--preset-notools ()
   "Set up the macher preset without tools (context only)."
-  ;; The global prompt transforms appear to get overwritten to nil while first applying presets. In
-  ;; this case, we need to restore the defaults to make sure the -add-context transform and any
-  ;; other preset transforms get applied.
-  (let ((prompt-transforms
-         (or gptel-prompt-transform-functions
-             '(gptel--transform-apply-preset gptel--transform-add-context))))
-    `(:prompt-transform-functions
-      ,(append prompt-transforms (list #'macher--prompt-transform-add-context)))))
+  `(:prompt-transform-functions
+    ,(append gptel-prompt-transform-functions (list #'macher--prompt-transform-add-context))))
 
 (defun macher--prompt-transform-add-context (callback fsm)
   "A gptel prompt transformer to add context from the current workspace.
