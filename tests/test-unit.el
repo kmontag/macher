@@ -4070,7 +4070,7 @@
                  `(,(lambda ()
                       (setq dispatched-p t)
                       (expect (current-buffer) :to-be project-file-buffer)))))
-            (macher-action 'implement "test prompt")
+            (macher-action 'implement nil "test prompt")
             (expect dispatched-p :to-be t)))))
 
     (it "passes original prompt when no before-action functions modify it"
@@ -4079,7 +4079,7 @@
                ;; Make sure the before actions are empty.
                (macher-before-action-functions nil))
           ;; Call macher-action with the original prompt.
-          (macher-action 'implement original-prompt)
+          (macher-action 'implement nil original-prompt)
           ;; Verify gptel-request was called.
           (expect 'gptel-request :to-have-been-called)
           ;; Get the arguments passed to gptel-request.
@@ -4099,7 +4099,7 @@
                    ;; Modify the prompt in the execution object.
                    (setf (macher-action-execution-prompt execution) modified-prompt)))))
           ;; Call macher-action with the original prompt.
-          (macher-action 'implement original-prompt)
+          (macher-action 'implement nil original-prompt)
           ;; Verify gptel-request was called.
           (expect 'gptel-request :to-have-been-called)
           ;; Get the arguments passed to gptel-request.
@@ -4119,7 +4119,7 @@
                    ;; Set context in the execution object.
                    (setf (macher-action-execution-context execution) test-context)))))
           ;; Call macher-action with the original prompt.
-          (macher-action 'implement original-prompt)
+          (macher-action 'implement nil original-prompt)
           ;; Verify gptel-request was called.
           (expect 'gptel-request :to-have-been-called)
           ;; Get the arguments passed to gptel-request.
