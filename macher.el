@@ -38,6 +38,52 @@
 (require 'cl-lib)
 (require 'macher-externals)
 
+;;; Preliminary definitions needed for defcustom defaults
+
+(defun macher-action-from-region-or-input (input-prompt transform preset &optional input)
+  "Get a macher action plist from user input or the selected region.
+
+First, gets user input from the selected region, or if no region is
+selected, prompts interactively using `read-string' with the
+INPUT-PROMPT (e.g. \"Your request: \"). If an INPUT argument is provided
+explicitly, this step will be skipped and the argument value will be
+used directly.
+
+Then, generates a full prompt by calling the TRANSFORM function with two
+arguments:
+
+- INPUT - the user input string from the previous step
+
+- IS-SELECTED - a boolean indicating whether the user input was pulled
+  from the selected region (as opposed to from a prompt or an explicit
+  INPUT argument).
+
+The returned plist will contain the transformed :prompt, the
+:preset (simply the PRESET argument), and a :summary (equal to the input
+that was passed to the transformer).
+
+This function is used by the default actions in the
+'macher-actions-alist', and provided as a convenience for defining
+custom actions with the same workflow."
+
+  ;; Prompt to save any unsaved buffers.
+  (save-some-buffers nil (lambda () (and (buffer-file-name) (buffer-modified-p))))
+
+  (let* ((user-input
+          (cond
+           ;; If INPUT is explicitly provided, use it directly.
+           (input
+            input)
+           ;; If there's an active region, use its contents.
+           ((use-region-p)
+            (buffer-substring-no-properties (region-beginning) (region-end)))
+           ;; Otherwise, prompt the user.
+           (t
+            (read-string input-prompt))))
+         (is-selected (and (not input) (use-region-p)))
+         (transformed-prompt (funcall transform user-input is-selected)))
+    `(:prompt ,transformed-prompt :preset ,preset :summary ,user-input)))
+
 ;;; Customization
 
 (defgroup macher nil
@@ -46,27 +92,58 @@
   :prefix "macher-")
 
 (defcustom macher-actions-alist
-  '((implement :prompt "To implement: " :preset macher :transform macher--implement-prompt)
-    (revise :prompt "Revision instructions: " :preset macher :transform macher--revise-prompt)
-    (discuss :prompt "Discuss: " :preset macher-ro :transform identity))
-  "Alist defining actions and their configuration.
+  `((implement
+     .
+     ,(apply-partially #'macher-action-from-region-or-input
+                       "To implement: "
+                       #'macher--implement-prompt
+                       'macher))
+    (revise
+     .
+     ,(apply-partially #'macher-action-from-region-or-input
+                       "Revision instructions: "
+                       #'macher--revise-prompt
+                       'macher))
+    (discuss
+     .
+     ,(apply-partially #'macher-action-from-region-or-input
+                       "Discuss: "
+                       #'macher--discuss-prompt
+                       'macher)))
+  "Alist of actions that can be invoked within a macher workspace.
 
-Each entry is of the form (ACTION . PLIST) where ACTION is a symbol
-representing the action name and PLIST contains the following keys:
+These definitions are used by `macher-action' to send macher requests
+with a specific workflow, where a prompt is generated based on
+contextual information and sent from a shared buffer for the current
+workspace. See `macher-action' for a more detailed description of the
+workflow.
 
-- :transform - Function to transform the user input into the final
-  prompt (required)
+Each entry is of the form (ACTION . FUNCTION-OR-PLIST) where ACTION is a
+symbol representing the action name and FUNCTION-OR-PLIST is (or
+returns) a plist containing the following keys:
+
+- :prompt - the full prompt string to send to the LLM.
 
 - :preset - gptel preset to use for the request (optional, defaults to
-  'macher)
+  'macher). This can be a symbol (one of the keys from
+  `macher--presets-alist') or a raw gptel preset plist.
 
-- :prompt - String prompt to show when asking for user input (optional)
+- :summary - a summarized version of the prompt (optional). This won't
+  affect the actual request content, but it will be included with the
+  'macher-action-execution' struct provided to the before-/after-action
+  hooks, for potential usage in the UI. For the built-in actions, this
+  will be the raw user input or selected-region text that was used to
+  generate the prompt (as opposed to the full prompt including
+  instructions and other contextual information). The default action
+  buffer UI uses this to render a heading above the full prompt text.
 
-The :transform function receives the user input string and should return
-the final prompt string to send to the LLM.
-
-The :preset can be a symbol (key from `macher--presets-alist') or a raw
-gptel preset plist."
+If FUNCTION-OR-PLIST is a function, it will be called in the context
+where the action was initiated, so it can access buffer content,
+region-selection status, etc. The function must be callable with no
+arguments, although additional (i.e. &rest) arguments passed to
+`macher-action' will be forwarded to it if provided - this allows, for
+example, input strings to be passed programmatically to actions based on
+`macher-action-from-region-or-input'."
   :type
   '(alist
     :key-type symbol
@@ -552,13 +629,14 @@ or is aborted.")
 (cl-defstruct (macher-action-execution (:constructor macher--make-action-execution))
   "Structure holding execution information for a macher action.
 
-- ACTION is the action symbol (e.g. 'implement, 'revise, 'discuss).
-
-- INPUT is the raw user input string.
+- ACTION is the action name symbol (e.g. 'implement, 'revise, 'discuss).
 
 - PROMPT is the transformed prompt string that will be sent to the LLM.
   Functions in 'macher-before-action-functions' can modify this field to
   change the prompt before sending.
+
+- SUMMARY is a summary of the prompt being sent - for built-in actions,
+  this is the actual user input string.
 
 - BUFFER is the action buffer where the request will be sent.
 
@@ -569,8 +647,8 @@ or is aborted.")
   the 'gptel-fsm' (state machine) associated with the request. Functions
   in 'macher-before-action-functions' can modify this field."
   (action)
-  (input)
   (prompt)
+  (summary)
   (buffer)
   (source)
   (context nil))
@@ -907,7 +985,7 @@ LLM content.
 
 It adapts the prompt formatting based on the current major mode."
   (let* ((prompt (macher-action-execution-prompt execution))
-         (input (macher-action-execution-input execution))
+         (summary (macher-action-execution-summary execution))
          (action (macher-action-execution-action execution))
          (action-str (symbol-name action))
          ;; Use some custom formatting if we're in org mode. Otherwise, format for markdown.
@@ -921,9 +999,9 @@ It adapts the prompt formatting based on the current major mode."
               ;; Add the action as a tag at the end of the headline.
               (format " :%s:" action-str)
             ""))
-         ;; Extract the first non-whitespace line from the prompt and truncate to fill-column.
-         (truncated-input
-          (let* ((lines (split-string input "\n" t "[[:space:]]*"))
+         ;; Extract the first non-whitespace line from the summary and truncate to fill-column.
+         (truncated-summary
+          (let* ((lines (split-string summary "\n" t "[[:space:]]*"))
                  (first-line (or (car lines) ""))
                  ;; Calculate available space: total fill-column minus prefix, action, and spacing.
                  (prefix (or (alist-get major-mode gptel-prompt-prefix-alist) ""))
@@ -935,7 +1013,9 @@ It adapts the prompt formatting based on the current major mode."
          (full-prompt-str
           (if is-org-mode
               (concat
-               (format ":PROMPT:\n" truncated-input) (org-escape-code-in-string prompt) "\n:END:\n")
+               (format ":PROMPT:\n" truncated-summary)
+               (org-escape-code-in-string prompt)
+               "\n:END:\n")
             (concat "```\n" prompt "\n```\n"))))
 
     (goto-char (point-max))
@@ -945,7 +1025,7 @@ It adapts the prompt formatting based on the current major mode."
       (insert (alist-get major-mode gptel-prompt-prefix-alist)))
 
     ;; Header string.
-    (insert (format "%s%s%s\n" header-prefix truncated-input header-postfix))
+    (insert (format "%s%s%s\n" header-prefix truncated-summary header-postfix))
 
     ;; Add the demarcated prompt text.
     (insert full-prompt-str)
@@ -2991,8 +3071,10 @@ otherwise returns (nil . nil)."
 
 ;;; Default Prompt Functions
 
-(defun macher--implement-prompt (content)
-  "Generate an implementation prompt for CONTENT in the current buffer."
+(defun macher--implement-prompt (input is-selected)
+  "Generate an implementation prompt for INPUT in the current buffer.
+
+IS-SELECTED specifies whether the input comes from the selected region."
   (let* ((workspace (macher-workspace))
          (filename (buffer-file-name))
          (relpath
@@ -3026,10 +3108,12 @@ otherwise returns (nil . nil)."
              "3. Create working, complete code that fulfills the request\n\n"
              "%s"
              "\n\nIMPLEMENTATION REQUEST:\n\n%s")
-            source-description content)))
+            source-description input)))
 
-(defun macher--revise-prompt (content &optional patch-buffer)
-  "Generate a prompt for revising based on CONTENT (revision instructions).
+(defun macher--revise-prompt (input is-selected &optional patch-buffer)
+  "Generate a prompt for revising based on INPUT (revision instructions).
+
+IS-SELECTED specifies whether the input comes from the selected region.
 
 The contents of the PATCH-BUFFER (defaulting to the current workspace's
 patch buffer) are included in the generated prompt."
@@ -3054,10 +3138,19 @@ patch buffer) are included in the generated prompt."
              "YOUR PREVIOUS WORK (for reference)\n"
              "==================================\n\n"
              "%s")
-            (if (and content (not (string-empty-p content)))
-                (format "REVISION INSTRUCTIONS:\n%s\n\n" content)
+            (if (and input (not (string-empty-p input)))
+                (format "REVISION INSTRUCTIONS:\n%s\n\n" input)
               "")
             patch-content)))
+
+(defun macher--discuss-prompt (input is-selected)
+  "Generate a prompt for discussion based on INPUT.
+
+IS-SELECTED specifies whether the input comes from the selected region.
+
+Currently this is just a no-op transformation."
+  input)
+
 
 (defun macher--patch-prepare-diff (context fsm callback)
   "Generate and add a diff to the current buffer for CONTEXT.
@@ -3668,21 +3761,44 @@ globally. For example:
         (apply #'gptel-make-preset actual-name preset-config)))))
 
 ;;;###autoload
-(defun macher-action (action &optional user-input callback)
-  "Execute an ACTION with optional USER-INPUT.
+(defun macher-action (action &optional callback &rest action-args)
+  "Send the prompt for a macher ACTION within a shared workspace buffer.
 
-When called interactively, prompts the user to select an action from
-available actions.
+More specifically, this function implements the following workflow for
+sending macher requests:
 
-ACTION should be a symbol defined in `macher-actions-alist'.
-If USER-INPUT is not provided, the user will be prompted based on the
-action configuration.
+1. Generate a prompt based on contextual information, e.g. the cursor
+   position or selected region.
+
+2. Send the prompt from a shared workspace buffer (the
+   `macher-action-buffer'), using a gptel preset that provides macher
+   tools.
+
+Lifecycle hooks are also run to allow modifying or otherwise handling
+the prompt/response - see 'macher-action-dispatch-hook',
+'macher-before-action-functions', and 'macher-after-action-functions'.
+The default action buffer UI uses these hooks to render information
+about outgoing action requests.
+
+ACTION can be a symbol defined in 'macher-actions-alist', or a list with
+the same format as an entry in 'macher-actions-alist' (e.g.
+'(my-action-name . my-action-function-or-plist)).
 
 If CALLBACK is provided, it will be called when the action completes.
 The callback will receive three arguments, the same as functions in
 'macher-after-action-functions': ERROR (nil on success, or an error
 description on failure), EXECUTION (the 'macher-action-execution' object
-for the action), and FSM (the `gptel-fsm' object for the request)."
+for the action), and FSM (the `gptel-fsm' object for the request).
+
+Any additional ACTION-ARGS will be forwarded to the action function, or
+simply ignored if the action is defined as a plain plist.
+
+When called interactively, prompts the user to select an ACTION from
+those available in the 'macher-actions-alist'.
+
+Note that macher presets can be used with any gptel request, and you
+don't need to use this function to use macher. This function simply
+implements one possible workflow."
   (interactive (let* ((actions (mapcar #'car macher-actions-alist))
                       (action-names (mapcar #'symbol-name actions))
                       (selected-name (completing-read "Action: " action-names nil t))
@@ -3692,91 +3808,101 @@ for the action), and FSM (the `gptel-fsm' object for the request)."
   ;; Run the action dispatch hook in the source buffer.
   (run-hooks 'macher-action-dispatch-hook)
 
-  ;; Prompt to save any unsaved buffers.
-  (save-some-buffers nil (lambda () (and (buffer-file-name) (buffer-modified-p))))
-
-  (let* ((action-config (alist-get action macher-actions-alist))
-         (prompt-text (or (plist-get action-config :prompt) "Prompt: "))
-         (preset (or (plist-get action-config :preset) 'macher))
-         (transform-fn (plist-get action-config :transform)))
-
+  (let ((action-config
+         (if (symbolp action)
+             (assoc action macher-actions-alist)
+           action)))
     (unless action-config
-      (error "Unknown action: %s" action))
+      (user-error (format "Unrecognized action: %s" action)))
 
-    (unless transform-fn
-      (error "No :transform function specified for action %s" action))
+    (let* ((action-name (car action-config))
+           (action-function-or-plist (cdr action-config))
+           (action-plist
+            (if (functionp action-function-or-plist)
+                (apply action-function-or-plist action-args)
+              action-function-or-plist)))
 
-    ;; Get user input if not provided.
-    (let* ((input
-            (or user-input
-                (if (use-region-p)
-                    (buffer-substring-no-properties (region-beginning) (region-end))
-                  (read-string prompt-text))))
-           ;; Transform the input into the final prompt.
-           (final-prompt (funcall transform-fn input))
-           ;; Get the action buffer for this workspace.
-           (action-buffer (macher-action-buffer nil t))
-           ;; Store the source buffer (where the action was initiated).
-           (source-buffer (current-buffer))
-           ;; Create execution object to pass to callbacks.
-           (execution
-            (macher--make-action-execution
-             :action action
-             :input input
-             :prompt final-prompt
-             :buffer action-buffer
-             :source source-buffer))
-           ;; Create a callback wrapper that includes the action hooks.
-           (request-callback
-            (lambda (exit-code fsm)
-              (let* ((state (gptel-fsm-state fsm))
-                     (error
-                      (cond
-                       ;; If we have a non-nil exit code (i.e. 'abort), just use it as the error.
-                       (exit-code)
-                       ;; If the FSM is in an errored state, extract the error text.
-                       ((eq state 'ERRS)
-                        (let* ((info (gptel-fsm-info fsm))
-                               (error (plist-get info :error))
-                               (http-msg (plist-get info :status))
-                               (error-type (plist-get error :type))
-                               (error-msg (plist-get error :message)))
-                          (or error-msg (format "%s: %s" error-type http-msg))))
-                       ;; Otherwise, consider the request successful. In practice the state should
-                       ;; always be 'DONE here.
-                       (t
-                        nil))))
+      (unless action-config
+        (error "Unknown action: %s" action))
 
-                ;; Call the original callback if provided. Don't change the buffer for this, to
-                ;; avoid any potential issues with killed buffers.
-                (when (functionp callback)
-                  (funcall callback error execution fsm))
+      ;; Handle the older action format with a warning. This fallback will be removed in a future
+      ;; update.
+      (when (plist-get action-plist :transform)
+        (warn
+         (concat
+          "The format for entries in the macher-actions-plist has changed."
+          "See the docstring for details."
+          "Please update the definition for action '%s'."))
+        (setq action-plist
+              (macher-action-from-region-or-input
+               (plist-get action-plist :prompt) (plist-get action-plist :transform))))
 
-                ;; Run the after-action hook if the action buffer is still live.
-                (when (buffer-live-p action-buffer)
-                  (with-current-buffer action-buffer
-                    (run-hook-with-args 'macher-after-action-functions error execution fsm)))))))
+      (let* ((prompt (plist-get action-plist :prompt))
+             (preset (or (plist-get action-plist :preset) 'macher))
+             (summary (plist-get action-plist :summary))
+             ;; Get the action buffer for this workspace.
+             (action-buffer (macher-action-buffer nil t))
+             ;; Store the source buffer (where the action was initiated).
+             (source-buffer (current-buffer))
+             ;; Create execution object to pass to callbacks.
+             (execution
+              (macher--make-action-execution
+               :action action
+               :prompt prompt
+               :summary summary
+               :buffer action-buffer
+               :source source-buffer))
+             ;; Create a callback wrapper that includes the action hooks.
+             (request-callback
+              (lambda (exit-code fsm)
+                (let* ((state (gptel-fsm-state fsm))
+                       (error
+                        (cond
+                         ;; If we have a non-nil exit code (i.e. 'abort), just use it as the error.
+                         (exit-code)
+                         ;; If the FSM is in an errored state, extract the error text.
+                         ((eq state 'ERRS)
+                          (let* ((info (gptel-fsm-info fsm))
+                                 (error (plist-get info :error))
+                                 (http-msg (plist-get info :status))
+                                 (error-type (plist-get error :type))
+                                 (error-msg (plist-get error :message)))
+                            (or error-msg (format "%s: %s" error-type http-msg))))
+                         ;; Otherwise, consider the request successful. In practice the state should
+                         ;; always be 'DONE here.
+                         (t
+                          nil))))
 
-      ;; Run the before-action hook from the shared buffer.
-      (with-current-buffer action-buffer
-        (run-hook-with-args 'macher-before-action-functions execution))
-      ;; It's possible for the before-action hook to change the current buffer, so re-enter the
-      ;; shared buffer explicitly.
-      (with-current-buffer action-buffer
-        (macher--with-preset
-         preset
-         (lambda ()
-           ;; Just like `gptel-send', but with a prompt specified directly, and with the callback on
-           ;; termination. Use the potentially modified prompt and context from the execution
-           ;; object.
-           (macher--gptel-request request-callback
-                                  (macher-action-execution-prompt execution)
-                                  :context (macher-action-execution-context execution)
-                                  ;; Insert at the end of the buffer.
-                                  :position (point-max)
-                                  :stream gptel-stream
-                                  :transforms gptel-prompt-transform-functions
-                                  :fsm (gptel-make-fsm :handlers gptel-send--handlers))))))))
+                  ;; Call the original callback if provided. Don't change the buffer for this, to
+                  ;; avoid any potential issues with killed buffers.
+                  (when (functionp callback)
+                    (funcall callback error execution fsm))
+
+                  ;; Run the after-action hook if the action buffer is still live.
+                  (when (buffer-live-p action-buffer)
+                    (with-current-buffer action-buffer
+                      (run-hook-with-args 'macher-after-action-functions error execution fsm)))))))
+
+        ;; Run the before-action hook from the shared buffer.
+        (with-current-buffer action-buffer
+          (run-hook-with-args 'macher-before-action-functions execution))
+        ;; It's possible for the before-action hook to change the current buffer, so re-enter the
+        ;; shared buffer explicitly.
+        (with-current-buffer action-buffer
+          (macher--with-preset
+           preset
+           (lambda ()
+             ;; Just like `gptel-send', but with a prompt specified directly, and with the callback on
+             ;; termination. Use the potentially modified prompt and context from the execution
+             ;; object.
+             (macher--gptel-request request-callback
+                                    (macher-action-execution-prompt execution)
+                                    :context (macher-action-execution-context execution)
+                                    ;; Insert at the end of the buffer.
+                                    :position (point-max)
+                                    :stream gptel-stream
+                                    :transforms gptel-prompt-transform-functions
+                                    :fsm (gptel-make-fsm :handlers gptel-send--handlers)))))))))
 
 ;;;###autoload
 (defun macher-abort (&optional buf)
@@ -3855,7 +3981,7 @@ on success, a string error description on failure, or the symbol 'abort
 if the request was aborted), EXECUTION (the `macher-action-execution'
 object for the action), and FSM (the `gptel-fsm' object for the request)."
   (interactive)
-  (macher-action 'implement instructions callback))
+  (macher-action 'implement callback instructions))
 
 ;;;###autoload
 (defun macher-revise (&optional instructions callback)
@@ -3876,7 +4002,7 @@ success, or an error description on failure), EXECUTION (the
 `macher-action-execution' object for the action), and FSM (the
 `gptel-fsm' object for the request)."
   (interactive)
-  (macher-action 'revise instructions callback))
+  (macher-action 'revise callback instructions))
 
 ;;;###autoload
 (defun macher-discuss (&optional question callback)
@@ -3897,7 +4023,7 @@ success, or an error description on failure), EXECUTION (the
 `macher-action-execution' object for the action), and FSM (the
 `gptel-fsm' object for the request)."
   (interactive)
-  (macher-action 'discuss question callback))
+  (macher-action 'discuss callback question))
 
 ;; Local variables:
 ;; elisp-autofmt-load-packages-local: ("cl-macs")
