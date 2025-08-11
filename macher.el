@@ -1129,13 +1129,17 @@ displays the patch buffer."
 (defun macher--process-request (reason context fsm)
   "Process the macher CONTEXT throughout the request lifecycle.
 
-REASON is the reason that the processing function is being invoked.
+This is the default implementation of 'macher-process-request-function'.
+It uses the 'macher-patch-prepare-functions' and the
+'macher-patch-ready-hook' to create/handle a patch based on the changes
+made during the request.
 
-CONTEXT is the 'macher-context' for the current request.
+REASON is the reason that the processing function is being invoked. This
+argument is currently ignored.
 
-FSM is the 'gptel-fsm' (state machine) for the current request.
+CONTEXT is the 'macher-context' for the request being processed.
 
-This is the default implementation of 'macher-process-request-function'."
+FSM is the 'gptel-fsm' (state machine) for the request being processed."
   (when context
     ;; Check if any changes were made during the request using the dirty-p flag.
     (when (macher-context-dirty-p context)
