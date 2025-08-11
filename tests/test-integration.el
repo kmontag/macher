@@ -2695,7 +2695,65 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Should NOT contain any diff content since no changes were made
               (expect patch :not :to-match "diff --git")
               (expect patch :not :to-match "@@")
-              (expect patch :not :to-match "^[+-]"))))))))
+              (expect patch :not :to-match "^[+-]")))))))
+
+  (describe "gptel preset integration"
+    :var (callback-called exit-code callback project-file-buffer orig-known-presets)
+
+    (before-each
+      (setq callback-called nil)
+      (setq exit-code nil)
+      (setq callback
+            (macher-test--make-once-only-callback
+             (lambda (cb-exit-code _cb-execution cb-fsm)
+               (setq callback-called t)
+               (setq exit-code cb-exit-code))))
+      (setq orig-known-presets gptel--known-presets)
+
+      (funcall setup-project "gptel-preset-test")
+
+      ;; Load the project file in an actual file buffer, to avoid unsaved files appearing during
+      ;; `save-some-buffers'.
+      (find-file project-file)
+      (setq project-file-buffer (current-buffer)))
+
+    (after-each
+      (kill-buffer project-file-buffer)
+      (setq gptel--known-presets orig-known-presets))
+
+    (it "applies global gptel preset when referenced in macher-implement prompt"
+      ;; Create a global gptel preset that we can test
+      (gptel-make-preset
+       'test-preset
+       :description "Test preset for integration testing"
+       :system "You are a helpful coding assistant. Always respond with exactly this phrase: PRESET_WAS_APPLIED")
+
+      (funcall setup-backend '("PRESET_WAS_APPLIED"))
+
+      (with-current-buffer project-file-buffer
+        (macher-implement "@test-preset testing inline presets" callback)
+
+        ;; Wait for the async response.
+        (let ((timeout 0))
+          (while (and (not callback-called) (< timeout 100))
+            (sleep-for 0.1)
+            (setq timeout (1+ timeout))))
+
+        (expect callback-called :to-be-truthy)
+        (expect exit-code :to-be nil)
+
+        ;; Check that the preset was applied by verifying the system message was included.
+        (let* ((requests (funcall received-requests))
+               (system-messages (funcall messages-of-type requests "system")))
+          (expect (> (length requests) 0) :to-be-truthy)
+          (expect (> (length system-messages) 0) :to-be-truthy)
+
+          ;; Verify that the test preset's system message appears in the request.
+          (let ((system-content
+                 (mapconcat (lambda (msgs) (string-join msgs " ")) system-messages " ")))
+            (expect
+             "You are a helpful coding assistant. Always respond with exactly this phrase: PRESET_WAS_APPLIED"
+             :to-appear-once-in system-content)))))))
 
 ;; Local variables:
 ;; elisp-autofmt-load-packages-local: ("./_defs.el")
