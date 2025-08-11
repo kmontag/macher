@@ -231,7 +231,7 @@
       ;; Set dirty-p to t.
       (setf (macher-context-dirty-p context) t)
       ;; Call macher--process-request.
-      (macher--process-request context fsm)
+      (macher--process-request 'test context fsm)
       ;; Verify macher--build-patch was called.
       (expect #'macher--build-patch :to-have-been-called))
 
@@ -239,15 +239,170 @@
       ;; Ensure dirty-p is nil (default).
       (expect (macher-context-dirty-p context) :to-be nil)
       ;; Call macher--process-request.
-      (macher--process-request context fsm)
+      (macher--process-request 'test context fsm)
       ;; Verify macher--build-patch was not called.
       (expect #'macher--build-patch :not :to-have-been-called))
 
     (it "does not call macher--build-patch when context is nil"
       ;; Call with nil context.
-      (macher--process-request nil fsm)
+      (macher--process-request 'test nil fsm)
       ;; Verify macher--build-patch was not called.
       (expect #'macher--build-patch :not :to-have-been-called)))
+
+  (describe "macher--context-for-fsm"
+    :var (context)
+
+    (before-each
+      (funcall setup-project)
+      (setq context (macher--make-context :workspace `(project . ,project-dir))))
+
+    (it "extracts context from FSM with macher tools"
+      ;; Create a macher tool with our context.
+      (let ((tool (macher--make-tool context :name "test_tool" :function (lambda () "test"))))
+        (with-temp-buffer
+          ;; Set up tools in the buffer as gptel would.
+          (setq-local gptel-tools (list tool))
+          ;; Create FSM using gptel-request with dry-run to get proper setup.
+          (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
+            ;; Should find the context.
+            (expect (macher--context-for-fsm fsm) :to-be context)))))
+
+    (it "returns nil when FSM has no macher tools"
+      ;; Create a regular gptel tool without macher context.
+      (let ((regular-tool (gptel-make-tool :name "regular" :function (lambda () "test"))))
+        (with-temp-buffer
+          ;; Set up tools in the buffer as gptel would.
+          (setq-local gptel-tools (list regular-tool))
+          ;; Create FSM using gptel-request with dry-run to get proper setup.
+          (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
+            ;; Should return nil.
+            (expect (macher--context-for-fsm fsm) :to-be nil)))))
+
+    (it "returns nil when FSM is nil"
+      (expect (macher--context-for-fsm nil) :to-be nil))
+
+    (it "returns nil when FSM has no tools"
+      (with-temp-buffer
+        ;; No tools set up.
+        (setq-local gptel-tools nil)
+        ;; Create FSM using gptel-request with dry-run.
+        (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
+          ;; FSM with no tools should return nil.
+          (expect (macher--context-for-fsm fsm) :to-be nil)))))
+
+  (describe "macher-process-request"
+    :var (context original-process-fn dummy-process-fn)
+
+    (before-each
+      (funcall setup-project)
+      (setq context (macher--make-context :workspace `(project . ,project-dir)))
+      ;; Store original function.
+      (setq original-process-fn macher-process-request-function)
+      ;; Set up a spy for the process function.
+      (setf (symbol-function 'dummy-process-fn) (lambda (&rest _)))
+      (spy-on 'dummy-process-fn)
+      (setq macher-process-request-function #'dummy-process-fn))
+
+    (after-each
+      (setq macher-process-request-function original-process-fn))
+
+    (it "calls process function with extracted context"
+      ;; Create a macher tool with our context.
+      (let ((tool (macher--make-tool context :name "test_tool" :function (lambda () "test"))))
+        (with-temp-buffer
+          ;; Set up tools in the buffer as gptel would.
+          (setq-local gptel-tools (list tool))
+          ;; Create FSM using gptel-request with dry-run to get proper setup.
+          (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
+            ;; Call macher-process-request.
+            (macher-process-request 'test-reason fsm)
+            ;; Should have called the process function with correct arguments.
+            (expect 'dummy-process-fn :to-have-been-called-with 'test-reason context fsm)))))
+
+    (it "uses macher--fsm-latest when FSM not provided"
+      ;; Create a macher tool with our context.
+      (let ((tool (macher--make-tool context :name "test_tool" :function (lambda () "test"))))
+        (with-temp-buffer
+          ;; Set up tools in the buffer as gptel would.
+          (setq-local gptel-tools (list tool))
+          ;; Create FSM using gptel-request with dry-run to get proper setup.
+          (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
+            ;; Set up FSM as the latest one.
+            (setq macher--fsm-latest fsm)
+            ;; Call without explicit FSM.
+            (macher-process-request 'test-reason)
+            ;; Should have called the process function with macher--fsm-latest.
+            (expect 'dummy-process-fn :to-have-been-called-with 'test-reason context fsm)))))
+
+    (it "does nothing when no context found"
+      (with-temp-buffer
+        ;; No macher tools.
+        (setq-local gptel-tools nil)
+        ;; Create FSM using gptel-request with dry-run.
+        (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
+          ;; Call without any macher tools.
+          (macher-process-request 'test-reason fsm)
+          ;; Should not have called the process function.
+          (expect 'dummy-process-fn :not :to-have-been-called)))))
+
+
+  (describe "macher-process-request-dwim"
+    :var (workspace context action-buffer original-process-fn dummy-process-fn)
+
+    (before-each
+      (funcall setup-project)
+      (setq workspace `(project . ,project-dir))
+      (setq context (macher--make-context :workspace workspace))
+      (setq action-buffer (macher-action-buffer workspace t))
+      ;; Store original function.
+      (setq original-process-fn macher-process-request-function)
+      ;; Set up a spy for the process function.
+      (setf (symbol-function 'dummy-process-fn) (lambda (&rest _)))
+      (spy-on 'dummy-process-fn)
+      (setq macher-process-request-function #'dummy-process-fn))
+
+    (after-each
+      (setq macher-process-request-function original-process-fn))
+
+    (it "uses local macher--fsm-latest when present"
+      ;; Create a macher tool with our context.
+      (let ((tool (macher--make-tool context :name "test_tool" :function (lambda () "test"))))
+        (with-temp-buffer
+          (setq-local macher--workspace workspace)
+          ;; Set up tools in the buffer as gptel would.
+          (setq-local gptel-tools (list tool))
+          ;; Create FSM using gptel-request with dry-run to get proper setup.
+          (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
+            ;; Set up FSM as latest one in the current buffer.
+            (setq macher--fsm-latest fsm)
+            ;; Call with local FSM present.
+            (macher-process-request-dwim 'test-reason)
+            ;; Should have called the process function with the local FSM.
+            (expect 'dummy-process-fn :to-have-been-called-with 'test-reason context fsm)))))
+
+    (it "falls back to action buffer macher--fsm-latest when local not present"
+      ;; Create a macher tool with our context.
+      (let ((tool (macher--make-tool context :name "test_tool" :function (lambda () "test"))))
+        (with-current-buffer action-buffer
+          ;; Set up tools in the buffer as gptel would.
+          (setq-local gptel-tools (list tool))
+          ;; Create FSM using gptel-request with dry-run to get proper setup.
+          (let ((fsm (gptel-request "test prompt" :buffer action-buffer :dry-run t)))
+            ;; Set up FSM as latest one in the action buffer context.
+            (setq macher--fsm-latest fsm)))
+
+        ;; Call from a different buffer without local FSM.
+        (with-temp-buffer
+          (setq-local macher--workspace workspace)
+          ;; Explicitly clear local FSM to ensure fallback behavior.
+          (setq macher--fsm-latest nil)
+          (macher-process-request-dwim 'test-reason)
+          ;; Should have called the process function with the action buffer FSM.
+          (expect
+           'dummy-process-fn
+           :to-have-been-called-with 'test-reason context
+           (with-current-buffer action-buffer
+             macher--fsm-latest))))))
 
   (describe "macher--read-string"
     (it "returns full content when no offset or limit specified"
@@ -4137,6 +4292,264 @@
                  (passed-context (plist-get call-plist :context)))
             ;; The :context key should contain our test context.
             (expect passed-context :to-equal test-context))))))
+
+  (describe "macher--add-transition-handler"
+    :var (fsm test-handler handler-calls)
+
+    (before-each
+      (setq handler-calls '())
+      (setq test-handler (lambda (fsm) (push (gptel-fsm-state fsm) handler-calls)))
+      ;; Create an FSM with gptel's standard transitions and handlers
+      (setq fsm
+            (gptel-make-fsm :table gptel-request--transitions :handlers gptel-request--handlers)))
+
+    (it "adds handler to all states that can be transitioned to"
+      ;; Add our test handler
+      (macher--add-transition-handler fsm test-handler)
+
+      ;; Verify the handler was added to the correct states
+      (let ((handlers (gptel-fsm-handlers fsm)))
+        ;; From gptel-request--transitions, these are the states that can be transitioned TO:
+        ;; WAIT (from INIT), TYPE (from WAIT), ERRS (from TYPE and TOOL), TOOL (from TYPE), DONE (from TYPE and TOOL)
+        ;; So our handler should be added to: WAIT, TYPE, ERRS, TOOL, DONE
+
+        ;; Check that WAIT has our handler.
+        (let ((wait-handlers (cdr (assq 'WAIT handlers))))
+          (expect (member test-handler wait-handlers) :to-be-truthy))
+
+        ;; Check that TYPE has our handler.
+        (let ((type-handlers (cdr (assq 'TYPE handlers))))
+          (expect (member test-handler type-handlers) :to-be-truthy))
+
+        ;; Check that ERRS has our handler.
+        (let ((errs-handlers (cdr (assq 'ERRS handlers))))
+          (expect (member test-handler errs-handlers) :to-be-truthy))
+
+        ;; Check that TOOL has our handler.
+        (let ((tool-handlers (cdr (assq 'TOOL handlers))))
+          (expect (member test-handler tool-handlers) :to-be-truthy))
+
+        ;; Check that DONE has our handler.
+        (let ((done-handlers (cdr (assq 'DONE handlers))))
+          (expect (member test-handler done-handlers) :to-be-truthy))
+
+        ;; Check that INIT does NOT have our handler (it's not a target state).
+        (let ((init-handlers (cdr (assq 'INIT handlers))))
+          (if init-handlers
+              (expect (member test-handler init-handlers) :to-be nil)
+            ;; INIT might not have any handlers, which is also correct.
+            (expect init-handlers :to-be nil)))))
+
+    (it "preserves existing handlers when adding new ones"
+      (let* ((existing-handler (lambda (fsm) "existing"))
+             (original-handlers (gptel-fsm-handlers fsm)))
+
+        ;; Add an existing handler to WAIT state.
+        (let ((wait-entry (assq 'WAIT original-handlers)))
+          (if wait-entry
+              (setcdr wait-entry (cons existing-handler (cdr wait-entry)))
+            ;; If WAIT doesn't have handlers yet, add it.
+            (setf (gptel-fsm-handlers fsm) (cons (list 'WAIT existing-handler) original-handlers))))
+
+        ;; Now add our transition handler.
+        (macher--add-transition-handler fsm test-handler)
+
+        ;; Verify both handlers are present in WAIT.
+        (let ((wait-handlers (cdr (assq 'WAIT (gptel-fsm-handlers fsm)))))
+          (expect (member existing-handler wait-handlers) :to-be-truthy)
+          (expect (member test-handler wait-handlers) :to-be-truthy))))
+
+    (it "works correctly with custom transition tables"
+      (let* ((custom-transitions '((START . ((t . MIDDLE))) (MIDDLE . ((t . END))) (END . ())))
+             (custom-handlers '())
+             (custom-fsm (gptel-make-fsm :table custom-transitions :handlers custom-handlers)))
+
+        ;; Add our handler to the custom FSM.
+        (macher--add-transition-handler custom-fsm test-handler)
+
+        ;; In this transition table:
+        ;; START -> MIDDLE, MIDDLE -> END
+        ;; So target states are: MIDDLE, END
+        ;; START is not a target state
+
+        (let ((handlers (gptel-fsm-handlers custom-fsm)))
+          ;; MIDDLE should have our handler (it's a target of START).
+          (let ((middle-handlers (cdr (assq 'MIDDLE handlers))))
+            (expect (member test-handler middle-handlers) :to-be-truthy))
+
+          ;; END should have our handler (it's a target of MIDDLE).
+          (let ((end-handlers (cdr (assq 'END handlers))))
+            (expect (member test-handler end-handlers) :to-be-truthy))
+
+          ;; START should NOT have our handler (it's not a target state).
+          (let ((start-handlers (cdr (assq 'START handlers))))
+            (if start-handlers
+                (expect (member test-handler start-handlers) :to-be nil)
+              (expect start-handlers :to-be nil))))))
+
+    (it "does not destructively modify the original transitions or handlers"
+      (let* ((original-transitions (copy-alist gptel-request--transitions))
+             (original-handlers (copy-alist gptel-request--handlers))
+             (original-fsm-transitions (gptel-fsm-table fsm))
+             (original-fsm-handlers (gptel-fsm-handlers fsm)))
+
+        ;; Add our handler
+        (macher--add-transition-handler fsm test-handler)
+
+        ;; Verify that the global constants are unchanged
+        (expect gptel-request--transitions :to-equal original-transitions)
+        (expect gptel-request--handlers :to-equal original-handlers)
+
+        ;; Verify that the FSM's transitions table is unchanged
+        (expect (gptel-fsm-table fsm) :to-equal original-fsm-transitions)
+
+        ;; Verify that the original handlers structure is preserved
+        ;; (though the FSM's handlers will have been modified)
+        (expect
+         (length (gptel-fsm-handlers fsm))
+         :to-be-greater-than (length original-fsm-handlers)))))
+
+  (describe "macher--add-termination-handler"
+    :var (fsm test-handler handler-calls)
+
+    (before-each
+      (setq handler-calls '())
+      (setq test-handler (lambda (fsm) (push (gptel-fsm-state fsm) handler-calls)))
+      ;; Create an FSM with gptel's standard transitions and handlers
+      (setq fsm
+            (gptel-make-fsm :table gptel-request--transitions :handlers gptel-request--handlers)))
+
+    (it "adds handler to all terminal states"
+      ;; Add our test handler
+      (macher--add-termination-handler fsm test-handler)
+
+      ;; Verify the handler was added to the correct states
+      (let ((handlers (gptel-fsm-handlers fsm)))
+        ;; From gptel-request--transitions, the terminal states are those that either:
+        ;; 1. Don't appear as keys in the transitions table, OR
+        ;; 2. Appear as keys but have no possible transitions (empty cdr)
+        ;; Looking at gptel-request--transitions: DONE and ERRS are terminal states
+
+        ;; Check that DONE has our handler
+        (let ((done-handlers (cdr (assq 'DONE handlers))))
+          (expect (member test-handler done-handlers) :to-be-truthy))
+
+        ;; Check that ERRS has our handler
+        (let ((errs-handlers (cdr (assq 'ERRS handlers))))
+          (expect (member test-handler errs-handlers) :to-be-truthy))
+
+        ;; Check that non-terminal states do NOT have our handler
+        (let ((wait-handlers (cdr (assq 'WAIT handlers))))
+          (if wait-handlers
+              (expect (member test-handler wait-handlers) :to-be nil)
+            (expect wait-handlers :to-be nil)))
+
+        (let ((type-handlers (cdr (assq 'TYPE handlers))))
+          (if type-handlers
+              (expect (member test-handler type-handlers) :to-be nil)
+            (expect type-handlers :to-be nil)))
+
+        (let ((tool-handlers (cdr (assq 'TOOL handlers))))
+          (if tool-handlers
+              (expect (member test-handler tool-handlers) :to-be nil)
+            (expect tool-handlers :to-be nil)))))
+
+    (it "preserves existing handlers when adding new ones"
+      (let* ((existing-handler (lambda (fsm) "existing"))
+             (original-handlers (gptel-fsm-handlers fsm)))
+
+        ;; Add an existing handler to DONE state
+        (let ((done-entry (assq 'DONE original-handlers)))
+          (if done-entry
+              (setcdr done-entry (cons existing-handler (cdr done-entry)))
+            ;; If DONE doesn't have handlers yet, add it
+            (setf (gptel-fsm-handlers fsm) (cons (list 'DONE existing-handler) original-handlers))))
+
+        ;; Now add our termination handler
+        (macher--add-termination-handler fsm test-handler)
+
+        ;; Verify both handlers are present in DONE
+        (let ((done-handlers (cdr (assq 'DONE (gptel-fsm-handlers fsm)))))
+          (expect (member existing-handler done-handlers) :to-be-truthy)
+          (expect (member test-handler done-handlers) :to-be-truthy))))
+
+    (it "works correctly with custom transition tables"
+      (let* ((custom-transitions '((START . ((t . MIDDLE))) (MIDDLE . ((t . END))) (END . ())))
+             (custom-handlers '())
+             (custom-fsm (gptel-make-fsm :table custom-transitions :handlers custom-handlers)))
+
+        ;; Add our handler to the custom FSM
+        (macher--add-termination-handler custom-fsm test-handler)
+
+        ;; In this transition table:
+        ;; START -> MIDDLE, MIDDLE -> END, END -> (nothing)
+        ;; So END is the only terminal state
+
+        (let ((handlers (gptel-fsm-handlers custom-fsm)))
+          ;; END should have our handler (it's terminal)
+          (let ((end-handlers (cdr (assq 'END handlers))))
+            (expect (member test-handler end-handlers) :to-be-truthy))
+
+          ;; START and MIDDLE should NOT have our handler (they're not terminal)
+          (let ((start-handlers (cdr (assq 'START handlers))))
+            (if start-handlers
+                (expect (member test-handler start-handlers) :to-be nil)
+              (expect start-handlers :to-be nil)))
+
+          (let ((middle-handlers (cdr (assq 'MIDDLE handlers))))
+            (if middle-handlers
+                (expect (member test-handler middle-handlers) :to-be nil)
+              (expect middle-handlers :to-be nil))))))
+
+    (it "handles states that don't appear as keys in transitions table"
+      (let* ((custom-transitions '((START . ((t . ORPHAN))) (MIDDLE . ((t . ORPHAN)))))
+             (custom-handlers '())
+             (custom-fsm (gptel-make-fsm :table custom-transitions :handlers custom-handlers)))
+
+        ;; Add our handler to the custom FSM
+        (macher--add-termination-handler custom-fsm test-handler)
+
+        ;; In this transition table:
+        ;; START -> ORPHAN, MIDDLE -> ORPHAN
+        ;; ORPHAN doesn't appear as a key, so it's terminal
+
+        (let ((handlers (gptel-fsm-handlers custom-fsm)))
+          ;; ORPHAN should have our handler (it's terminal - doesn't appear as a key)
+          (let ((orphan-handlers (cdr (assq 'ORPHAN handlers))))
+            (expect (member test-handler orphan-handlers) :to-be-truthy))
+
+          ;; START and MIDDLE should NOT have our handler (they have transitions)
+          (let ((start-handlers (cdr (assq 'START handlers))))
+            (if start-handlers
+                (expect (member test-handler start-handlers) :to-be nil)
+              (expect start-handlers :to-be nil)))
+
+          (let ((middle-handlers (cdr (assq 'MIDDLE handlers))))
+            (if middle-handlers
+                (expect (member test-handler middle-handlers) :to-be nil)
+              (expect middle-handlers :to-be nil))))))
+
+    (it "does not destructively modify the original transitions or handlers"
+      (let* ((original-transitions (copy-alist gptel-request--transitions))
+             (original-handlers (copy-alist gptel-request--handlers))
+             (original-fsm-transitions (gptel-fsm-table fsm))
+             (original-fsm-handlers (gptel-fsm-handlers fsm)))
+
+        ;; Add our handler
+        (macher--add-termination-handler fsm test-handler)
+
+        ;; Verify that the global constants are unchanged
+        (expect gptel-request--transitions :to-equal original-transitions)
+        (expect gptel-request--handlers :to-equal original-handlers)
+
+        ;; Verify that the FSM's transitions table is unchanged
+        (expect (gptel-fsm-table fsm) :to-equal original-fsm-transitions)
+
+        ;; Verify that the original handlers structure is preserved
+        ;; (though the FSM's handlers will have been modified)
+        (expect
+         (length (gptel-fsm-handlers fsm))
+         :to-be-greater-than (length original-fsm-handlers)))))
 
   (describe "macher--resolve-workspace-path"
     :var

@@ -2695,7 +2695,91 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Should NOT contain any diff content since no changes were made
               (expect patch :not :to-match "diff --git")
               (expect patch :not :to-match "@@")
-              (expect patch :not :to-match "^[+-]"))))))))
+              (expect patch :not :to-match "^[+-]")))))))
+
+  (describe "macher-process-request integration"
+    :var
+    (callback-called
+     exit-code callback project-file-buffer original-process-fn process-fn-called process-fn-args)
+
+    (before-each
+      (setq callback-called nil)
+      (setq exit-code nil)
+      (setq process-fn-called nil)
+      (setq process-fn-args nil)
+      (setq callback
+            (macher-test--make-once-only-callback
+             (lambda (cb-exit-code _cb-execution cb-fsm)
+               (setq callback-called t)
+               (setq exit-code cb-exit-code))))
+
+      (funcall setup-project "process-request-integration" '(("test.txt" . "original content")))
+
+      ;; Load the project file in an actual file buffer, to avoid unsaved files appearing during
+      ;; `save-some-buffers'.
+      (find-file project-file)
+      (setq project-file-buffer (current-buffer))
+
+      ;; Set up spy for the process function.
+      (setq original-process-fn macher-process-request-function)
+      (setq macher-process-request-function
+            (lambda (reason context fsm-arg)
+              (setq process-fn-called t)
+              (setq process-fn-args (list reason context fsm-arg)))))
+
+    (after-each
+      (setq macher-process-request-function original-process-fn)
+      (kill-buffer project-file-buffer))
+
+    (it "calls process function with context containing edit after aborted tool request"
+      ;; Set up backend to respond with a tool call that edits a file.
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "edit_file_in_workspace"
+                     :arguments
+                     (:path
+                      "test.txt"
+                      :old_text "original content"
+                      :new_text "modified content")))])
+                 "I edited the file as requested"))
+
+      (with-current-buffer project-file-buffer
+        (let ((fsm (macher-implement "Edit the test file" callback)))
+
+          ;; Abort the request after the tool is called.
+          (sleep-for 0.1)
+          (macher-abort)
+
+          ;; The abort should be processed immediately.
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be 'abort)
+
+          ;; Now call macher-process-request with the aborted FSM.
+          (macher-process-request-dwim 'test-reason)
+
+          ;; Should have called our spy process function.
+          (expect process-fn-called :to-be-truthy)
+          (expect (length process-fn-args) :to-be 3)
+
+          ;; Check the arguments passed to the process function.
+          (let ((reason (nth 0 process-fn-args))
+                (context (nth 1 process-fn-args))
+                (fsm-arg (nth 2 process-fn-args)))
+            (expect reason :to-be 'test-reason)
+            (expect context :to-be-truthy)
+            (expect fsm-arg :to-be fsm)
+
+            ;; Verify the context contains the edit made by the tool.
+            (expect (macher-context-p context) :to-be-truthy)
+            (expect (macher-context-dirty-p context) :to-be-truthy)
+
+            ;; Check that the file was actually edited by the tool.
+            (expect
+             (cdr
+              (macher-context--contents-for-file (expand-file-name "test.txt" project-dir) context))
+             :to-equal "modified content")))))))
 
 ;; Local variables:
 ;; elisp-autofmt-load-packages-local: ("./_defs.el")
