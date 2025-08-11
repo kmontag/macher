@@ -3306,21 +3306,18 @@ If no workspace can be determined from the current buffer, returns (nil
 . preset) with no modifications"
 
   (if-let ((workspace (macher-workspace)))
-    (let* ((context
-            (macher--make-context
-             :workspace workspace
-             :process-request-function macher-process-request-function))
+    (let* ((context (macher--make-context :workspace workspace))
            (prompt-transforms (plist-get preset :prompt-transform-functions))
 
            ;; Handler for the first state machine transtion, i.e. as soon as the request is sent.
-           ;; It's better to set 'macher--fsm-latest' in a transition handler rather than
-           ;; immediately in a prompt transformer, since the latter can also be used when not
-           ;; actually sending requests, e.g. when inspecting an outgoing query.
            (transition-handler-invoked nil)
            (transition-handler
             (lambda (fsm)
               (unless transition-handler-invoked
-                (with-current-buffer (plist-get :buffer (gptel-fsm-info fsm))
+                (with-current-buffer (plist-get (gptel-fsm-info fsm) :buffer)
+                  ;; It's better to set 'macher--fsm-latest' in a transition handler rather than
+                  ;; immediately in a prompt transformer, since the latter can also be used when not
+                  ;; actually sending requests, e.g. when inspecting an outgoing query.
                   (setq macher--fsm-latest fsm))
                 ;; Only allow this function to be called once.
                 (setq transition-handler-invoked t))))
@@ -3329,22 +3326,23 @@ If no workspace can be determined from the current buffer, returns (nil
            (termination-handler
             (lambda (fsm)
               "Process termination of a macher request."
-              (let ((process-fn (macher-context-process-request-function context)))
-                (when process-fn
-                  (funcall process-fn 'complete context fsm)))))
+              (macher-process-request 'complete fsm)))
 
-           ;; Transform to capture the prompt and store it on the context.
-           (prompt-transform-store-prompt
-            (lambda (_fsm) (setf (macher-context-prompt context) (buffer-string))))
+           ;; Transform to capture the prompt and other contextual information, and store it on the
+           ;; context.
+           (prompt-transform-store-context-data
+            (lambda (_fsm)
+              (setf (macher-context-prompt context) (buffer-string))
+              (setf (macher-context-process-request-function context)
+                    macher-process-request-function)))
 
            ;; Transform to preload files from the gptel context into the macher context.
            (prompt-transform-preload-context
             (lambda (_fsm) (macher--load-gptel-context-files (gptel-context--collect) context)))
 
            ;; Transform to store the FSM locally as soon as the state machine transitions.
-           (prompt-transform-store-fsm
-            (lambda (fsm)
-              (macher--partial-prompt-transform-add-transition-handler transition-handler fsm)))
+           (prompt-transform-transition-handler
+            (lambda (fsm) (macher--add-transition-handler fsm transition-handler)))
 
            ;; Transform to hook into the request lifecycle with our callback.
            (prompt-transform-termination-handler
@@ -3356,10 +3354,13 @@ If no workspace can be determined from the current buffer, returns (nil
            (updated-prompt-transforms
             (append
              prompt-transforms
+             ;; Add these after the earlier prompt transforms, to ensure that all presets and other
+             ;; modifications from other transforms have already been applied.
              (list
-              prompt-transform-store-prompt
+              prompt-transform-store-context-data
               prompt-transform-preload-context
-              prompt-transform-termination-handler))))
+              prompt-transform-termination-handler
+              prompt-transform-transition-handler))))
       ;; Return the context and the updated preset.
       (cons
        context
@@ -3927,7 +3928,7 @@ BUF defaults to the current buffer if not specified."
 
 ;;;###autoload
 (defun macher-process-request (reason &optional fsm)
-  "Process a macher request with the given REASON.
+  "Process (e.g. display a patch for) the latest macher request.
 
 Extracts the macher context from the FSM and calls the configured
 'macher-process-request-function'. You can use this, for example, to
@@ -3942,14 +3943,14 @@ FSM is an optional 'gptel-fsm' (state machine) for the request. If not
 provided, defaults the most recent macher request for the current
 buffer (i.e. the local value of 'macher--fsm-latest')."
   (interactive (list 'interactive))
-  (let* ((fsm (or fsm macher--fsm-latest))
-         (context (macher--context-for-fsm fsm)))
-    (when (and fsm context macher-process-request-function)
-      (funcall macher-process-request-function reason context fsm))))
+  (when-let* ((fsm (or fsm macher--fsm-latest))
+              (context (macher--context-for-fsm fsm))
+              (process-request-fn (macher-context-process-request-function context)))
+    (funcall process-request-fn reason context fsm)))
 
 ;;;###autoload
 (defun macher-process-request-dwim (reason)
-  "Process a macher request for the current buffer or the action buffer.
+  "Process the latest macher request for the current buffer or the action buffer.
 
 REASON is the reason that the processing function is being invoked.
 Defaults to 'interactive when called interactively, or any custom value

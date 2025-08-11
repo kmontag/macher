@@ -2697,10 +2697,17 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect patch :not :to-match "@@")
               (expect patch :not :to-match "^[+-]")))))))
 
-  (describe "macher-process-request integration"
+  (describe "macher-process-request"
     :var
     (callback-called
-     exit-code callback project-file-buffer original-process-fn process-fn-called process-fn-args)
+     exit-code
+     callback
+     project-file-buffer
+     original-process-fn
+     process-fn
+     process-fn-called
+     process-fn-args
+     original-known-presets)
 
     (before-each
       (setq callback-called nil)
@@ -2720,19 +2727,24 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (find-file project-file)
       (setq project-file-buffer (current-buffer))
 
-      ;; Set up spy for the process function.
+      (setq original-known-presets gptel--known-presets)
+
       (setq original-process-fn macher-process-request-function)
-      (setq macher-process-request-function
+
+      ;; Alternate process function.
+      (setq process-fn
             (lambda (reason context fsm-arg)
               (setq process-fn-called t)
               (setq process-fn-args (list reason context fsm-arg)))))
 
     (after-each
+      (setq gptel--known-presets original-known-presets)
       (setq macher-process-request-function original-process-fn)
       (kill-buffer project-file-buffer))
 
     (it "calls process function with context containing edit after aborted tool request"
       ;; Set up backend to respond with a tool call that edits a file.
+      (setq macher-process-request-function process-fn)
       (funcall setup-backend
                '((:tool-calls
                   [(:function
@@ -2779,7 +2791,81 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (expect
              (cdr
               (macher-context--contents-for-file (expand-file-name "test.txt" project-dir) context))
-             :to-equal "modified content")))))))
+             :to-equal "modified content")))))
+
+    (it "uses the process function from a gptel preset referenced in the prompt"
+      ;; Sanity check.
+      (expect macher-process-request-function :not :to-be process-fn)
+
+      ;; Create a preset that uses the custom process function.
+      (gptel-make-preset 'test-preset :macher-process-request-function process-fn)
+
+      ;; Set up backend to respond successfully.
+      (funcall setup-backend '("Test response"))
+
+      (with-current-buffer project-file-buffer
+        ;; Use the preset in the prompt using @preset syntax.
+        (let ((fsm (macher-implement "@test-preset testing" callback)))
+
+          ;; Wait for the request to complete.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+
+          ;; Should have called our custom process function instead of the spy.
+          (expect process-fn-called :to-be-truthy)
+          (expect (length process-fn-args) :to-be 3)
+
+          ;; Check the arguments passed to the custom process function.
+          (let ((reason (nth 0 process-fn-args))
+                (context (nth 1 process-fn-args))
+                (fsm-arg (nth 2 process-fn-args)))
+            (expect reason :to-be 'complete)
+            (expect context :to-be-truthy)
+            (expect fsm-arg :to-be fsm)
+            (expect (macher-context-p context) :to-be-truthy)))))
+
+    (it "uses the process function from a gptel preset applied with `gptel-with-preset`"
+      ;; Sanity check.
+      (expect macher-process-request-function :not :to-be process-fn)
+
+      ;; Create a preset that uses the custom process function.
+      (gptel-make-preset 'test-preset :macher-process-request-function process-fn)
+
+      ;; Set up backend to respond successfully.
+      (funcall setup-backend '("Test response"))
+
+      (with-current-buffer project-file-buffer
+        (gptel-with-preset
+         'test-preset
+         ;; Use the preset in the prompt using @preset syntax.
+         (let ((fsm (macher-implement "testing" callback)))
+
+           ;; Wait for the request to complete.
+           (let ((timeout 0))
+             (while (and (not callback-called) (< timeout 100))
+               (sleep-for 0.1)
+               (setq timeout (1+ timeout))))
+
+           (expect callback-called :to-be-truthy)
+           (expect exit-code :to-be nil)
+
+           ;; Should have called our custom process function instead of the spy.
+           (expect process-fn-called :to-be-truthy)
+           (expect (length process-fn-args) :to-be 3)
+
+           ;; Check the arguments passed to the custom process function.
+           (let ((reason (nth 0 process-fn-args))
+                 (context (nth 1 process-fn-args))
+                 (fsm-arg (nth 2 process-fn-args)))
+             (expect reason :to-be 'complete)
+             (expect context :to-be-truthy)
+             (expect fsm-arg :to-be fsm))))))))
+
 
 ;; Local variables:
 ;; elisp-autofmt-load-packages-local: ("./_defs.el")
