@@ -291,106 +291,77 @@
           (expect (macher--context-for-fsm fsm) :to-be nil)))))
 
   (describe "macher-process-request"
-    :var (context original-process-fn dummy-process-fn)
+    :var (context original-process-fn dummy-process-fn fsm workspace)
 
     (before-each
       (funcall setup-project)
-      (setq context (macher--make-context :workspace `(project . ,project-dir)))
       ;; Store original function.
       (setq original-process-fn macher-process-request-function)
       ;; Set up a spy for the process function.
       (setf (symbol-function 'dummy-process-fn) (lambda (&rest _)))
       (spy-on 'dummy-process-fn)
-      (setq macher-process-request-function #'dummy-process-fn))
+
+      (setq workspace `(project . ,project-dir))
+      (setq context
+            (macher--make-context
+             :workspace workspace
+             :process-request-function #'dummy-process-fn))
+      (setq fsm (gptel-make-fsm)))
 
     (after-each
       (setq macher-process-request-function original-process-fn))
 
     (it "calls process function with extracted context"
-      ;; Create a macher tool with our context.
-      (let ((tool (macher--make-tool context :name "test_tool" :function (lambda () "test"))))
-        (with-temp-buffer
-          ;; Set up tools in the buffer as gptel would.
-          (setq-local gptel-tools (list tool))
-          ;; Create FSM using gptel-request with dry-run to get proper setup.
-          (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
-            ;; Call macher-process-request.
-            (macher-process-request 'test-reason fsm)
-            ;; Should have called the process function with correct arguments.
-            (expect 'dummy-process-fn :to-have-been-called-with 'test-reason context fsm)))))
+      (with-temp-buffer
+        ;; Spy on macher--context-for-request and return a known context.
+        (spy-on 'macher--context-for-fsm :and-return-value context)
+        ;; Call macher-process-request.
+        (macher-process-request 'test-reason fsm)
+        ;; Should have called the process function with correct arguments.
+        (expect 'dummy-process-fn :to-have-been-called-with 'test-reason context fsm)))
 
     (it "uses macher--fsm-latest when FSM not provided"
-      ;; Create a macher tool with our context.
-      (let ((tool (macher--make-tool context :name "test_tool" :function (lambda () "test"))))
-        (with-temp-buffer
-          ;; Set up tools in the buffer as gptel would.
-          (setq-local gptel-tools (list tool))
-          ;; Create FSM using gptel-request with dry-run to get proper setup.
-          (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
-            ;; Set up FSM as the latest one.
-            (setq macher--fsm-latest fsm)
-            ;; Call without explicit FSM.
-            (macher-process-request 'test-reason)
-            ;; Should have called the process function with macher--fsm-latest.
-            (expect 'dummy-process-fn :to-have-been-called-with 'test-reason context fsm)))))
+      ;; Spy on macher--context-for-request and return a known context.
+      (spy-on 'macher--context-for-fsm :and-return-value context)
+      (setq macher--fsm-latest fsm)
+      ;; Call without explicit FSM.
+      (macher-process-request 'test-reason)
+      ;; Should have called the process function with macher--fsm-latest.
+      (expect 'dummy-process-fn :to-have-been-called-with 'test-reason context fsm))
 
     (it "does nothing when no context found"
-      (with-temp-buffer
-        ;; No macher tools.
-        (setq-local gptel-tools nil)
-        ;; Create FSM using gptel-request with dry-run.
-        (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
-          ;; Call without any macher tools.
-          (macher-process-request 'test-reason fsm)
-          ;; Should not have called the process function.
-          (expect 'dummy-process-fn :not :to-have-been-called)))))
+      ;; Spy on macher--context-for-request and return nil.
+      (spy-on 'macher--context-for-fsm :and-return-value nil)
+      ;; Call without any macher context.
+      (macher-process-request 'test-reason fsm)
+      ;; Should not have called the process function.
+      (expect 'dummy-process-fn :not :to-have-been-called))
 
 
-  (describe "macher-process-request-dwim"
-    :var (workspace context action-buffer original-process-fn dummy-process-fn)
+    (describe "macher-process-request-dwim"
+      :var (action-buffer)
 
-    (before-each
-      (funcall setup-project)
-      (setq workspace `(project . ,project-dir))
-      (setq context (macher--make-context :workspace workspace))
-      (setq action-buffer (macher-action-buffer workspace t))
-      ;; Store original function.
-      (setq original-process-fn macher-process-request-function)
-      ;; Set up a spy for the process function.
-      (setf (symbol-function 'dummy-process-fn) (lambda (&rest _)))
-      (spy-on 'dummy-process-fn)
-      (setq macher-process-request-function #'dummy-process-fn))
+      (before-each
+        (setq action-buffer (macher-action-buffer workspace t)))
 
-    (after-each
-      (setq macher-process-request-function original-process-fn))
-
-    (it "uses local macher--fsm-latest when present"
-      ;; Create a macher tool with our context.
-      (let ((tool (macher--make-tool context :name "test_tool" :function (lambda () "test"))))
+      (it "uses local macher--fsm-latest when present"
+        ;; Spy on macher--context-for-request and return a known context.
+        (spy-on 'macher--context-for-fsm :and-return-value context)
+        ;; Create a simple FSM and set as latest in current buffer.
         (with-temp-buffer
           (setq-local macher--workspace workspace)
-          ;; Set up tools in the buffer as gptel would.
-          (setq-local gptel-tools (list tool))
-          ;; Create FSM using gptel-request with dry-run to get proper setup.
-          (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
-            ;; Set up FSM as latest one in the current buffer.
-            (setq macher--fsm-latest fsm)
-            ;; Call with local FSM present.
-            (macher-process-request-dwim 'test-reason)
-            ;; Should have called the process function with the local FSM.
-            (expect 'dummy-process-fn :to-have-been-called-with 'test-reason context fsm)))))
+          (setq macher--fsm-latest fsm)
+          ;; Call with local FSM present.
+          (macher-process-request-dwim 'test-reason)
+          ;; Should have called the process function with the local FSM.
+          (expect 'dummy-process-fn :to-have-been-called-with 'test-reason context fsm)))
 
-    (it "falls back to action buffer macher--fsm-latest when local not present"
-      ;; Create a macher tool with our context.
-      (let ((tool (macher--make-tool context :name "test_tool" :function (lambda () "test"))))
+      (it "falls back to action buffer macher--fsm-latest when local not present"
+        ;; Spy on macher--context-for-request and return a known context.
+        (spy-on 'macher--context-for-fsm :and-return-value context)
+        ;; Create a simple FSM and set as latest in action buffer.
         (with-current-buffer action-buffer
-          ;; Set up tools in the buffer as gptel would.
-          (setq-local gptel-tools (list tool))
-          ;; Create FSM using gptel-request with dry-run to get proper setup.
-          (let ((fsm (gptel-request "test prompt" :buffer action-buffer :dry-run t)))
-            ;; Set up FSM as latest one in the action buffer context.
-            (setq macher--fsm-latest fsm)))
-
+          (setq macher--fsm-latest fsm))
         ;; Call from a different buffer without local FSM.
         (with-temp-buffer
           (setq-local macher--workspace workspace)
@@ -398,11 +369,7 @@
           (setq macher--fsm-latest nil)
           (macher-process-request-dwim 'test-reason)
           ;; Should have called the process function with the action buffer FSM.
-          (expect
-           'dummy-process-fn
-           :to-have-been-called-with 'test-reason context
-           (with-current-buffer action-buffer
-             macher--fsm-latest))))))
+          (expect 'dummy-process-fn :to-have-been-called-with 'test-reason context fsm)))))
 
   (describe "macher--read-string"
     (it "returns full content when no offset or limit specified"
