@@ -557,6 +557,20 @@ To add a new workspace type, add an entry to this alist and update
   :type '(alist :key-type symbol :value-type (plist :key-type keyword :value-type function))
   :group 'macher)
 
+(defcustom macher-auto-flush-cache t
+  "Whether to automatically flush workspace cache when appropriate.
+
+When non-nil, the workspace cache will be flushed automatically at
+strategic points to ensure macher sees fresh file contents:
+
+- Before each macher action (implement/revise/discuss)
+- After processing requests that make changes
+
+This helps prevent the bug where changes are proposed against old
+versions of files."
+  :type 'boolean
+  :group 'macher)
+
 ;;; Constants
 
 (defconst macher--max-read-length (* 1024 1024)
@@ -652,6 +666,89 @@ or is aborted.")
   (buffer)
   (source)
   (context nil))
+
+;;; Workspace Cache Management
+
+(defun macher-flush-workspace-cache (&optional workspace)
+  "Flush cached file contents for WORKSPACE.
+
+This clears all cached file contents in active macher contexts for the
+specified workspace, forcing them to be reloaded from disk or buffers
+on next access. This is useful when files have been modified outside
+of macher tools and you want to ensure macher sees the latest content.
+
+If WORKSPACE is nil, flushes cache for the current buffer's workspace
+as determined by `macher-workspace'.
+
+This function affects all active macher contexts (requests in progress)
+that are associated with the workspace."
+  (interactive)
+  (let* ((workspace (or workspace (macher-workspace)))
+         (flushed-count 0)
+         (context-count 0))
+
+    (unless workspace
+      (error "No workspace found for current buffer"))
+
+    ;; Find all active macher contexts by searching through FSMs
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (when (bound-and-true-p macher--fsm-latest)
+          (let ((context (macher--context-for-fsm macher--fsm-latest)))
+            (when (and context
+                       (equal workspace (macher-context-workspace context)))
+              (cl-incf context-count)
+              ;; Clear the contents alist to force reload
+              (let ((old-contents (macher-context-contents context)))
+                (setf (macher-context-contents context) nil)
+                (cl-incf flushed-count (length old-contents))))))))
+
+    (when (called-interactively-p 'interactive)
+      (message "Flushed %d cached files from %d contexts in workspace %s"
+               flushed-count context-count (cdr workspace)))
+
+    flushed-count))
+
+(defun macher-flush-current-file-cache ()
+  "Flush cached content for the current file only.
+
+Similar to `macher-flush-workspace-cache' but only clears the cache
+entry for the current buffer's file, leaving other files in the
+workspace cache intact."
+  (interactive)
+  (let* ((current-file (buffer-file-name))
+         (workspace (macher-workspace))
+         (flushed-count 0))
+
+    (unless current-file
+      (error "Current buffer is not visiting a file"))
+
+    (unless workspace
+      (error "No workspace found for current buffer"))
+
+    (let ((normalized-path (macher--normalize-path current-file)))
+      ;; Find all active macher contexts and remove this file's cache entry
+      (dolist (buffer (buffer-list))
+        (with-current-buffer buffer
+          (when (and (boundp 'macher--fsm-latest) macher--fsm-latest)
+            (let ((context (macher--context-for-fsm macher--fsm-latest)))
+              (when (and context
+                         (equal workspace (macher-context-workspace context)))
+                ;; Remove just this file from the contents alist
+                (let ((old-contents (macher-context-contents context)))
+                  (when (assoc normalized-path old-contents)
+                    (setf (macher-context-contents context)
+                          (assoc-delete-all normalized-path old-contents))
+                    (cl-incf flushed-count)))))))))
+
+    (when (called-interactively-p 'interactive)
+      (if (> flushed-count 0)
+          (message "Flushed cache for %s from %d contexts"
+                   (file-relative-name current-file) flushed-count)
+        (message "No cache entries found for %s"
+                 (file-relative-name current-file))))
+
+    flushed-count))
 
 ;;; Internal Functions
 
@@ -1143,7 +1240,14 @@ FSM is the 'gptel-fsm' (state machine) for the request being processed."
   (when context
     ;; Check if any changes were made during the request using the dirty-p flag.
     (when (macher-context-dirty-p context)
-      (macher--build-patch context fsm))))
+      (macher--build-patch context fsm)
+      ;; Flush cache after making changes if configured
+      ;; TODO: Check that this actually works as expected, and doesn't just mess up the context
+      (when macher-auto-flush-cache
+        (condition-case err
+            (macher-flush-workspace-cache (macher-context-workspace context))
+          (error
+           (message "macher: cache flush failed: %s" (error-message-string err))))))))
 
 (defun macher--context-for-fsm (fsm)
   "Extract the macher context from the FSM, if any.
@@ -3810,6 +3914,13 @@ implements one possible workflow."
   ;; Run the action dispatch hook in the source buffer.
   (run-hooks 'macher-action-dispatch-hook)
 
+  ;; Flush workspace cache before action if configured
+  (when macher-auto-flush-cache
+    (condition-case err
+        (macher-flush-workspace-cache)
+      (error
+       (message "macher: cache flush failed: %s" (error-message-string err)))))
+
   (let ((action-config
          (if (symbolp action)
              (assoc action macher-actions-alist)
@@ -4026,6 +4137,10 @@ success, or an error description on failure), EXECUTION (the
 `gptel-fsm' object for the request)."
   (interactive)
   (macher-action 'discuss callback question))
+
+
+
+
 
 ;; Local variables:
 ;; elisp-autofmt-load-packages-local: ("cl-macs")

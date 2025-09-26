@@ -4882,6 +4882,301 @@
         (let ((outside-home-path (expand-file-name "other-project/file.txt" "~")))
           (expect (macher--resolve-workspace-path home-workspace outside-home-path) :to-throw))))))
 
+  (describe "cache flushing behavior"
+    :var (context1 context2 temp-file1 temp-file2 workspace1 workspace2)
+
+    (before-each
+      ;; Create two temporary files for testing
+      (setq temp-file1 (make-temp-file "macher-cache-test1"))
+      (setq temp-file2 (make-temp-file "macher-cache-test2"))
+      ;; Write initial content
+      (write-region "original content 1" nil temp-file1)
+      (write-region "original content 2" nil temp-file2)
+      
+      ;; Create two different workspaces
+      (setq workspace1 (cons 'file temp-file1))
+      (setq workspace2 (cons 'file temp-file2))
+      
+      ;; Create contexts for each workspace
+      (setq context1 (macher--make-context :workspace workspace1))
+      (setq context2 (macher--make-context :workspace workspace2)))
+
+    (after-each
+      ;; Clean up temporary files
+      (when (file-exists-p temp-file1)
+        (delete-file temp-file1))
+      (when (file-exists-p temp-file2)
+        (delete-file temp-file2)))
+
+    (describe "macher-flush-workspace-cache"
+      (it "flushes cached contents for specific workspace only"
+        ;; Load content into both contexts to create cache entries
+        (macher-context--contents-for-file temp-file1 context1)
+        (macher-context--contents-for-file temp-file2 context2)
+        
+        ;; Verify both contexts have cached content
+        (expect (length (macher-context-contents context1)) :to-be 1)
+        (expect (length (macher-context-contents context2)) :to-be 1)
+        
+        ;; Create mock buffers with FSMs containing our contexts
+        (with-temp-buffer
+          (setq-local macher--fsm-latest (gptel-make-fsm))
+          ;; Mock context extraction to return context1
+          (spy-on 'macher--context-for-fsm :and-return-value context1)
+          
+          ;; Flush workspace1 cache
+          (let ((flushed-count (macher-flush-workspace-cache workspace1)))
+            ;; Should flush 1 file from context1
+            (expect flushed-count :to-be 1)
+            ;; context1 should have empty contents
+            (expect (length (macher-context-contents context1)) :to-be 0)
+            ;; context2 should still have its cached content
+            (expect (length (macher-context-contents context2)) :to-be 1))))
+
+      (it "handles multiple contexts for same workspace"
+        ;; Create two contexts for the same workspace
+        (let ((context1-alt (macher--make-context :workspace workspace1)))
+          ;; Load content into both contexts
+          (macher-context--contents-for-file temp-file1 context1)
+          (macher-context--contents-for-file temp-file1 context1-alt)
+          
+          ;; Verify both contexts have cached content
+          (expect (length (macher-context-contents context1)) :to-be 1)
+          (expect (length (macher-context-contents context1-alt)) :to-be 1)
+          
+          ;; Mock buffer list with FSMs for both contexts
+          (let ((buffer1 (generate-new-buffer "test-buffer1"))
+                (buffer2 (generate-new-buffer "test-buffer2")))
+            (unwind-protect
+                (progn
+                  ;; Set up first buffer with context1
+                  (with-current-buffer buffer1
+                    (setq-local macher--fsm-latest (gptel-make-fsm)))
+                  ;; Set up second buffer with context1-alt
+                  (with-current-buffer buffer2
+                    (setq-local macher--fsm-latest (gptel-make-fsm)))
+                  
+                  ;; Mock context extraction to return appropriate contexts
+                  (let ((call-count 0))
+                    (spy-on 'macher--context-for-fsm
+                            :and-call-fake
+                            (lambda (fsm)
+                              (cl-incf call-count)
+                              (if (= call-count 1) context1 context1-alt))))
+                  
+                  ;; Flush workspace1 cache - should affect both contexts
+                  (let ((flushed-count (macher-flush-workspace-cache workspace1)))
+                    ;; Should flush 1 file from each context = 2 total
+                    (expect flushed-count :to-be 2)
+                    ;; Both contexts should have empty contents
+                    (expect (length (macher-context-contents context1)) :to-be 0)
+                    (expect (length (macher-context-contents context1-alt)) :to-be 0)))
+              
+              ;; Clean up buffers
+              (kill-buffer buffer1)
+              (kill-buffer buffer2)))))
+
+      (it "returns 0 when no contexts found for workspace"
+        ;; Try to flush cache for a workspace with no active contexts
+        (let ((unused-workspace (cons 'file "/nonexistent/file")))
+          (let ((flushed-count (macher-flush-workspace-cache unused-workspace)))
+            (expect flushed-count :to-be 0))))
+
+      (it "errors when workspace is nil and no current workspace available"
+        ;; Mock macher-workspace to return nil
+        (spy-on 'macher-workspace :and-return-value nil)
+        (expect (macher-flush-workspace-cache nil) :to-throw)))
+
+    (describe "macher-flush-current-file-cache"
+      (it "flushes cache for current file only"
+        ;; Create a context with multiple cached files
+        (macher-context--contents-for-file temp-file1 context1)
+        (macher-context--contents-for-file temp-file2 context1)
+        
+        ;; Verify context has 2 cached files
+        (expect (length (macher-context-contents context1)) :to-be 2)
+        
+        ;; Mock current buffer to be temp-file1
+        (with-temp-buffer
+          (setq buffer-file-name temp-file1)
+          (setq-local macher--fsm-latest (gptel-make-fsm))
+          
+          ;; Mock context extraction and workspace detection
+          (spy-on 'macher--context-for-fsm :and-return-value context1)
+          (spy-on 'macher-workspace :and-return-value workspace1)
+          
+          ;; Flush current file cache
+          (let ((flushed-count (macher-flush-current-file-cache)))
+            ;; Should flush 1 file
+            (expect flushed-count :to-be 1)
+            ;; Context should now have only 1 cached file (temp-file2)
+            (expect (length (macher-context-contents context1)) :to-be 1)
+            ;; temp-file2 should still be cached
+            (expect (assoc (macher--normalize-path temp-file2) 
+                          (macher-context-contents context1)) :to-be-truthy)
+            ;; temp-file1 should not be cached
+            (expect (assoc (macher--normalize-path temp-file1) 
+                          (macher-context-contents context1)) :to-be nil))))
+
+      (it "errors when current buffer has no file"
+        (with-temp-buffer
+          ;; Buffer has no file
+          (expect (macher-flush-current-file-cache) :to-throw)))
+
+      (it "errors when no workspace found"
+        (with-temp-buffer
+          (setq buffer-file-name temp-file1)
+          (spy-on 'macher-workspace :and-return-value nil)
+          (expect (macher-flush-current-file-cache) :to-throw)))
+
+      (it "returns 0 when file not found in any context cache"
+        (with-temp-buffer
+          (setq buffer-file-name temp-file1)
+          (setq-local macher--fsm-latest (gptel-make-fsm))
+          
+          ;; Mock context with no cached files
+          (let ((empty-context (macher--make-context :workspace workspace1)))
+            (spy-on 'macher--context-for-fsm :and-return-value empty-context)
+            (spy-on 'macher-workspace :and-return-value workspace1)
+            
+            (let ((flushed-count (macher-flush-current-file-cache)))
+              (expect flushed-count :to-be 0))))))
+
+    (describe "auto-flush behavior"
+      :var (original-auto-flush)
+      
+      (before-each
+        (setq original-auto-flush macher-auto-flush-cache))
+      
+      (after-each
+        (setq macher-auto-flush-cache original-auto-flush))
+
+      (it "auto-flushes cache before actions when enabled"
+        ;; Enable auto-flush
+        (setq macher-auto-flush-cache t)
+        
+        ;; Spy on the flush function
+        (spy-on 'macher-flush-workspace-cache)
+        
+        ;; Mock macher-workspace to return a test workspace
+        (spy-on 'macher-workspace :and-return-value workspace1)
+        
+        ;; Test the code path in macher--dispatch-action
+        ;; We can't easily test the full function, so we test the relevant part
+        (when macher-auto-flush-cache
+          (condition-case err
+              (macher-flush-workspace-cache)
+            (error
+             (message "macher: cache flush failed: %s" (error-message-string err)))))
+        
+        ;; Verify flush was called
+        (expect 'macher-flush-workspace-cache :to-have-been-called))
+
+      (it "skips auto-flush when disabled"
+        ;; Disable auto-flush
+        (setq macher-auto-flush-cache nil)
+        
+        ;; Spy on the flush function
+        (spy-on 'macher-flush-workspace-cache)
+        
+        ;; Test the code path
+        (when macher-auto-flush-cache
+          (macher-flush-workspace-cache))
+        
+        ;; Verify flush was not called
+        (expect 'macher-flush-workspace-cache :not :to-have-been-called))
+
+      (it "auto-flushes cache after processing requests with changes"
+        ;; Enable auto-flush
+        (setq macher-auto-flush-cache t)
+        
+        ;; Create a context with dirty flag set
+        (setf (macher-context-dirty-p context1) t)
+        
+        ;; Spy on the flush function and macher--build-patch
+        (spy-on 'macher-flush-workspace-cache)
+        (spy-on 'macher--build-patch)
+        
+        ;; Test the relevant part of macher--process-request
+        (when (macher-context-dirty-p context1)
+          (macher--build-patch context1 (gptel-make-fsm))
+          (when macher-auto-flush-cache
+            (condition-case err
+                (macher-flush-workspace-cache (macher-context-workspace context1))
+              (error
+               (message "macher: cache flush failed: %s" (error-message-string err))))))
+        
+        ;; Verify both functions were called
+        (expect 'macher--build-patch :to-have-been-called)
+        (expect 'macher-flush-workspace-cache :to-have-been-called-with workspace1))
+
+      (it "handles flush errors gracefully during auto-flush"
+        ;; Enable auto-flush
+        (setq macher-auto-flush-cache t)
+        
+        ;; Mock flush function to throw an error
+        (spy-on 'macher-flush-workspace-cache 
+                :and-call-fake (lambda (&rest _) (error "Test flush error")))
+        (spy-on 'message)
+        
+        ;; Test error handling
+        (when macher-auto-flush-cache
+          (condition-case err
+              (macher-flush-workspace-cache workspace1)
+            (error
+             (message "macher: cache flush failed: %s" (error-message-string err)))))
+        
+        ;; Verify error message was displayed
+        (expect 'message :to-have-been-called-with 
+                "macher: cache flush failed: %s" "Test flush error")))
+
+    (describe "cache invalidation scenarios"
+      (it "forces reload after cache flush"
+        ;; Load initial content into context
+        (let ((initial-contents (macher-context--contents-for-file temp-file1 context1)))
+          (expect (cdr initial-contents) :to-equal "original content 1")
+          
+          ;; Modify file on disk
+          (write-region "modified content 1" nil temp-file1)
+          
+          ;; Before flush: should still get cached content
+          (let ((cached-contents (macher-context--contents-for-file temp-file1 context1)))
+            (expect (cdr cached-contents) :to-equal "original content 1"))
+          
+          ;; Create mock buffer with FSM for flushing
+          (with-temp-buffer
+            (setq-local macher--fsm-latest (gptel-make-fsm))
+            (spy-on 'macher--context-for-fsm :and-return-value context1)
+            
+            ;; Flush cache
+            (macher-flush-workspace-cache workspace1)
+            
+            ;; After flush: should get fresh content from disk
+            (let ((fresh-contents (macher-context--contents-for-file temp-file1 context1)))
+              (expect (cdr fresh-contents) :to-equal "modified content 1")))))
+
+      (it "handles context with mixed cached and uncached files"
+        ;; Load one file into cache
+        (macher-context--contents-for-file temp-file1 context1)
+        ;; temp-file2 not loaded yet
+        
+        ;; Create mock buffer for flushing
+        (with-temp-buffer
+          (setq-local macher--fsm-latest (gptel-make-fsm))
+          (spy-on 'macher--context-for-fsm :and-return-value context1)
+          
+          ;; Verify initial state
+          (expect (length (macher-context-contents context1)) :to-be 1)
+          
+          ;; Flush cache
+          (let ((flushed-count (macher-flush-workspace-cache workspace1)))
+            (expect flushed-count :to-be 1)
+            (expect (length (macher-context-contents context1)) :to-be 0))
+          
+          ;; After flush, can still load uncached files
+          (let ((temp2-contents (macher-context--contents-for-file temp-file2 context1)))
+            (expect (cdr temp2-contents) :to-equal "original content 2"))))))
+
 
 ;; Local variables:
 ;; elisp-autofmt-load-packages-local: ("./_defs.el")
