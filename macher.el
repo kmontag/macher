@@ -327,10 +327,10 @@ The function is called with three arguments:
 - REASON: the reason that the processing function is being invoked.
   Currently this can be:
 
-  - The symbol 'complete' - when invoked at the end of the request
+  - The symbol `complete' - when invoked at the end of the request
     lifecycle.
 
-  - The symbol 'interactive' - when `macher-process-request' is invoked
+  - The symbol `interactive' - when `macher-process-request' is invoked
     interactively.
 
   - any custom value passed to `macher-process-request'
@@ -396,7 +396,7 @@ predefined \"pre\" function for the `macher-patch-buffer-setup-hook'.
 
 The choices are:
 
-- symbol `diff' - sets up `diff-mode', makes the buffer read-only, and adds
+- \\='diff - sets up `diff-mode', makes the buffer read-only, and adds
   buffer-local hooks to display the patch buffer when it's ready.
 
 - nil - don't perform any patch buffer setup. The patch buffer will
@@ -632,10 +632,11 @@ or is aborted.")
 (cl-defstruct (macher-action-execution (:constructor macher--make-action-execution))
   "Structure holding execution information for a macher action.
 
-- ACTION is the action name symbol (e.g. 'implement, 'revise, 'discuss).
+- ACTION is the action name symbol (e.g. \\='implement, \\='revise,
+  \\='discuss).
 
 - PROMPT is the transformed prompt string that will be sent to the LLM.
-  Functions in 'macher-before-action-functions' can modify this field to
+  Functions in `macher-before-action-functions' can modify this field to
   change the prompt before sending.
 
 - SUMMARY is a summary of the prompt being sent - for built-in actions,
@@ -647,8 +648,8 @@ or is aborted.")
 
 - CONTEXT will be passed as the :context key when calling
   `gptel-request'. This is a user-defined object that can be read from
-  the 'gptel-fsm' (state machine) associated with the request. Functions
-  in 'macher-before-action-functions' can modify this field."
+  the `gptel-fsm' (state machine) associated with the request. Functions
+  in `macher-before-action-functions' can modify this field."
   (action)
   (prompt)
   (summary)
@@ -3744,7 +3745,7 @@ This function registers three presets:
 
 NAMES is an optional alist of name overrides, whose entries are
 like (PRESET . NAME). PRESET is the preset's standard name symbol (e.g.
-symbol `macher-notools') and NAME is the symbol to actually register
+\\='macher-notools) and NAME is the symbol to actually register
 with gptel. You can also pass a nil NAME to disable registering a preset
 globally. For example:
 
