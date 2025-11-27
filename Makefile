@@ -49,14 +49,23 @@ format.check: format.elisp.check format.prettier.check
 # Use absolute path for Python to work with Nix-isolated Emacs in CI.
 PYTHON3 := $(shell which python3)
 
+# Common setup for elisp-autofmt commands. Notes:
+# - We use editorconfig-apply to respect .editorconfig settings (e.g. fill-column).
+# - elisp-autofmt-use-function-defs is set to nil to avoid spawning a subprocess Emacs for
+#   generating builtin function definitions, which fails in Nix-isolated environments like CI.
+# - tests/_defs.el provides macro definitions for buttercup so its forms are formatted correctly.
+define ELISP_AUTOFMT_SETUP
+--eval "(require 'editorconfig)" \
+--eval "(require 'elisp-autofmt)" \
+--eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")" \
+--eval "(setq elisp-autofmt-use-function-defs nil)" \
+-l tests/_defs.el
+endef
+
 .PHONY: format.elisp
 format.elisp: $(EASK) .eask
 	$(EASK) emacs --batch \
-		--eval "(require 'editorconfig)" \
-		--eval "(require 'elisp-autofmt)" \
-		--eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")" \
-		--eval "(setq elisp-autofmt-use-function-defs nil)" \
-		-l tests/_defs.el \
+		$(ELISP_AUTOFMT_SETUP) \
 		--eval "(dolist (file (cdr command-line-args-left)) \
 			(find-file file) \
 			(editorconfig-apply) \
@@ -67,11 +76,7 @@ format.elisp: $(EASK) .eask
 .PHONY: format.elisp.check
 format.elisp.check: $(EASK) .eask
 	$(EASK) emacs --batch \
-		--eval "(require 'editorconfig)" \
-		--eval "(require 'elisp-autofmt)" \
-		--eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")" \
-		--eval "(setq elisp-autofmt-use-function-defs nil)" \
-		-l tests/_defs.el \
+		$(ELISP_AUTOFMT_SETUP) \
 		--eval "(let ((failed nil)) \
 			(dolist (file (cdr command-line-args-left)) \
 			  (find-file file) \
