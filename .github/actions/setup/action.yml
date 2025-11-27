@@ -8,7 +8,7 @@ runs:
     # Eask dependencies are installed via an npm postinstall hook, so Emacs needs to be installed
     # first.
     - name: Setup Emacs
-      uses: purcell/setup-emacs@v6.0
+      uses: purcell/setup-emacs@8415786a52b3a84babd7ffc92a802b06e3780c17
       with:
         version: 30.1
 
