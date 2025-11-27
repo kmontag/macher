@@ -3218,8 +3218,8 @@
             (expect result :to-be-truthy)
             (expect (car result) :to-be 'project)
             (expect
-             (directory-file-name (cdr result))
-             :to-equal (directory-file-name project-dir)))))
+             (file-truename (directory-file-name (cdr result)))
+             :to-equal (file-truename (directory-file-name project-dir))))))
 
       (it "returns nil when not in a project"
         (with-temp-buffer
@@ -3258,8 +3258,8 @@
             (expect result :to-be-truthy)
             (expect (car result) :to-be 'project)
             (expect
-             (directory-file-name (cdr result))
-             :to-equal (directory-file-name project-dir)))))
+             (file-truename (directory-file-name (cdr result)))
+             :to-equal (file-truename (directory-file-name project-dir))))))
 
       (it "falls back to file workspace when no project found"
         (with-temp-buffer
@@ -3318,8 +3318,8 @@
                 (expect result :to-be-truthy)
                 (expect (car result) :to-be 'project)
                 (expect
-                 (directory-file-name (cdr result))
-                 :to-equal (directory-file-name project-dir)))))))
+                 (file-truename (directory-file-name (cdr result)))
+                 :to-equal (file-truename (directory-file-name project-dir))))))))
 
       ;; Test the actual default hook behavior.
       (describe "integration tests"
@@ -3338,8 +3338,8 @@
               (expect result :to-be-truthy)
               (expect (car result) :to-be 'project)
               (expect
-               (directory-file-name (cdr result))
-               :to-equal (directory-file-name project-dir)))))))
+               (file-truename (directory-file-name (cdr result)))
+               :to-equal (file-truename (directory-file-name project-dir))))))))
 
     (describe "macher--workspace-root"
       (before-each

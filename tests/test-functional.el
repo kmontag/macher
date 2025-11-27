@@ -12,7 +12,6 @@
 (require 'buttercup)
 (require 'macher)
 (require 'gptel)
-(require 'gptel-curl)
 (require 'gptel-ollama)
 (require 'project)
 
