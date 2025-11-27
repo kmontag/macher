@@ -2796,7 +2796,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (expect
              (cdr
               (macher-context--contents-for-file (expand-file-name "test.txt" project-dir) context))
-             :to-equal "modified content"))))))
+             :to-equal "modified content")))))
 
     (it "uses the process function from a gptel preset referenced in the prompt"
       ;; Sanity check.
