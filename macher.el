@@ -36,7 +36,6 @@
 (require 'gptel)
 (require 'gptel-context)
 (require 'cl-lib)
-(require 'macher-externals)
 
 ;;; Preliminary definitions needed for defcustom defaults
 

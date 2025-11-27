@@ -202,15 +202,6 @@
           ;; dirty-p should now be t.
           (expect (macher-context-dirty-p context) :to-be t)))))
 
-  (describe "gptel--macher-process-request-function"
-    (it "sets the macher-proces-request-function in gptel presets"
-      ;; Sanity checks.
-      (expect gptel--macher-process-request-function :to-be #'macher--process-request)
-      (expect macher-process-request-function :to-be #'macher--process-request)
-      (gptel-with-preset
-       '(:macher-process-request-function nil)
-       (expect macher-process-request-function :to-be nil))))
-
   (describe "macher--process-request"
     :var (context fsm temp-file build-patch-called)
 
