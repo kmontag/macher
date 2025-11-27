@@ -36,6 +36,10 @@ lint.%: $(EASK) .eask
 .PHONY: lint
 lint: analyze lint.declare lint.package lint.regexps
 
+.PHONY: compile
+compile: $(EASK) .eask
+	$(EASK) --strict compile
+
 # Convenience targets for running tests that match a pattern, e.g. `make test.unit`.
 .PHONY: test.%
 test.%: $(EASK) .eask
