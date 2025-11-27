@@ -36,6 +36,36 @@ lint.%: $(EASK) .eask
 .PHONY: lint
 lint: analyze lint.declare lint.package lint.regexps
 
+# Files to format (same pattern as lint, excluding non-alphanumeric-prefixed test files).
+EL_FILES := $(wildcard *.el) $(wildcard demo/*.el) $(filter tests/[a-z]%,$(wildcard tests/*.el))
+
+.PHONY: format
+format: $(EASK) .eask
+	@$(EASK) emacs --batch \
+		--eval "(require 'elisp-autofmt)" \
+		--eval "(setq elisp-autofmt-python-bin \"python3\")" \
+		--eval "(dolist (file (cdr command-line-args-left)) \
+			(find-file file) \
+			(elisp-autofmt-buffer) \
+			(save-buffer))" \
+		-- $(abspath $(EL_FILES))
+
+.PHONY: format.check
+format.check: $(EASK) .eask
+	@$(EASK) emacs --batch \
+		--eval "(require 'elisp-autofmt)" \
+		--eval "(setq elisp-autofmt-python-bin \"python3\")" \
+		--eval "(let ((failed nil)) \
+			(dolist (file (cdr command-line-args-left)) \
+			  (find-file file) \
+			  (let ((original (buffer-string))) \
+			    (elisp-autofmt-buffer) \
+			    (unless (string= original (buffer-string)) \
+			      (message \"File needs formatting: %s\" file) \
+			      (setq failed t)))) \
+			(when failed (kill-emacs 1)))" \
+		-- $(abspath $(EL_FILES))
+
 # Convenience targets for running tests that match a pattern, e.g. `make test.unit`.
 .PHONY: test.%
 test.%: $(EASK) .eask
