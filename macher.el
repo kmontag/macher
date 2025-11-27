@@ -62,7 +62,7 @@ The returned plist will contain the transformed :prompt, the
 that was passed to the transformer).
 
 This function is used by the default actions in the
-'macher-actions-alist', and provided as a convenience for defining
+`macher-actions-alist', and provided as a convenience for defining
 custom actions with the same workflow."
 
   ;; Prompt to save any unsaved buffers.
@@ -129,7 +129,7 @@ returns) a plist containing the following keys:
 
 - :summary - a summarized version of the prompt (optional). This won't
   affect the actual request content, but it will be included with the
-  'macher-action-execution' struct provided to the before-/after-action
+  `macher-action-execution' struct provided to the before-/after-action
   hooks, for potential usage in the UI. For the built-in actions, this
   will be the raw user input or selected-region text that was used to
   generate the prompt (as opposed to the full prompt including
@@ -158,29 +158,29 @@ requests are made when using `macher-action' (or its wrappers like
 
 This value controls the buffer-local setup that happens just after an
 action buffer is created, and just before the
-'macher-action-buffer-setup-hook' is fired. It effectively sets up a
-predefined \"pre\" function for the 'macher-action-buffer-setup-hook'.
+`macher-action-buffer-setup-hook' is fired. It effectively sets up a
+predefined \"pre\" function for the `macher-action-buffer-setup-hook'.
 
 The choices are:
 
-- 'basic - sets up buffer-local hooks in
-  'macher-before-action-functions' and 'macher-after-action-functions'
+- 'basic' - sets up buffer-local hooks in
+  `macher-before-action-functions' and `macher-after-action-functions'
   to display the action buffer and insert a nicely-formatted prompt.
 
-- 'default - like 'basic, but also enables 'gptel-mode' and the global
-  'gptel-default-mode' (e.g. markdown), and sets up auto-scrolling and
+- 'default' - like 'basic', but also enables `gptel-mode' and the global
+  `gptel-default-mode' (e.g. markdown), and sets up auto-scrolling and
   line wrapping.
 
-- 'org - like 'default, but instead of the 'gptel-default-mode', enables
-  'org-mode' and requires 'gptel-org'. If you're already using
-  'org-mode' (with 'gptel-org') as your 'gptel-default-mode', this will
-  behave exactly the same as 'default.
+- 'org' - like 'default', but instead of the `gptel-default-mode', enables
+  `org-mode' and requires `gptel-org'. If you're already using
+  `org-mode' (with `gptel-org') as your `gptel-default-mode', this will
+  behave exactly the same as 'default'.
 
 - nil - don't perform any action buffer setup. The action buffer will
-  just be a 'fundamental-mode' buffer which receives the responses from
+  just be a `fundamental-mode' buffer which receives the responses from
   gptel requests made through `macher-action'. Use this if you want full
   control over the action buffer UI - you can customize the
-  'macher-action-buffer-setup-hook' to perform your own initialization
+  `macher-action-buffer-setup-hook' to perform your own initialization
   from scratch.
 
 The exact behavior of the predefined UI configurations is subject to
@@ -199,7 +199,7 @@ change."
 Functions in this hook are called with no arguments in the newly created
 action buffer. The buffer will already have its workspace set up (i.e.
 `macher-workspace' can be used to get the associated workspace) and
-'default-directory' set to the workspace root.
+`default-directory' set to the workspace root.
 
 The base UI configuration is controlled by `macher-action-buffer-ui'
 and is applied before this hook runs. This hook can be used for
@@ -209,7 +209,7 @@ If you want full control over the action buffer UI, set
 `macher-action-buffer-ui' to nil and use this hook to perform all
 setup from scratch. In that case, you'll probably also need to
 customize (globally or buffer-locally) the
-'macher-before-action-functions' to make sure the buffer actually gets
+`macher-before-action-functions' to make sure the buffer actually gets
 displayed."
   :type 'hook
   :group 'macher)
@@ -222,7 +222,7 @@ invoked, e.g. a file or directory buffer. It runs before the prompt text
 is captured/transformed - so you could use this, for example, to adjust
 the selected region, or add the current file to the gptel context.
 
-This runs prior to the 'macher-before-action-functions', and potentially
+This runs prior to the `macher-before-action-functions', and potentially
 prior to the creation of the action buffer."
   :type 'hook
   :group 'macher)
@@ -234,13 +234,13 @@ Each function is called in the workspace's action buffer, with a
 `macher-action-execution' object containing details about the request
 that's about to be sent.
 
-Note this hook runs _after_ the 'macher-action-dispatch-hook', after the
+Note this hook runs _after_ the `macher-action-dispatch-hook', after the
 prompt has been captured and transformed but before the actual request
 is sent.
 
 Functions can modify the PROMPT or CONTEXT fields of the execution
 object to change the prompt that will be sent to the LLM and/or add
-context to the request's 'gptel-fsm'.
+context to the request's `gptel-fsm'.
 
 Note that the default UI configurations (controlled by
 `macher-action-buffer-ui') will modify this hook buffer-locally in the
@@ -274,14 +274,14 @@ This hook runs after the callback provided to `macher-action' (if any)."
 
 This function will be called from the buffer where the request is being
 sent, and receives the same arguments as the standard
-'gptel-context-string-function'. It can be synchronous (one argument,
+`gptel-context-string-function'. It can be synchronous (one argument,
 just the context list) or asynchronous (two args, a callback and the
 context list) - see that function's docstring for details.
 
 The function should return (or invoke the async callback with) a
 workspace information string that will be added to the request content,
 in the same place the standard gptel context as indicated by
-'gptel-use-context'. It can also return nil, in which case the request
+`gptel-use-context'. It can also return nil, in which case the request
 will not be modified.
 
 The default function adds information about the current workspace (e.g.
@@ -307,7 +307,7 @@ alphabetical order.
 Set to nil to disable the limit entirely.
 
 Note: This value is used within the default `macher--context-string'
-function. If you customize 'macher-context-string-function' to use a
+function. If you customize `macher-context-string-function' to use a
 different function, this value will have no effect."
   :type '(choice (natnum :tag "Maximum number of files") (const :tag "No limit" nil))
   :group 'macher)
@@ -336,12 +336,12 @@ The function is called with three arguments:
   - any custom value passed to `macher-process-request'
     programmatically.
 
-- CONTEXT: the 'macher-context' for the request.
+- CONTEXT: the `macher-context' for the request.
 
-- FSM: the 'gptel-fsm' (state machine) for the request.
+- FSM: the `gptel-fsm' (state machine) for the request.
 
 This function is only called for requests that actually create a
-'macher-context', i.e. requests with macher tools of some sort. The
+`macher-context', i.e. requests with macher tools of some sort. The
 'macher-notools preset will not cause the hook to be called.
 
 The value of this variable will be stored at request-time and used
@@ -357,10 +357,10 @@ temporary buffer (not the actual patch buffer), and should modify the
 buffer to contain the patch content. They will be called with three
 arguments:
 
-- CONTEXT: the 'macher-context' associated with the request being
+- CONTEXT: the `macher-context' associated with the request being
   processed.
 
-- FSM: the 'gptel-fsm' struct for the request.
+- FSM: the `gptel-fsm' struct for the request.
 
 - CALLBACK: a callback that must be called after the preparation step is
   finished. This function can be called synchronously or asynchronously,
@@ -370,9 +370,9 @@ By default, the functions in this hook will populate the buffer with a
 git-patch-style diff, and add metadata including the request prompt.
 
 If you want to add to this hook but also preserve the default behavior,
-make sure you call `add-hook' (or similar) _after_ requiring 'macher'.
+make sure you call `add-hook' (or similar) _after_ requiring `macher'.
 If you call it beforehand, the default hook value will simply be
-ignored. If you're using 'use-package', this means you should avoid the
+ignored. If you're using `use-package', this means you should avoid the
 :hook keyword, and instead use `add-hook' in the :config section.
 
 This hook is run within the default 'macher-process-request-function'.
@@ -387,19 +387,19 @@ is displayed when using macher actions that generate patches.
 
 This value controls the buffer-local setup that happens just after a
 patch buffer is created, and just before the
-'macher-patch-buffer-setup-hook' is fired. It effectively sets up a
-predefined \"pre\" function for the 'macher-patch-buffer-setup-hook'.
+`macher-patch-buffer-setup-hook' is fired. It effectively sets up a
+predefined \"pre\" function for the `macher-patch-buffer-setup-hook'.
 
 The choices are:
 
-- 'diff - sets up 'diff-mode', makes the buffer read-only, and adds
+- symbol `diff' - sets up `diff-mode', makes the buffer read-only, and adds
   buffer-local hooks to display the patch buffer when it's ready.
 
 - nil - don't perform any patch buffer setup. The patch buffer will
-  just be a 'fundamental-mode' buffer which receives the patch content.
+  just be a `fundamental-mode' buffer which receives the patch content.
   Use this if you want full control over the patch buffer UI - you can
-  customize the 'macher-patch-buffer-setup-hook' and
-  'macher-patch-ready-hook' to perform your own initialization from
+  customize the `macher-patch-buffer-setup-hook' and
+  `macher-patch-ready-hook' to perform your own initialization from
   scratch."
   :type
   '(choice
@@ -413,7 +413,7 @@ The choices are:
 Functions in this hook are called with no arguments in the newly created
 patch buffer. The buffer will already have its workspace set up (i.e.
 `macher-workspace' can be used to get the associated workspace) and
-'default-directory' set to the workspace root.
+`default-directory' set to the workspace root.
 
 The base UI configuration is controlled by `macher-patch-buffer-ui'
 and is applied before this hook runs. This hook can be used for
@@ -518,7 +518,7 @@ workspace (i.e. same type and ID).
 To add custom workspace detection, add functions to this list.
 
 Custom functions should return a cons cell (TYPE . ID) where:
-- TYPE is a symbol from the 'macher-workspace-types-alist' (e.g.
+- TYPE is a symbol from the `macher-workspace-types-alist' (e.g.
   'project, 'file, or a custom workspace type)
 - ID is the workspace identifier (typically a root directory or file path,
   but for custom workspace types, it can be any string as long as you
@@ -552,7 +552,7 @@ All functions receive the workspace ID as a string argument, i.e. the
 cdr of a workspace cons cell whose type matches the associated alist key.
 
 To add a new workspace type, add an entry to this alist and update
-'macher-workspace-functions' to detect it."
+`macher-workspace-functions' to detect it."
   :type '(alist :key-type symbol :value-type (plist :key-type keyword :value-type function))
   :group 'macher)
 
@@ -724,7 +724,7 @@ WORKSPACE is a cons cell (TYPE . ID) where TYPE is a workspace type.
 Returns the root directory path for the workspace.
 
 Uses the appropriate root function as configured in the
-'macher-workspace-types-alist', and validates that the result is an
+`macher-workspace-types-alist', and validates that the result is an
 absolute path to a real directory."
   (let* ((workspace-type (car workspace))
          (workspace-id (cdr workspace))
@@ -892,9 +892,10 @@ Returns a workspace information string to be added to the request."
 
 (defun macher--workspace-hash (workspace &optional length)
   "Generate a unique hash for WORKSPACE.
-LENGTH specifies the number of characters in the hash (default 16).
-This can be used, for example, to ensure unique buffer names per
-workspace, without needing to put the full path in the buffer name."
+
+LENGTH specifies the number of characters in the hash (default 16). This
+can be used, for example, to ensure unique buffer names per workspace,
+without needing to put the full path in the buffer name."
   (let* ((workspace-type (car workspace))
          (workspace-id (cdr workspace))
          (hash-input (secure-hash 'sha256 (concat (format "%s" workspace-type) workspace-id)))
@@ -930,9 +931,9 @@ performed."
 (defun macher--action-buffer-setup-ui ()
   "Set up a slightly more opinionated action buffer UI.
 
-This setup is shared among the 'default and 'org UI configurations. The
-function enables 'gptel-mode' and sets up auto-scrolling and line
-wrapping."
+This setup is shared among the symbol `default' and symbol `org' UI
+configurations. The function enables `gptel-mode' and sets up
+auto-scrolling and line wrapping."
   ;; Enable gptel-mode for a nice header and LLM interaction feedback.
   (gptel-mode 1)
   ;; Wrap lines.
@@ -3721,7 +3722,7 @@ Then pass arguments through to the original callback."
   "Register macher presets with gptel.
 
 Once presets are registered, you can use macher functionality in any
-gptel request using the \\=\"@preset\" syntax, for example:
+gptel request using the \"@preset\" syntax, for example:
 
   @macher Add an eslint config to this project.
 
@@ -3739,8 +3740,8 @@ This function registers three presets:
 
 NAMES is an optional alist of name overrides, whose entries are
 like (PRESET . NAME). PRESET is the preset's standard name symbol (e.g.
-\\='macher-notools) and NAME is the symbol to actually register with
-gptel. You can also pass a nil NAME to disable registering a preset
+symbol `macher-notools') and NAME is the symbol to actually register
+with gptel. You can also pass a nil NAME to disable registering a preset
 globally. For example:
 
 \\='((macher . m) (macher-ro . mr) (macher-notools . nil))"
@@ -3786,6 +3787,7 @@ If CALLBACK is provided, it will be called when the action completes.
 The callback will receive three arguments, the same as functions in
 'macher-after-action-functions': ERROR (nil on success, or an error
 description on failure), EXECUTION (the 'macher-action-execution' object
+`macher-after-action-functions': ERROR (nil on success, or an error
 for the action), and FSM (the `gptel-fsm' object for the request).
 
 Any additional ACTION-ARGS will be forwarded to the action function, or
