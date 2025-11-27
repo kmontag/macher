@@ -23,6 +23,10 @@ jobs:
       - uses: ./.github/actions/setup
       - uses: hashicorp/setup-terraform@v3
 
+      # DEBUG: SSH into runner. Remove after debugging.
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+
       - name: Check formatting
         run: make format.check
 
