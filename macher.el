@@ -124,7 +124,7 @@ returns) a plist containing the following keys:
 - :prompt - the full prompt string to send to the LLM.
 
 - :preset - gptel preset to use for the request (optional, defaults to
-  'macher). This can be a symbol (one of the keys from
+  ='macher'). This can be a symbol (one of the keys from
   `macher--presets-alist') or a raw gptel preset plist.
 
 - :summary - a summarized version of the prompt (optional). This won't
@@ -163,18 +163,18 @@ predefined \"pre\" function for the `macher-action-buffer-setup-hook'.
 
 The choices are:
 
-- 'basic' - sets up buffer-local hooks in
+- ='basic' - sets up buffer-local hooks in
   `macher-before-action-functions' and `macher-after-action-functions'
   to display the action buffer and insert a nicely-formatted prompt.
 
-- 'default' - like 'basic', but also enables `gptel-mode' and the global
+- ='default' - like ='basic', but also enables `gptel-mode' and the global
   `gptel-default-mode' (e.g. markdown), and sets up auto-scrolling and
   line wrapping.
 
-- 'org' - like 'default', but instead of the `gptel-default-mode', enables
+- ='org' - like ='default', but instead of the `gptel-default-mode', enables
   `org-mode' and requires `gptel-org'. If you're already using
   `org-mode' (with `gptel-org') as your `gptel-default-mode', this will
-  behave exactly the same as 'default'.
+  behave exactly the same as ='default'.
 
 - nil - don't perform any action buffer setup. The action buffer will
   just be a `fundamental-mode' buffer which receives the responses from
@@ -327,10 +327,10 @@ The function is called with three arguments:
 - REASON: the reason that the processing function is being invoked.
   Currently this can be:
 
-  - The symbol `complete' - when invoked at the end of the request
+  - The symbol ='complete' - when invoked at the end of the request
     lifecycle.
 
-  - The symbol `interactive' - when `macher-process-request' is invoked
+  - The symbol ='interactive' - when `macher-process-request' is invoked
     interactively.
 
   - any custom value passed to `macher-process-request'
@@ -342,7 +342,7 @@ The function is called with three arguments:
 
 This function is only called for requests that actually create a
 `macher-context', i.e. requests with macher tools of some sort. The
-'macher-notools preset will not cause the hook to be called.
+='macher-notools' preset will not cause the hook to be called.
 
 The value of this variable will be stored at request-time and used
 throughout a particular request. This enables custom handling on a
@@ -434,22 +434,22 @@ setup from scratch."
 
 Functions in this hook will be called inside the patch buffer, with its
 contents initialized to the result of the
-'macher-patch-prepare-functions' (i.e. the contents of the temporary
+`macher-patch-prepare-functions' (i.e. the contents of the temporary
 preparation buffer after running those functions). They will be called
 with no arguments.
 
-The patch buffer's 'default-directory' will be set to the workspace
+The patch buffer's `default-directory' will be set to the workspace
 root, and `macher-workspace' can be called to retrieve the associated
 workspace.
 
 The base UI configuration is controlled by `macher-patch-buffer-ui'
 and will modify this hook buffer-locally in the patch buffer. This is
-what handles setting up 'diff-mode' and displaying the patch buffer when
+what handles setting up `diff-mode' and displaying the patch buffer when
 it's ready. If you set `macher-patch-buffer-ui' to nil, you'll probably
 also want to add something to this hook which at least displays the
 patch buffer.
 
-This hook is run within the default 'macher-process-request-function'.
+This hook is run within the default `macher-process-request-function'.
 If you modify that function for a particular request, this hook won't be
 run."
   :type 'hook
@@ -478,7 +478,7 @@ added to the global gptel registry."
 
 This function is called with two arguments:
 
-- CONTEXT: the 'macher-context' object for the current request.
+- CONTEXT: the `macher-context' object for the current request.
 
 - MAKE-TOOL-FUNCTION: function that takes the same arguments as
   `gptel-make-tool', but must be used instead of `gptel-make-tool' to
@@ -523,7 +523,7 @@ To add custom workspace detection, add functions to this list.
 
 Custom functions should return a cons cell (TYPE . ID) where:
 - TYPE is a symbol from the `macher-workspace-types-alist' (e.g.
-  'project, 'file, or a custom workspace type)
+  ='project', ='file', or a custom workspace type)
 - ID is the workspace identifier (typically a root directory or file path,
   but for custom workspace types, it can be any string as long as you
   can use it to resolve a real root path)"
@@ -599,7 +599,7 @@ or is aborted.")
 - CONTENTS is an alist of (filename . (orig-content . new-content))
   pairs, where orig-content and new-content are strings.
 
-- WORKSPACE is the workspace information (same format as 'macher--workspace').
+- WORKSPACE is the workspace information (same format as `macher--workspace').
 
 - PROMPT is the raw prompt text sent to the LLM (not including any
   conversation history/prior messages that might also have been
@@ -613,7 +613,7 @@ or is aborted.")
 
 - PROCESS-REQUEST-FUNCTION is the function to process the request
   throughout its lifecycle. This will be set to the current value of
-  'macher-process-request-function' at the time a request is made.
+  `macher-process-request-function' at the time a request is made.
 
 - DATA is an arbitrary user-defined data object that you can manipulate
   in custom tools.
@@ -977,11 +977,11 @@ before running the `macher-action-buffer-setup-hook'."
   "Default function for before-action processing.
 
 This is added buffer-locally (in the action buffer) to the
-'macher-before-action-functions' when using any of the predefined
-'macher-action-buffer-ui' configurations. If you set
+`macher-before-action-functions' when using any of the predefined
+`macher-action-buffer-ui' configurations. If you set
 `macher-action-buffer-ui' to nil, this function will never be called.
 
-This function takes an EXECUTION object (a 'macher-action-execution'
+This function takes an EXECUTION object (a `macher-action-execution'
 struct) describing the action and the request.
 
 The function inserts the prompt at the end of the current buffer (action
@@ -1052,8 +1052,8 @@ It adapts the prompt formatting based on the current major mode."
   "Default function for after-action handling.
 
 This is added buffer-locally (in the action buffer) to the
-'macher-after-action-functions' when using the 'basic, 'default, or
-'org UI configurations. If you set `macher-action-buffer-ui' to nil,
+`macher-after-action-functions' when using the `basic', `default', or
+`org' UI configurations. If you set `macher-action-buffer-ui' to nil,
 this function will never be called.
 
 The function just inserts the prefix for the next prompt if it wasn't
@@ -1083,10 +1083,10 @@ in an error. The marker info from the gptel FSM is used for placement."
             (insert "\n" prefix)))))))
 
 (defun macher--patch-buffer-setup-diff ()
-  "Set up 'diff-mode' and related settings for patch buffers.
+  "Set up `diff-mode' and related settings for patch buffers.
 
 This performs setup related to displaying patch content as diffs,
-including enabling 'diff-mode' and setting up buffer-local hooks for
+including enabling `diff-mode' and setting up buffer-local hooks for
 displaying the patch buffer when it's ready."
   (diff-mode)
   ;; Diffs are generally easier to interact with (e.g. press RET to jump to a change) in read-only
@@ -1116,13 +1116,13 @@ before running the `macher-patch-buffer-setup-hook'."
   "Set up the patch buffer with appropriate modes and settings.
 
 This is added buffer-locally (in the patch buffer) to the
-'macher-patch-ready-hook' when using the 'diff UI configuration.
+`macher-patch-ready-hook' when using the ='diff' UI configuration.
 If you set `macher-patch-buffer-ui' to nil, this function will
 never be called.
 
-The function syncs 'diff-mode' settings based on the current content and
+The function syncs `diff-mode' settings based on the current content and
 displays the patch buffer."
-  ;; Re-detect patch type (i.e. 'git) now that the buffer has been populated.
+  ;; Re-detect patch type (i.e. ='git') now that the buffer has been populated.
   (when (derived-mode-p 'diff-mode)
     (diff-setup-buffer-type))
 
@@ -1134,17 +1134,17 @@ displays the patch buffer."
 (defun macher--process-request (reason context fsm)
   "Process the macher CONTEXT throughout the request lifecycle.
 
-This is the default implementation of 'macher-process-request-function'.
-It uses the 'macher-patch-prepare-functions' and the
-'macher-patch-ready-hook' to create/handle a patch based on the changes
+This is the default implementation of `macher-process-request-function'.
+It uses the `macher-patch-prepare-functions' and the
+`macher-patch-ready-hook' to create/handle a patch based on the changes
 made during the request.
 
 REASON is the reason that the processing function is being invoked. This
 argument is currently ignored.
 
-CONTEXT is the 'macher-context' for the request being processed.
+CONTEXT is the `macher-context' for the request being processed.
 
-FSM is the 'gptel-fsm' (state machine) for the request being processed."
+FSM is the `gptel-fsm' (state machine) for the request being processed."
   (when context
     ;; Check if any changes were made during the request using the dirty-p flag.
     (when (macher-context-dirty-p context)
@@ -1153,9 +1153,9 @@ FSM is the 'gptel-fsm' (state machine) for the request being processed."
 (defun macher--context-for-fsm (fsm)
   "Extract the macher context from the FSM, if any.
 
-FSM is a 'gptel-fsm' (state machine) for a request.
+FSM is a `gptel-fsm' (state machine) for a request.
 
-Returns the 'macher-context' object if the FSM has macher tools, nil otherwise."
+Returns the `macher-context' object if the FSM has macher tools, nil otherwise."
   (when fsm
     (let* ((info (gptel-fsm-info fsm))
            (tools (plist-get info :tools)))
@@ -1164,10 +1164,10 @@ Returns the 'macher-context' object if the FSM has macher tools, nil otherwise."
         (cl-some #'macher--tool-context tools)))))
 
 (defun macher--build-patch (context fsm)
-  "Run the 'macher-patch-prepare-functions' and the 'macher-patch-ready-hook'.
+  "Run the `macher-patch-prepare-functions' and the `macher-patch-ready-hook'.
 
 CONTEXT and FSM are the same as passed to the
-'macher-process-request-function'."
+`macher-process-request-function'."
   ;; Prepare patch content in a temporary buffer.
   (with-temp-buffer
     (let* ((temp-buffer (current-buffer))
@@ -1648,7 +1648,9 @@ RECURSIVE, if non-nil, recursively lists subdirectories.
 SIZES, if non-nil, includes file sizes in the output.
 
 Returns a formatted string listing the directory contents. Files are
-prefixed with 'file:' and directories with 'dir:' to be clear to LLMs.
+prefixed with \"file:\" and directories with \"dir:\" to be clear to
+LLMs.
+
 Signals an error if the directory is not found in the workspace."
   (let* ((workspace (macher-context-workspace context))
          (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
@@ -2052,7 +2054,7 @@ will be matched against each file's path relative to the search PATH.
 
 CASE-INSENSITIVE, if non-nil, performs a case-insensitive search.
 
-Returns an alist containing 'xref-match-item' structs for each file,
+Returns an alist containing `xref-match-item' structs for each file,
 with structure:
 
  ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)
@@ -2265,7 +2267,7 @@ MATCHES-ALIST is an alist of the form:
 
    ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)
 
-The inner lists of the MATCHES-ALIST contain 'xref-match-item' structs."
+The inner lists of the MATCHES-ALIST contain `xref-match-item' structs."
   (let* ((workspace (macher-context-workspace context))
          (workspace-root (macher--workspace-root workspace))
          (context-contents (macher-context-contents context))
@@ -2668,8 +2670,8 @@ the global gptel registry when the request completes."
      "Search for patterns within the workspace using grep or something like it.\n"
      "\n"
      "Supports two output modes:\n"
-     "- 'files' (default): Shows file paths with match counts\n"
-     "- 'content': Shows matching lines with optional context\n"
+     "- ='files' (default): Shows file paths with match counts\n"
+     "- ='content': Shows matching lines with optional context\n"
      "\n"
      "!!! CRITICAL: You MUST NOT use this tool to search files whose contents were "
      "already provided to you in the REQUEST CONTEXT. You already have their contents!")
@@ -2700,8 +2702,8 @@ the global gptel registry when the request completes."
        :optional t
        :description
        ,(concat
-         "Output mode: 'files' (default, shows paths + counts) or "
-         "'content' (shows grep-style matching lines)"))
+         "Output mode: ='files' (default, shows paths + counts) or "
+         "='content' (shows grep-style matching lines)"))
       (:name
        "case_insensitive"
        :type boolean
@@ -2924,7 +2926,7 @@ an error if it was not."
 
 (defun macher--generate-patch-diff (context)
   "Generate a raw diff to populate the patch buffer.
-CONTEXT is the 'macher-context' object. Returns the generated diff text."
+CONTEXT is the `macher-context' object. Returns the generated diff text."
   (let* ((contents-alist (macher-context-contents context))
          (workspace (macher-context-workspace context))
          (base-dir (macher--workspace-root workspace))
@@ -3222,16 +3224,16 @@ CALLBACK must be called when preparation is complete."
 ;;; Tool Management
 ;;
 ;; We use a potentially-too-clever overload of the :category field on gptel tool objects to allow
-;; the 'macher-context' to be retrieved from existing tool definitions. Normally the :category is
+;; the `macher-context' to be retrieved from existing tool definitions. Normally the :category is
 ;; expected to be a string, but since we're not adding tools to the global registry, it should
 ;; hopefully never be accessed elsewhere.
 ;;
-;; This enables sharing of the 'macher-context' across all tools for a request, even when they're
+;; This enables sharing of the `macher-context' across all tools for a request, even when they're
 ;; added across multiple presets. It also allows for sensible merging of tools with request forms
 ;; like "@macher-ro @macher my query".
 
 (defun macher--tool-context (tool)
-  "Get the 'macher-context' for a TOOL created with `macher--make-tool'.
+  "Get the `macher-context' for a TOOL created with `macher--make-tool'.
 Returns nil if the tool was not created with `macher--make-tool'."
   (let ((category (gptel-tool-category tool)))
     (when (macher-context-p category)
@@ -3294,16 +3296,16 @@ Returns the updated preset spec."
       preset)))
 
 (defun macher--make-context-for-preset (preset)
-  "Create a 'macher-context' and add appropriate transforms to the PRESET spec.
+  "Create a `macher-context' and add appropriate transforms to the PRESET spec.
 
 PRESET is a plist containing at least the existing
 :prompt-transform-functions for this preset; the new preset will append
 to this list.
 
 The added transforms will handle setting up the
-'macher-context' (storing the prompt and preloading files from the
+`macher-context' (storing the prompt and preloading files from the
 context), hooking into the request lifecycle to process the request on
-completion, and storing the outgoing FSM in 'macher--fsm-latest'.
+completion, and storing the outgoing FSM in `macher--fsm-latest'.
 
 Returns a cons cell (macher-context . updated-preset).
 
@@ -3320,7 +3322,7 @@ If no workspace can be determined from the current buffer, returns (nil
             (lambda (fsm)
               (unless transition-handler-invoked
                 (with-current-buffer (plist-get (gptel-fsm-info fsm) :buffer)
-                  ;; It's better to set 'macher--fsm-latest' in a transition handler rather than
+                  ;; It's better to set `macher--fsm-latest' in a transition handler rather than
                   ;; immediately in a prompt transformer, since the latter can also be used when not
                   ;; actually sending requests, e.g. when inspecting an outgoing query.
                   (setq macher--fsm-latest fsm))
@@ -3379,7 +3381,7 @@ If no workspace can be determined from the current buffer, returns (nil
 
 - SPEC-FUNCTION is a function which returns a partial spec based on the
   current environment. This spec should only contain keys that directly
-  correspond to 'gptel-*' variables, e.g. :use-tools,
+  correspond to gptel variables, e.g. :use-tools,
   :prompt-transform-functions, etc.
 
 - BASELINE-SPEC is the baseline preset specification (minus :pre and :post
@@ -3485,7 +3487,7 @@ the global state.")
 (defun macher--with-preset (preset callback)
   "Run the CALLBACK with the macher PRESET applied.
 
-PRESET is a key from the 'macher--presets-alist', or a raw preset spec
+PRESET is a key from the `macher--presets-alist', or a raw preset spec
 like \\='(:use-tools t). Note that this function does not accept a name
 from the global gptel registry - it's for cases where you want to use a
 well-defined preset independent of how gptel is currently configured.
@@ -3535,11 +3537,11 @@ CALLBACK takes no arguments."
   "A gptel prompt transformer to add context from the current workspace.
 
 CALLBACK and FSM are as described in the
-'gptel-prompt-transform-functions' documentation.
+`gptel-prompt-transform-functions' documentation.
 
-Adds the result of the 'macher-context-string-function' to the prompt,
+Adds the result of the `macher-context-string-function' to the prompt,
 in the same place as the default gptel context as specified by
-'gptel-use-context'."
+`gptel-use-context'."
   (when macher-context-string-function
     (when-let* (
                 ;; plist containing information about the upcoming request.
@@ -3559,15 +3561,15 @@ in the same place as the default gptel context as specified by
 The HANDLER will receive one argument when the request terminates
 successfully or otherwise:
 
-- FSM: the 'gptel-fsm' struct for the request (the same one passed to
+- FSM: the `gptel-fsm' struct for the request (the same one passed to
   this function). This can be used to extract a more specific
   termination reason - for example, standard gptel requests will end up
-  in the the 'DONE or 'ERRS state, which can be extracted from the FSM.
+  in the the ='DONE' or ='ERRS' state, which can be extracted from the FSM.
 
 The request is considered to have terminated when the FSM reaches a
 state with no possible transitions to another state."
   (let* (
-         ;; An alist of states mapped to potential next states. See 'gptel-request--transitions'.
+         ;; An alist of states mapped to potential next states. See `gptel-request--transitions'.
          (transitions (gptel-fsm-table fsm))
 
          ;; An alist of states mapped to their handler functions.
@@ -3625,7 +3627,7 @@ The HANDLER will receive one argument:
 The handler will be called once for each state transition throughout the
 request lifecycle."
   (let* (
-         ;; An alist of states mapped to potential next states. See 'gptel-request--transitions'.
+         ;; An alist of states mapped to potential next states. See `gptel-request--transitions'.
          (transitions (gptel-fsm-table fsm))
 
          ;; An alist of states mapped to their handler functions.
@@ -3664,11 +3666,11 @@ successfully or otherwise:
 
 - EXIT-CODE: nil if the request terminated via a normal FSM
   flow (including terminations due to an error response), or the symbol
-  'abort if the request was aborted.
+  ='abort' if the request was aborted.
 
 - FSM: the FSM for the request (the same one passed to this function).
   This can be used to extract a more specific termination reason - for
-  example, standard gptel requests will end up in the the 'DONE or 'ERRS
+  example, standard gptel requests will end up in the the ='DONE' or ='ERRS'
   state, which can be extracted using `gptel-fsm-state'.
 
 This is a thin wrapper around `gptel-request'. The PROMPT and KEYS will
@@ -3745,7 +3747,7 @@ This function registers three presets:
 
 NAMES is an optional alist of name overrides, whose entries are
 like (PRESET . NAME). PRESET is the preset's standard name symbol (e.g.
-\\='macher-notools) and NAME is the symbol to actually register
+='macher-notools') and NAME is the symbol to actually register
 with gptel. You can also pass a nil NAME to disable registering a preset
 globally. For example:
 
@@ -3779,27 +3781,26 @@ sending macher requests:
    tools.
 
 Lifecycle hooks are also run to allow modifying or otherwise handling
-the prompt/response - see 'macher-action-dispatch-hook',
-'macher-before-action-functions', and 'macher-after-action-functions'.
+the prompt/response - see `macher-action-dispatch-hook',
+`macher-before-action-functions', and `macher-after-action-functions'.
 The default action buffer UI uses these hooks to render information
 about outgoing action requests.
 
-ACTION can be a symbol defined in 'macher-actions-alist', or a list with
-the same format as an entry in 'macher-actions-alist' (e.g.
-'(my-action-name . my-action-function-or-plist)).
+ACTION can be a symbol defined in `macher-actions-alist', or a list with
+the same format as an entry in `macher-actions-alist' (e.g.
+\='(my-action-name . my-action-function-or-plist)).
 
 If CALLBACK is provided, it will be called when the action completes.
 The callback will receive three arguments, the same as functions in
-'macher-after-action-functions': ERROR (nil on success, or an error
-description on failure), EXECUTION (the 'macher-action-execution' object
 `macher-after-action-functions': ERROR (nil on success, or an error
+description on failure), EXECUTION (the `macher-action-execution' object
 for the action), and FSM (the `gptel-fsm' object for the request).
 
 Any additional ACTION-ARGS will be forwarded to the action function, or
 simply ignored if the action is defined as a plain plist.
 
 When called interactively, prompts the user to select an ACTION from
-those available in the 'macher-actions-alist'.
+those available in the `macher-actions-alist'.
 
 Note that macher presets can be used with any gptel request, and you
 don't need to use this function to use macher. This function simply
@@ -3860,23 +3861,24 @@ implements one possible workflow."
              ;; Create a callback wrapper that includes the action hooks.
              (request-callback
               (lambda (exit-code fsm)
-                (let* ((state (gptel-fsm-state fsm))
-                       (error
-                        (cond
-                         ;; If we have a non-nil exit code (i.e. 'abort), just use it as the error.
-                         (exit-code)
-                         ;; If the FSM is in an errored state, extract the error text.
-                         ((eq state 'ERRS)
-                          (let* ((info (gptel-fsm-info fsm))
-                                 (error (plist-get info :error))
-                                 (http-msg (plist-get info :status))
-                                 (error-type (plist-get error :type))
-                                 (error-msg (plist-get error :message)))
-                            (or error-msg (format "%s: %s" error-type http-msg))))
-                         ;; Otherwise, consider the request successful. In practice the state should
-                         ;; always be 'DONE here.
-                         (t
-                          nil))))
+                (let*
+                    ((state (gptel-fsm-state fsm))
+                     (error
+                      (cond
+                       ;; If we have a non-nil exit code (i.e. ='abort'), just use it as the error.
+                       (exit-code)
+                       ;; If the FSM is in an errored state, extract the error text.
+                       ((eq state 'ERRS)
+                        (let* ((info (gptel-fsm-info fsm))
+                               (error (plist-get info :error))
+                               (http-msg (plist-get info :status))
+                               (error-type (plist-get error :type))
+                               (error-msg (plist-get error :message)))
+                          (or error-msg (format "%s: %s" error-type http-msg))))
+                       ;; Otherwise, consider the request successful. In practice the state should
+                       ;; always be 'DONE here.
+                       (t
+                        nil))))
 
                   ;; Call the original callback if provided. Don't change the buffer for this, to
                   ;; avoid any potential issues with killed buffers.
@@ -3917,7 +3919,7 @@ In other words, abort gptel requests running in the macher
 action buffer associated with the `macher-workspace' for BUF.
 
 If a callback was provided to the original request, it will be called
-with the 'abort symbol as the error parameter.
+with the ='abort' symbol as the error parameter.
 
 BUF defaults to the current buffer if not specified."
   (interactive)
@@ -3931,17 +3933,17 @@ BUF defaults to the current buffer if not specified."
   "Process (e.g. display a patch for) the latest macher request.
 
 Extracts the macher context from the FSM and calls the configured
-'macher-process-request-function'. You can use this, for example, to
+`macher-process-request-function'. You can use this, for example, to
 show the patch associated with an in-progress or aborted request.
 
 REASON is the reason that the processing function is being invoked. This
-will be forwarded to the 'macher-process-request-function'. Defaults to
-'interactive when called interactively, or any custom value can be
+will be forwarded to the `macher-process-request-function'. Defaults to
+='interactive' when called interactively, or any custom value can be
 provided.
 
-FSM is an optional 'gptel-fsm' (state machine) for the request. If not
+FSM is an optional `gptel-fsm' (state machine) for the request. If not
 provided, defaults the most recent macher request for the current
-buffer (i.e. the local value of 'macher--fsm-latest')."
+buffer (i.e. the local value of `macher--fsm-latest')."
   (interactive (list 'interactive))
   (when-let* ((fsm (or fsm macher--fsm-latest))
               (context (macher--context-for-fsm fsm))
@@ -3953,11 +3955,11 @@ buffer (i.e. the local value of 'macher--fsm-latest')."
   "Process the latest macher request for the current buffer or the action buffer.
 
 REASON is the reason that the processing function is being invoked.
-Defaults to 'interactive when called interactively, or any custom value
+Defaults to ='interactive' when called interactively, or any custom value
 can be provided.
 
 This function processes the most recent macher request in the current
-buffer (i.e. the local value of 'macher--fsm-latest') if present,
+buffer (i.e. the local value of `macher--fsm-latest') if present,
 otherwise uses the most recent macher request in the action buffer
 associated with the current workspace."
   (interactive (list 'interactive))
@@ -3982,7 +3984,7 @@ If nil, the user will be prompted.
 
 If CALLBACK is provided, it will be called when the implementation
 process completes. The callback will receive three arguments: ERROR (nil
-on success, a string error description on failure, or the symbol 'abort
+on success, a string error description on failure, or the symbol ='abort'
 if the request was aborted), EXECUTION (the `macher-action-execution'
 object for the action), and FSM (the `gptel-fsm' object for the request)."
   (interactive)
