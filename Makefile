@@ -55,6 +55,8 @@ format.elisp: $(EASK) .eask
 		--eval "(require 'editorconfig)" \
 		--eval "(require 'elisp-autofmt)" \
 		--eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")" \
+		--eval "(setq elisp-autofmt-use-function-defs nil)" \
+		-l tests/_defs.el \
 		--eval "(dolist (file (cdr command-line-args-left)) \
 			(find-file file) \
 			(editorconfig-apply) \
@@ -68,6 +70,8 @@ format.elisp.check: $(EASK) .eask
 		--eval "(require 'editorconfig)" \
 		--eval "(require 'elisp-autofmt)" \
 		--eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")" \
+		--eval "(setq elisp-autofmt-use-function-defs nil)" \
+		-l tests/_defs.el \
 		--eval "(let ((failed nil)) \
 			(dolist (file (cdr command-line-args-left)) \
 			  (find-file file) \
