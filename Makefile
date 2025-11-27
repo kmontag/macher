@@ -46,12 +46,15 @@ format: format.elisp format.prettier
 .PHONY: format.check
 format.check: format.elisp.check format.prettier.check
 
+# Use absolute path for Python to work with Nix-isolated Emacs in CI.
+PYTHON3 := $(shell which python3)
+
 .PHONY: format.elisp
 format.elisp: $(EASK) .eask
 	$(EASK) emacs --batch \
 		--eval "(require 'editorconfig)" \
 		--eval "(require 'elisp-autofmt)" \
-		--eval "(setq elisp-autofmt-python-bin \"python3\")" \
+		--eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")" \
 		--eval "(dolist (file (cdr command-line-args-left)) \
 			(find-file file) \
 			(editorconfig-apply) \
@@ -64,7 +67,7 @@ format.elisp.check: $(EASK) .eask
 	$(EASK) emacs --batch \
 		--eval "(require 'editorconfig)" \
 		--eval "(require 'elisp-autofmt)" \
-		--eval "(setq elisp-autofmt-python-bin \"python3\")" \
+		--eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")" \
 		--eval "(let ((failed nil)) \
 			(dolist (file (cdr command-line-args-left)) \
 			  (find-file file) \
