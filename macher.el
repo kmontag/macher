@@ -1314,8 +1314,7 @@ context won't change before it can edit them."
   (when-let* ((workspace (macher-context-workspace macher-context))
               (workspace-files (macher--workspace-files workspace)))
     ;; Pre-compute truenames for workspace files for efficient comparison.
-    (let ((workspace-files-truenames
-           (mapcar #'file-truename workspace-files)))
+    (let ((workspace-files-truenames (mapcar #'file-truename workspace-files)))
       (dolist (context-entry contexts)
         (let ((source (car context-entry)))
           ;; Only process file paths (strings), not buffers.
