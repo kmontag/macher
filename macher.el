@@ -1561,9 +1561,10 @@ If SET-DIRTY-P is non-nil, sets the dirty-p flag on the context."
          (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
          (get-or-create-file-contents
           (lambda (file-path)
-            "Get or create implementation contents for FILE-PATH, scoped to the current request.
-Returns a cons cell (orig-content . new-content) of strings for the file.
-Also updates the context's :contents alist."
+            "Get or create contents for FILE-PATH in the current context.
+
+Returns a cons cell (orig-content . new-content) of strings for the
+file. Also updates the context's :contents alist."
             (let ((full-path (funcall resolve-workspace-path file-path)))
               (macher-context--contents-for-file full-path context))))
          (full-path (funcall resolve-workspace-path path))
@@ -1971,7 +1972,8 @@ CONTENT is the complete new content for the file.
 Use with caution as it will overwrite existing files without warning.
 Handles text content with proper encoding.
 
-Returns nil on success. Sets the dirty-p flag on the context to indicate changes."
+Returns nil on success. Sets the dirty-p flag on the context to indicate
+changes."
   (let* ((workspace (macher-context-workspace context))
          (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
          (full-path (funcall resolve-workspace-path path)))
@@ -2221,7 +2223,9 @@ the 'xref-search-program' to perform the search."
 (defun macher--search-format-files-mode (matches-alist)
   "Format search results for files mode output.
 
-MATCHES-ALIST has structure ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)."
+MATCHES-ALIST has structure:
+
+  ((REL-PATH . (XREF-MATCH-ITEM1 XREF-MATCH-ITEM2 ...)) ...)"
   (let ((output "")
         (total-matches
          (apply #'+ (mapcar (lambda (file-entry) (length (cdr file-entry))) matches-alist))))
