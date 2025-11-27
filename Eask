@@ -16,4 +16,5 @@
 
 (development
  (depends-on "buttercup")
+ (depends-on "editorconfig")
  (depends-on "elisp-autofmt"))

@@ -1,5 +1,6 @@
 NPM := npm
 EASK := node_modules/.bin/eask
+PRETTIER := node_modules/.bin/prettier
 
 # CLI tools for generating demo videos. Not needed for other package-related operations.
 AGG := agg
@@ -7,9 +8,9 @@ ASCIINEMA := asciinema
 FFMPEG := ffmpeg
 
 # Note this also installs eask dependencies via the package's postinstall script.
-$(EASK) .eask: package.json package-lock.json Eask
+$(EASK) $(PRETTIER) .eask: package.json package-lock.json Eask
 	"$(NPM)" install
-	[ -f "$(EASK)" ] && touch "$(EASK)" && touch .eask/
+	[ -f "$(EASK)" ] && touch "$(EASK)" && touch "$(PRETTIER)" && touch .eask/
 
 # Analyze the Eask file itself for inconsistencies, and exit unsuccessfully if any are found.
 .PHONY: analyze
@@ -36,28 +37,38 @@ lint.%: $(EASK) .eask
 .PHONY: lint
 lint: analyze lint.declare lint.package lint.regexps
 
-# Files to format (same pattern as lint, excluding non-alphanumeric-prefixed test files).
-EL_FILES := $(wildcard *.el) $(wildcard demo/*.el) $(filter tests/[a-z]%,$(wildcard tests/*.el))
+# Elisp files to format.
+EL_FILES := $(wildcard *.el) $(wildcard demo/*.el) $(wildcard tests/*.el)
 
 .PHONY: format
-format: $(EASK) .eask
-	@$(EASK) emacs --batch \
+format: format.elisp format.prettier
+
+.PHONY: format.check
+format.check: format.elisp.check format.prettier.check
+
+.PHONY: format.elisp
+format.elisp: $(EASK) .eask
+	$(EASK) emacs --batch \
+		--eval "(require 'editorconfig)" \
 		--eval "(require 'elisp-autofmt)" \
 		--eval "(setq elisp-autofmt-python-bin \"python3\")" \
 		--eval "(dolist (file (cdr command-line-args-left)) \
 			(find-file file) \
+			(editorconfig-apply) \
 			(elisp-autofmt-buffer) \
 			(save-buffer))" \
 		-- $(abspath $(EL_FILES))
 
-.PHONY: format.check
-format.check: $(EASK) .eask
-	@$(EASK) emacs --batch \
+.PHONY: format.elisp.check
+format.elisp.check: $(EASK) .eask
+	$(EASK) emacs --batch \
+		--eval "(require 'editorconfig)" \
 		--eval "(require 'elisp-autofmt)" \
 		--eval "(setq elisp-autofmt-python-bin \"python3\")" \
 		--eval "(let ((failed nil)) \
 			(dolist (file (cdr command-line-args-left)) \
 			  (find-file file) \
+			  (editorconfig-apply) \
 			  (let ((original (buffer-string))) \
 			    (elisp-autofmt-buffer) \
 			    (unless (string= original (buffer-string)) \
@@ -65,6 +76,15 @@ format.check: $(EASK) .eask
 			      (setq failed t)))) \
 			(when failed (kill-emacs 1)))" \
 		-- $(abspath $(EL_FILES))
+
+# Use git ls-files to respect all gitignore sources (global, .git/info/exclude, etc.).
+.PHONY: format.prettier
+format.prettier: $(PRETTIER)
+	git ls-files --cached --others --exclude-standard | xargs $(PRETTIER) --write --ignore-unknown
+
+.PHONY: format.prettier.check
+format.prettier.check: $(PRETTIER)
+	git ls-files --cached --others --exclude-standard | xargs $(PRETTIER) --check --ignore-unknown
 
 # Convenience targets for running tests that match a pattern, e.g. `make test.unit`.
 .PHONY: test.%
