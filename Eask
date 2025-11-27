@@ -5,6 +5,7 @@
 (keywords "convenience" "gptel" "llm")
 
 (package-file "macher.el")
+(files "macher.el" "macher-externals.el")
 
 (script "test" "echo \"Error: no test specified\" && exit 1")
 
