@@ -1380,7 +1380,9 @@ types."
         ;; root).
         (when (> (length path-components) 1)
           (dolist (component (butlast path-components))
-            (unless (string-empty-p component) ; Skip empty components
+            (unless
+                ;; Skip empty components.
+                (string-empty-p component)
               (setq current-path (expand-file-name component current-path))
               (when (file-exists-p current-path)
                 (cond
