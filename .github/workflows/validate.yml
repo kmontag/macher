@@ -21,6 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
+      - uses: hashicorp/setup-terraform@v3
 
       - name: Check formatting
         run: make format.check
