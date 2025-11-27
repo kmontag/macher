@@ -2791,7 +2791,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (expect
              (cdr
               (macher-context--contents-for-file (expand-file-name "test.txt" project-dir) context))
-             :to-equal "modified content")))))
+             :to-equal "modified content"))))))
 
   (describe "gptel preset integration"
     :var (callback-called exit-code callback project-file-buffer orig-known-presets)
