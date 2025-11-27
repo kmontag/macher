@@ -346,7 +346,9 @@ This function is only called for requests that actually create a
 
 The value of this variable will be stored at request-time and used
 throughout a particular request. This enables custom handling on a
-per-request basis.")
+per-request basis."
+  :type 'function
+  :group 'macher)
 
 (defcustom macher-patch-prepare-functions
   '(macher--patch-prepare-diff macher--patch-prepare-metadata)
@@ -375,9 +377,11 @@ If you call it beforehand, the default hook value will simply be
 ignored. If you're using `use-package', this means you should avoid the
 :hook keyword, and instead use `add-hook' in the :config section.
 
-This hook is run within the default 'macher-process-request-function'.
+This hook is run within the default `macher-process-request-function'.
 If you modify that function for a particular request, this hook won't be
-run.")
+run."
+  :type 'hook
+  :group 'macher)
 
 (defcustom macher-patch-buffer-ui 'diff
   "Specifies a base UI configuration to use for patch buffers.
