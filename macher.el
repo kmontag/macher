@@ -1312,23 +1312,20 @@ are modified on disk before editing operations occur - that is, it
 ensures that the LLM can trust that file contents provided to it in the
 context won't change before it can edit them."
   (when-let* ((workspace (macher-context-workspace macher-context))
-              (workspace-type (car workspace))
-              (workspace-id (cdr workspace)))
-    (dolist (context-entry contexts)
-      (let ((source (car context-entry)))
-        ;; Only process file paths (strings), not buffers.
-        (when (stringp source)
-          (let* ((full-path (expand-file-name source))
-                 (workspace-root (macher--workspace-root workspace))
-                 (in-workspace-p
-                  (if (eq workspace-type 'file)
-                      ;; Single-file workspace: only include if it's the exact file.
-                      (string= full-path workspace-id)
-                    ;; General workspace: include if file is within the workspace root.
-                    (and workspace-root (string-prefix-p workspace-root full-path)))))
-            ;; If this context file is in the workspace, load implementation contents for it.
-            (when in-workspace-p
-              (macher-context--contents-for-file full-path macher-context))))))))
+              (workspace-files (macher--workspace-files workspace)))
+    ;; Pre-compute truenames for workspace files for efficient comparison.
+    (let ((workspace-files-truenames
+           (mapcar #'file-truename workspace-files)))
+      (dolist (context-entry contexts)
+        (let ((source (car context-entry)))
+          ;; Only process file paths (strings), not buffers.
+          (when (stringp source)
+            (let* ((full-path (expand-file-name source))
+                   (full-path-truename (file-truename full-path))
+                   (in-workspace-p (member full-path-truename workspace-files-truenames)))
+              ;; If this context file is in the workspace, load implementation contents for it.
+              (when in-workspace-p
+                (macher-context--contents-for-file full-path macher-context)))))))))
 
 (defun macher--resolve-workspace-path (workspace rel-path)
   "Get the full path for REL-PATH within the WORKSPACE.
