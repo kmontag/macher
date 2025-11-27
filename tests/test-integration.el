@@ -654,9 +654,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             ;; 'gptel-context-string-function'.
             (expect contexts :to-equal `((,context-file)))
             ;; Verify that the gptel context file was loaded into the macher context.
-            (expect
-             (macher-context-contents macher-context)
-             :to-equal `((,context-file . ("context content" . "context content")))))))))
+            (let ((contents (macher-context-contents macher-context)))
+              (expect (length contents) :to-be 1)
+              (let* ((entry (car contents))
+                     (stored-path (car entry))
+                     (content-pair (cdr entry)))
+                (expect (expand-file-name stored-path) :to-equal (expand-file-name context-file))
+                (expect (car content-pair) :to-equal "context content")
+                (expect (cdr content-pair) :to-equal "context content"))))))))
 
   (describe "read_file_in_workspace"
     (before-each
