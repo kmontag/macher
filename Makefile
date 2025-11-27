@@ -77,13 +77,21 @@ format.elisp.check: $(EASK) .eask
 			(when failed (kill-emacs 1)))" \
 		-- $(abspath $(EL_FILES))
 
-# Use git ls-files to respect all gitignore sources (global, .git/info/exclude, etc.).
+# Terraform files are formatted via prettier-plugin-terraform-formatter if terraform is installed.
+define TERRAFORM_WARNING
+	@if ! command -v terraform >/dev/null 2>&1; then \
+		echo "Warning: terraform not found, .tf files will not be formatted"; \
+	fi
+endef
+
 .PHONY: format.prettier
 format.prettier: $(PRETTIER)
+	$(TERRAFORM_WARNING)
 	git ls-files --cached --others --exclude-standard | xargs $(PRETTIER) --write --ignore-unknown
 
 .PHONY: format.prettier.check
 format.prettier.check: $(PRETTIER)
+	$(TERRAFORM_WARNING)
 	git ls-files --cached --others --exclude-standard | xargs $(PRETTIER) --check --ignore-unknown
 
 # Convenience targets for running tests that match a pattern, e.g. `make test.unit`.

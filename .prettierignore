@@ -1,5 +1,2 @@
 /package.json
 /package-lock.json
-
-# Terraform (has its own formatter).
-/.github/terraform/

@@ -15,6 +15,7 @@
     "@sourcemeta/jsonschema": "^10.0.0",
     "@tsconfig/node-lts": "^22.0.1",
     "prettier": "^3.7.1",
+    "prettier-plugin-terraform-formatter": "^1.2.1",
     "semantic-release": "^24.2.5"
   }
 }
