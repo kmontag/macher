@@ -1,1 +1,1 @@
-((emacs-lisp-mode . ((elisp-autofmt-load-packages-local . ("cl-lib" "cl-macs" "cl-seq")))))
+((emacs-lisp-mode . ((elisp-autofmt-load-packages-local . ("cl-generic" "cl-macs" "cl-seq")))))

@@ -4,7 +4,7 @@
   .
   ((elisp-autofmt-load-packages-local
     .
-    ("cl-lib"
+    ("cl-generic"
      "cl-macs"
      "cl-seq"
      "subr-x"
