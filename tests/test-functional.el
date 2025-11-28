@@ -192,10 +192,9 @@ CALLBACK-TEST is a function that verifies the result."
                          (if (and patch-buffer (buffer-live-p patch-buffer))
                              (progn
                                ;; The patch buffer should always include the prompt.
-                               (expect
-                                (with-current-buffer patch-buffer
-                                  (buffer-string))
-                                :to-match (regexp-quote prompt))
+                               (expect (with-current-buffer patch-buffer
+                                         (buffer-string))
+                                       :to-match (regexp-quote prompt))
                                ;; Run the specific test for this operation.
                                (funcall callback-test patch-buffer test-files))
                            (cons 'error "No patch buffer created"))))))
@@ -441,8 +440,9 @@ CALLBACK-TEST is a function that verifies the result."
                       ;; matches our action buffer.
                       (eq
                        (thread-first
-                        (cadr entry) ; FSM
-                        (gptel-fsm-info) (plist-get :buffer))
+                         (cadr entry) ; FSM
+                         (gptel-fsm-info)
+                         (plist-get :buffer))
                        action-buffer))
                     gptel--request-alist)))))
 
@@ -494,10 +494,6 @@ CALLBACK-TEST is a function that verifies the result."
           ;; Verify that the abort callback was called.
           (expect test-complete :to-be-truthy)
           (expect abort-called :to-be-truthy))))))
-
-;; Local variables:
-;; elisp-autofmt-load-packages-local: ("./_defs.el")
-;; end:
 
 (provide 'test-functional)
 ;;; test-functional.el ends here

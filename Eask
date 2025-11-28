@@ -15,4 +15,6 @@
 (depends-on "gptel" "0.9.8.5")
 
 (development
- (depends-on "buttercup"))
+ (depends-on "buttercup")
+ (depends-on "editorconfig")
+ (depends-on "elisp-autofmt"))

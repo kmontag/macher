@@ -5,7 +5,8 @@
   "description": "Development dependencies for macher.el",
   "scripts": {
     "test": "eask exec buttercup --stale-file-error tests/",
-    "postinstall": "eask install-deps --dev"
+    "//": "postinstall copies package files so elisp-autofmt can read macro definitions even when packages aren't installed in the user's Emacs",
+    "postinstall": "eask install-deps --dev && cp .eask/*/elpa/buttercup-*/buttercup.el .eask/buttercup.el && cp .eask/*/elpa/gptel-*/gptel.el .eask/gptel.el && cp .eask/*/elpa/gptel-*/gptel-ollama.el .eask/gptel-ollama.el"
   },
   "devDependencies": {
     "@emacs-eask/cli": "^0.11.1",
@@ -14,6 +15,7 @@
     "@semantic-release/git": "^10.0.1",
     "@sourcemeta/jsonschema": "^10.0.0",
     "@tsconfig/node-lts": "^22.0.1",
+    "prettier": "^3.7.1",
     "semantic-release": "^24.2.5"
   }
 }
