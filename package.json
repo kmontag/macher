@@ -5,7 +5,7 @@
   "description": "Development dependencies for macher.el",
   "scripts": {
     "test": "eask exec buttercup --stale-file-error tests/",
-    "postinstall": "eask install-deps --dev"
+    "postinstall": "eask install-deps --dev && node scripts/generate-autofmt-defs.js tests/_buttercup.el buttercup"
   },
   "devDependencies": {
     "@emacs-eask/cli": "^0.11.1",

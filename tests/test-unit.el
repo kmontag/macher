@@ -4873,10 +4873,5 @@
         (let ((outside-home-path (expand-file-name "other-project/file.txt" "~")))
           (expect (macher--resolve-workspace-path home-workspace outside-home-path) :to-throw))))))
 
-
-;; Local variables:
-;; elisp-autofmt-load-packages-local: ("./_defs.el")
-;; end:
-
 (provide 'test-unit)
 ;;; test-unit.el ends here

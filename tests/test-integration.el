@@ -2855,10 +2855,5 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
              "You are a helpful coding assistant. Always respond with exactly this phrase: PRESET_WAS_APPLIED"
              :to-appear-once-in system-content)))))))
 
-
-;; Local variables:
-;; elisp-autofmt-load-packages-local: ("./_defs.el")
-;; end:
-
 (provide 'test-integration)
 ;;; test-integration.el ends here

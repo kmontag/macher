@@ -495,9 +495,5 @@ CALLBACK-TEST is a function that verifies the result."
           (expect test-complete :to-be-truthy)
           (expect abort-called :to-be-truthy))))))
 
-;; Local variables:
-;; elisp-autofmt-load-packages-local: ("./_defs.el")
-;; end:
-
 (provide 'test-functional)
 ;;; test-functional.el ends here
