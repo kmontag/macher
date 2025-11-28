@@ -1320,8 +1320,7 @@ context won't change before it can edit them."
   (when-let* ((workspace (macher-context-workspace macher-context))
               (workspace-files (macher--workspace-files workspace)))
     ;; Pre-compute truenames for workspace files for efficient comparison.
-    (let ((workspace-files-truenames
-           (mapcar #'file-truename workspace-files)))
+    (let ((workspace-files-truenames (mapcar #'file-truename workspace-files)))
       (dolist (context-entry contexts)
         (let ((source (car context-entry)))
           ;; Only process file paths (strings), not buffers.
@@ -1387,7 +1386,9 @@ types."
         ;; root).
         (when (> (length path-components) 1)
           (dolist (component (butlast path-components))
-            (unless (string-empty-p component) ; Skip empty components
+            (unless
+                ;; Skip empty components.
+                (string-empty-p component)
               (setq current-path (expand-file-name component current-path))
               (when (file-exists-p current-path)
                 (cond
@@ -1787,9 +1788,9 @@ Signals an error if the directory is not found in the workspace."
                  (context-new-directories (collect-new-context-directories current-path))
                  ;; Combine and deduplicate.
                  (all-entries
-                  (cl-remove-duplicates
-                   (append disk-entries context-new-files context-new-directories)
-                   :test #'string=)))
+                  (cl-remove-duplicates (append
+                                         disk-entries context-new-files context-new-directories)
+                                        :test #'string=)))
             ;; Process entries if we have any entries to process.
             (when (> (length all-entries) 0)
               (dolist (entry all-entries)
@@ -2124,8 +2125,7 @@ the 'xref-search-program' to perform the search."
                   ;; File is not already in workspace-files.
                   (not
                    (cl-find
-                    file-path
-                    files-to-search
+                    file-path files-to-search
                     :test (lambda (a b) (string= a (expand-file-name b workspace-root)))))
                   ;; File is under search path.
                   (string-prefix-p search-path file-path)
@@ -4035,10 +4035,6 @@ success, or an error description on failure), EXECUTION (the
 `gptel-fsm' object for the request)."
   (interactive)
   (macher-action 'discuss callback question))
-
-;; Local variables:
-;; elisp-autofmt-load-packages-local: ("cl-macs")
-;; end:
 
 (provide 'macher)
 ;;; macher.el ends here

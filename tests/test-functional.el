@@ -1,11 +1,15 @@
 ;;; test-functional.el --- Functional tests for macher.el -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; Functional tests for macher.el that interact with a real LLM on a local ollama server.
+;; Functional tests for macher.el that interact with a real LLM.
 ;; Uses very simple prompts to ensure that even weak LLMs can handle them correctly.
 ;;
 ;; These are not intended to be exhaustive tests of tool functionality. They're intended
 ;; to catch issues in the general end-to-end implementation workflow.
+;;
+;; Backend selection:
+;; - In CI (GITHUB_ACTIONS env var set): Uses GitHub Models API with gpt-4o-mini.
+;; - Locally: Uses Ollama with a local model (works offline).
 
 ;;; Code:
 
@@ -13,6 +17,7 @@
 (require 'macher)
 (require 'gptel)
 (require 'gptel-ollama)
+(require 'gptel-openai)
 (require 'project)
 
 ;; Uncomment for debugging output.
@@ -47,21 +52,19 @@
 (describe "functional tests"
   :var*
   (
-   ;; The ollama model to use in gptel requests. Must be installed locally.
+   ;; Whether to use GitHub Models API (in CI) or Ollama (locally).
+   (use-github-models (getenv "GITHUB_ACTIONS"))
+
+   ;; GitHub Models configuration.
+   (github-models-host "models.github.ai")
+   (github-models-endpoint "/inference/chat/completions")
+   (github-models-model "gpt-4o-mini")
+
+   ;; Ollama configuration.
    (ollama-model "llama3.2:3b")
-
-   ;; Add a transform based on the specific ollama model, e.g. to turn off thinking.
-   (ollama-prompt-transform #'identity)
-
-   ;; Add a specific seed value to try and get consistent responses. This still doesn't make things
-   ;; perfectly replicable, as the output also depends on the OS and system tools, but it should
-   ;; make responses consistent within a particular environment.
-   ;;
-   ;; You might need to play around with this when changing the model.
-   (ollama-seed 5678)
-
-   ;; The host where the ollama server is running.
    (ollama-host (or (getenv "MACHER_TEST_OLLAMA_HOST") "localhost:11434"))
+   ;; Seed for consistent responses. You might need to adjust this when changing the model.
+   (ollama-seed 5678)
 
    ;; Timeout in seconds for macher functional tests. Needs to be permissive as tests run in a
    ;; fairly constrained environment on GitHub Actions.
@@ -177,7 +180,7 @@ CALLBACK-TEST is a function that verifies the result."
 
               ;; Use a callback to check the results.
               (macher-implement
-               (funcall ollama-prompt-transform prompt)
+               prompt
                (lambda (error _execution _fsm)
                  (setq test-complete t)
                  (when test-timer
@@ -192,10 +195,9 @@ CALLBACK-TEST is a function that verifies the result."
                          (if (and patch-buffer (buffer-live-p patch-buffer))
                              (progn
                                ;; The patch buffer should always include the prompt.
-                               (expect
-                                (with-current-buffer patch-buffer
-                                  (buffer-string))
-                                :to-match (regexp-quote prompt))
+                               (expect (with-current-buffer patch-buffer
+                                         (buffer-string))
+                                       :to-match (regexp-quote prompt))
                                ;; Run the specific test for this operation.
                                (funcall callback-test patch-buffer test-files))
                            (cons 'error "No patch buffer created"))))))
@@ -249,20 +251,31 @@ CALLBACK-TEST is a function that verifies the result."
     (expect temp-files-created :to-be nil)
     (expect temp-dirs-created :to-be nil)
 
-    ;; Set up gptel configuration for tests
-    (setq gptel-model ollama-model)
+    ;; Set up gptel configuration for tests.
     (setq gptel-directives `(default . ,system-message))
-    (setq gptel-backend
-          (gptel-make-ollama
-           "Test ollama"
-           :host ollama-host
-           :models `(,gptel-model)
-           ;; Use temperature 0 and a fixed seed to ensure that responses are identical
-           ;; across runs. When changing the model (which is expected to be rather weak),
-           ;; you might need to play around with different seeds to find one that works.
-           ;;
-           ;; See https://github.com/ollama/ollama/issues/1749.
-           :request-params `(:options (:temperature 0 :seed ,ollama-seed)))))
+    (if use-github-models
+        ;; CI: Use GitHub Models API (faster, requires internet and token).
+        (progn
+          (setq gptel-model github-models-model)
+          (setq gptel-backend
+                (gptel-make-openai
+                 "GitHub Models"
+                 :host github-models-host
+                 :endpoint github-models-endpoint
+                 :key (getenv "GITHUB_TOKEN")
+                 :stream t
+                 :models `(,gptel-model)
+                 :request-params '(:temperature 0))))
+      ;; Local: Use Ollama (works offline).
+      (setq gptel-model ollama-model)
+      (setq gptel-backend
+            (gptel-make-ollama
+             "Test ollama"
+             :host ollama-host
+             :models `(,gptel-model)
+             ;; Use temperature 0 and a fixed seed for consistent responses.
+             ;; See https://github.com/ollama/ollama/issues/1749.
+             :request-params `(:options (:temperature 0 :seed ,ollama-seed))))))
 
   (after-each
     ;; Verify that all gptel requests have been aborted or terminated.
@@ -441,8 +454,9 @@ CALLBACK-TEST is a function that verifies the result."
                       ;; matches our action buffer.
                       (eq
                        (thread-first
-                        (cadr entry) ; FSM
-                        (gptel-fsm-info) (plist-get :buffer))
+                         (cadr entry) ; FSM
+                         (gptel-fsm-info)
+                         (plist-get :buffer))
                        action-buffer))
                     gptel--request-alist)))))
 
@@ -494,10 +508,6 @@ CALLBACK-TEST is a function that verifies the result."
           ;; Verify that the abort callback was called.
           (expect test-complete :to-be-truthy)
           (expect abort-called :to-be-truthy))))))
-
-;; Local variables:
-;; elisp-autofmt-load-packages-local: ("./_defs.el")
-;; end:
 
 (provide 'test-functional)
 ;;; test-functional.el ends here

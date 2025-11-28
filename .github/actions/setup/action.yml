@@ -12,6 +12,12 @@ runs:
       with:
         version: 30.1
 
+    # Install python for elisp-autofmt invocations.
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:

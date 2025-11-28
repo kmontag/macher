@@ -1,5 +1,6 @@
 NPM := npm
 EASK := node_modules/.bin/eask
+PRETTIER := node_modules/.bin/prettier
 
 # CLI tools for generating demo videos. Not needed for other package-related operations.
 AGG := agg
@@ -7,9 +8,9 @@ ASCIINEMA := asciinema
 FFMPEG := ffmpeg
 
 # Note this also installs eask dependencies via the package's postinstall script.
-$(EASK) .eask: package.json package-lock.json Eask
+$(EASK) $(PRETTIER) .eask: package.json package-lock.json Eask
 	"$(NPM)" install
-	[ -f "$(EASK)" ] && touch "$(EASK)" && touch .eask/
+	[ -f "$(EASK)" ] && touch "$(EASK)" && touch "$(PRETTIER)" && touch .eask/
 
 # Analyze the Eask file itself for inconsistencies, and exit unsuccessfully if any are found.
 .PHONY: analyze
@@ -39,6 +40,71 @@ lint: analyze lint.declare lint.package lint.regexps
 .PHONY: compile
 compile: $(EASK) .eask
 	$(EASK) --strict compile
+
+.PHONY: format
+format: format.elisp format.prettier
+
+.PHONY: format.check
+format.check: format.elisp.check format.prettier.check
+
+# Use absolute path for Python to work with Nix-isolated Emacs in CI.
+PYTHON3 := $(shell which python3)
+
+# Common setup for elisp-autofmt commands. Notes:
+# - We use editorconfig-apply to respect .editorconfig settings (e.g. fill-column).
+# - elisp-autofmt--workaround-make-proc forces use of call-process instead of make-process,
+#   which works around subprocess communication issues in Nix-isolated CI environments.
+# - .eask/*.el provides macro definitions so test files are formatted correctly.
+define ELISP_AUTOFMT_SETUP
+--eval "(require 'editorconfig)" \
+--eval "(require 'elisp-autofmt)" \
+--eval "(setq elisp-autofmt--workaround-make-proc t)" \
+--eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")" \
+-l .eask/buttercup.el \
+-l .eask/gptel.el \
+-l .eask/gptel-ollama.el
+endef
+
+.PHONY: format.elisp
+format.elisp: $(EASK) .eask
+	$(EASK) emacs --batch \
+		$(ELISP_AUTOFMT_SETUP) \
+		--eval "(dolist (file (cdr command-line-args-left)) \
+			(find-file file) \
+			(editorconfig-apply) \
+			(elisp-autofmt-buffer) \
+			(save-buffer))" \
+		-- $$(git ls-files '*.el' | xargs realpath)
+
+.PHONY: format.elisp.check
+format.elisp.check: $(EASK) .eask
+	$(EASK) emacs --batch \
+		$(ELISP_AUTOFMT_SETUP) \
+		--eval "(let ((failed nil)) \
+			(dolist (file (cdr command-line-args-left)) \
+			  (find-file file) \
+			  (editorconfig-apply) \
+			  (let ((original (buffer-string))) \
+			    (elisp-autofmt-buffer) \
+			    (if (string= original (buffer-string)) \
+			        (message \"OK: %s\" file) \
+			      (message \"File needs formatting: %s\" file) \
+			      (let ((temp-file (make-temp-file \"autofmt-check-\"))) \
+			        (write-region (point-min) (point-max) temp-file) \
+			        (message \"Diff:\\n%s\" \
+			          (shell-command-to-string (format \"diff -u %s %s || true\" file temp-file))) \
+			        (delete-file temp-file)) \
+			      (setq failed t)))) \
+			(when failed (kill-emacs 1)))" \
+		-- $$(git ls-files '*.el' | xargs realpath)
+
+.PHONY: format.prettier
+format.prettier: $(PRETTIER)
+	git ls-files --cached --others --exclude-standard | xargs $(PRETTIER) --write --ignore-unknown
+
+.PHONY: format.prettier.check
+format.prettier.check: $(PRETTIER)
+	git ls-files --cached --others --exclude-standard | xargs $(PRETTIER) --check --ignore-unknown
 
 # Convenience targets for running tests that match a pattern, e.g. `make test.unit`.
 .PHONY: test.%
