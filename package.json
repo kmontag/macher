@@ -5,7 +5,7 @@
   "description": "Development dependencies for macher.el",
   "scripts": {
     "test": "eask exec buttercup --stale-file-error tests/",
-    "postinstall": "eask install-deps --dev && node scripts/generate-autofmt-defs.js tests/_buttercup.el buttercup"
+    "postinstall": "eask install-deps --dev"
   },
   "devDependencies": {
     "@emacs-eask/cli": "^0.11.1",
@@ -14,7 +14,6 @@
     "@semantic-release/git": "^10.0.1",
     "@sourcemeta/jsonschema": "^10.0.0",
     "@tsconfig/node-lts": "^22.0.1",
-    "@types/node": "^24.10.1",
     "prettier": "^3.7.1",
     "prettier-plugin-terraform-formatter": "^1.2.1",
     "semantic-release": "^24.2.5"
