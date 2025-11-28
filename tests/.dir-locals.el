@@ -7,6 +7,7 @@
     ("cl-lib"
      "cl-macs"
      "cl-seq"
+     "subr-x"
      "./../.eask/gptel.el"
      "./../.eask/gptel-ollama.el"
      "./../.eask/buttercup.el")))))
