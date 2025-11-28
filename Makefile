@@ -85,6 +85,11 @@ format.elisp.check: $(EASK) .eask
 			    (elisp-autofmt-buffer) \
 			    (unless (string= original (buffer-string)) \
 			      (message \"File needs formatting: %s\" file) \
+			      (let ((temp-file (make-temp-file \"autofmt-check-\"))) \
+			        (write-region (point-min) (point-max) temp-file) \
+			        (message \"Diff:\\n%s\" \
+			          (shell-command-to-string (format \"diff -u %s %s || true\" file temp-file))) \
+			        (delete-file temp-file)) \
 			      (setq failed t)))) \
 			(when failed (kill-emacs 1)))" \
 		-- $(abspath $(EL_FILES))
