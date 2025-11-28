@@ -23,6 +23,9 @@ jobs:
       - uses: ./.github/actions/setup
       - uses: hashicorp/setup-terraform@v3
 
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+
       - name: Check formatting
         run: make format.check
 
