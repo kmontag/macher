@@ -2799,10 +2799,9 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
     (it "applies global gptel preset when referenced in macher-implement prompt"
       ;; Create a global gptel preset that we can test
-      (gptel-make-preset
-       'test-preset
-       :description "Test preset for integration testing"
-       :system "You are a helpful coding assistant. Always respond with exactly this phrase: PRESET_WAS_APPLIED")
+      (gptel-make-preset 'test-preset
+        :description "Test preset for integration testing"
+        :system "You are a helpful coding assistant. Always respond with exactly this phrase: PRESET_WAS_APPLIED")
 
       (funcall setup-backend '("PRESET_WAS_APPLIED"))
 

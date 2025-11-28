@@ -4003,10 +4003,10 @@
               (progn
                 (apply #'gptel-make-preset 'test-functional-preset preset-spec)
                 ;; Use gptel-with-preset to apply the preset temporarily.
-                (gptel-with-preset
-                 'test-functional-preset
-                 ;; Inside the preset context, values should be applied.
-                 (expect gptel-use-tools :to-be t) (expect gptel-tools :to-equal '(tool1)))
+                (gptel-with-preset 'test-functional-preset
+                  ;; Inside the preset context, values should be applied.
+                  (expect gptel-use-tools :to-be t)
+                  (expect gptel-tools :to-equal '(tool1)))
                 ;; After exiting the preset context, values should be reset.
                 (expect gptel-use-tools :to-equal original-use-tools)
                 (expect gptel-tools :to-equal original-tools))

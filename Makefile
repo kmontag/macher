@@ -53,14 +53,15 @@ PYTHON3 := $(shell which python3)
 # - We use editorconfig-apply to respect .editorconfig settings (e.g. fill-column).
 # - elisp-autofmt--workaround-make-proc forces use of call-process instead of make-process,
 #   which works around subprocess communication issues in Nix-isolated CI environments.
-# - .eask/buttercup.el provides macro definitions for buttercup so test files are formatted
-#   correctly.
+# - .eask/*.el provides macro definitions so test files are formatted correctly.
 define ELISP_AUTOFMT_SETUP
 --eval "(require 'editorconfig)" \
 --eval "(require 'elisp-autofmt)" \
 --eval "(setq elisp-autofmt--workaround-make-proc t)" \
 --eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")" \
--l .eask/buttercup.el
+-l .eask/buttercup.el \
+-l .eask/gptel.el \
+-l .eask/gptel-ollama.el
 endef
 
 .PHONY: format.elisp
