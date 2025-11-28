@@ -15,13 +15,12 @@
 
 ;;; Stubbed gptel backend implementation:
 
-(cl-defstruct
- (macher-test-backend
-  (:constructor macher-test--make-backend) (:copier nil) (:include gptel-backend))
- "A stubbed gptel backend for testing."
- (responses nil) ; List of responses to provide
- (current-index 0) ; Current response index
- (received-requests nil)) ; List of requests received by the backend
+(cl-defstruct (macher-test-backend
+               (:constructor macher-test--make-backend) (:copier nil) (:include gptel-backend))
+  "A stubbed gptel backend for testing."
+  (responses nil) ; List of responses to provide
+  (current-index 0) ; Current response index
+  (received-requests nil)) ; List of requests received by the backend
 
 (cl-defmethod macher--wrap-ollama-method (method &rest args)
   "Wrap a gptel backend METHOD by calling it with a dummy ollama backend.

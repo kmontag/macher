@@ -253,16 +253,15 @@ CALLBACK-TEST is a function that verifies the result."
     (setq gptel-model ollama-model)
     (setq gptel-directives `(default . ,system-message))
     (setq gptel-backend
-          (gptel-make-ollama
-           "Test ollama"
-           :host ollama-host
-           :models `(,gptel-model)
-           ;; Use temperature 0 and a fixed seed to ensure that responses are identical
-           ;; across runs. When changing the model (which is expected to be rather weak),
-           ;; you might need to play around with different seeds to find one that works.
-           ;;
-           ;; See https://github.com/ollama/ollama/issues/1749.
-           :request-params `(:options (:temperature 0 :seed ,ollama-seed)))))
+          (gptel-make-ollama "Test ollama"
+            :host ollama-host
+            :models `(,gptel-model)
+            ;; Use temperature 0 and a fixed seed to ensure that responses are identical
+            ;; across runs. When changing the model (which is expected to be rather weak),
+            ;; you might need to play around with different seeds to find one that works.
+            ;;
+            ;; See https://github.com/ollama/ollama/issues/1749.
+            :request-params `(:options (:temperature 0 :seed ,ollama-seed)))))
 
   (after-each
     ;; Verify that all gptel requests have been aborted or terminated.
@@ -441,8 +440,9 @@ CALLBACK-TEST is a function that verifies the result."
                       ;; matches our action buffer.
                       (eq
                        (thread-first
-                        (cadr entry) ; FSM
-                        (gptel-fsm-info) (plist-get :buffer))
+                         (cadr entry) ; FSM
+                         (gptel-fsm-info)
+                         (plist-get :buffer))
                        action-buffer))
                     gptel--request-alist)))))
 
