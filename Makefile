@@ -51,14 +51,14 @@ PYTHON3 := $(shell which python3)
 
 # Common setup for elisp-autofmt commands. Notes:
 # - We use editorconfig-apply to respect .editorconfig settings (e.g. fill-column).
-# - elisp-autofmt normally spawns a subprocess Emacs to generate builtin function definitions,
-#   but this fails in Nix-isolated environments. The advice below forces in-process generation.
+# - elisp-autofmt--workaround-make-proc forces use of call-process instead of make-process,
+#   which works around subprocess communication issues in Nix-isolated CI environments.
 # - tests/_defs.el provides macro definitions for buttercup so its forms are formatted correctly.
 define ELISP_AUTOFMT_SETUP
 --eval "(require 'editorconfig)" \
 --eval "(require 'elisp-autofmt)" \
+--eval "(setq elisp-autofmt--workaround-make-proc t)" \
 --eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")" \
---eval "(advice-add 'elisp-autofmt--cache-api-ensure-cache-for-emacs :filter-args (lambda (_) '(nil)))" \
 -l tests/_defs.el
 endef
 
