@@ -8,7 +8,7 @@ ASCIINEMA := asciinema
 FFMPEG := ffmpeg
 
 # Note this also installs eask dependencies via the package's postinstall script.
-$(EASK) $(PRETTIER) .eask: package.json package-lock.json Eask
+$(EASK) $(PRETTIER) .eask tests/_buttercup.el: package.json package-lock.json Eask
 	"$(NPM)" install
 	[ -f "$(EASK)" ] && touch "$(EASK)" && touch "$(PRETTIER)" && touch .eask/
 
@@ -37,8 +37,8 @@ lint.%: $(EASK) .eask
 .PHONY: lint
 lint: analyze lint.declare lint.package lint.regexps
 
-# Elisp files to format.
-EL_FILES := $(wildcard *.el) $(wildcard demo/*.el) $(wildcard tests/*.el)
+# Elisp files to format (excludes tests/_buttercup.el which is copied from .eask).
+EL_FILES := $(wildcard *.el) $(wildcard demo/*.el) $(filter-out tests/_%.el,$(wildcard tests/*.el))
 
 .PHONY: format
 format: format.elisp format.prettier
@@ -53,11 +53,13 @@ PYTHON3 := $(shell which python3)
 # - We use editorconfig-apply to respect .editorconfig settings (e.g. fill-column).
 # - elisp-autofmt--workaround-make-proc forces use of call-process instead of make-process,
 #   which works around subprocess communication issues in Nix-isolated CI environments.
+# - tests/_buttercup.el provides macro definitions for buttercup so test files are formatted correctly.
 define ELISP_AUTOFMT_SETUP
 --eval "(require 'editorconfig)" \
 --eval "(require 'elisp-autofmt)" \
 --eval "(setq elisp-autofmt--workaround-make-proc t)" \
---eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")"
+--eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")" \
+-l tests/_buttercup.el
 endef
 
 .PHONY: format.elisp

@@ -5,7 +5,8 @@
   "description": "Development dependencies for macher.el",
   "scripts": {
     "test": "eask exec buttercup --stale-file-error tests/",
-    "postinstall": "eask install-deps --dev"
+    "//": "postinstall copies buttercup.el to tests/ so elisp-autofmt can read its macro definitions even when buttercup isn't installed in the user's Emacs",
+    "postinstall": "eask install-deps --dev && cp .eask/*/elpa/buttercup-*/buttercup.el tests/_buttercup.el"
   },
   "devDependencies": {
     "@emacs-eask/cli": "^0.11.1",

@@ -8,3 +8,6 @@
 # Compiled demo images should be pushed to the `resources` branch, so that they can be referenced in
 # the README without bloating the main package branch.
 /demo/output/
+
+# Copied from .eask by postinstall for elisp-autofmt macro definitions.
+/tests/_buttercup.el
