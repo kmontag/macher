@@ -37,9 +37,6 @@ lint.%: $(EASK) .eask
 .PHONY: lint
 lint: analyze lint.declare lint.package lint.regexps
 
-# Elisp files to format.
-EL_FILES := $(wildcard *.el) $(wildcard demo/*.el) $(wildcard tests/*.el)
-
 .PHONY: format
 format: format.elisp format.prettier
 
@@ -73,7 +70,7 @@ format.elisp: $(EASK) .eask
 			(editorconfig-apply) \
 			(elisp-autofmt-buffer) \
 			(save-buffer))" \
-		-- $(abspath $(EL_FILES))
+		-- $$(git ls-files '*.el' | xargs realpath)
 
 .PHONY: format.elisp.check
 format.elisp.check: $(EASK) .eask
@@ -85,7 +82,8 @@ format.elisp.check: $(EASK) .eask
 			  (editorconfig-apply) \
 			  (let ((original (buffer-string))) \
 			    (elisp-autofmt-buffer) \
-			    (unless (string= original (buffer-string)) \
+			    (if (string= original (buffer-string)) \
+			        (message \"OK: %s\" file) \
 			      (message \"File needs formatting: %s\" file) \
 			      (let ((temp-file (make-temp-file \"autofmt-check-\"))) \
 			        (write-region (point-min) (point-max) temp-file) \
@@ -94,7 +92,7 @@ format.elisp.check: $(EASK) .eask
 			        (delete-file temp-file)) \
 			      (setq failed t)))) \
 			(when failed (kill-emacs 1)))" \
-		-- $(abspath $(EL_FILES))
+		-- $$(git ls-files '*.el' | xargs realpath)
 
 .PHONY: format.prettier
 format.prettier: $(PRETTIER)
