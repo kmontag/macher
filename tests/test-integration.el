@@ -315,18 +315,18 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
              (goto-char (point-min))))
 
          ;; Call the callback asynchronously to simulate network behavior.
-         (run-at-time 0.01 nil
-                      (lambda (_)
-                        ;; Aborting requests kills the response buffer.
-                        (when (buffer-live-p response-buffer)
-                          (with-current-buffer response-buffer
-                            (apply
-                             callback
-                             ;; `url-retrieve' would normally pass a STATUS plist containing a list
-                             ;; of events during the request, but it's not currently used by gptel.
-                             '()
-                             cbargs))))
-                      nil)
+         (run-at-time
+          0.01
+          nil
+          (lambda (_)
+            ;; Aborting requests kills the response buffer.
+            (when (buffer-live-p response-buffer)
+              (with-current-buffer response-buffer
+                (apply callback
+                       ;; `url-retrieve' would normally pass a STATUS plist containing a list
+                       ;; of events during the request, but it's not currently used by gptel.
+                       '() cbargs))))
+          nil)
 
          response-buffer))))
 
@@ -388,13 +388,12 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                   (expect messages :to-be-truthy)
                   (expect (> (length messages) 0) :to-be-truthy)
                   ;; Check that at least one message contains our test prompt.
-                  (expect
-                   (cl-some
-                    (lambda (msg)
-                      (and (string= (plist-get msg :role) "user")
-                           (string-match-p "Test prompt" (plist-get msg :content))))
-                    messages)
-                   :to-be-truthy))))
+                  (expect (cl-some
+                           (lambda (msg)
+                             (and (string= (plist-get msg :role) "user")
+                                  (string-match-p "Test prompt" (plist-get msg :content))))
+                           messages)
+                          :to-be-truthy))))
 
           ;; Clean up.
           (when (file-exists-p temp-file)
@@ -573,10 +572,9 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                   (expect (length first-user-messages) :to-be 1)
                   (expect "Initial buffer content" :to-appear-once-in (car first-user-messages))
                   ;; Should NOT contain the additional content from the second message.
-                  (expect
-                   (car first-user-messages)
-                   :not
-                   :to-match "Additional content for second message"))
+                  (expect (car first-user-messages)
+                          :not
+                          :to-match "Additional content for second message"))
 
                 ;; Second request should contain conversation flow.
                 (let ((second-user-messages (elt user-messages 1))
@@ -600,9 +598,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                     (expect "First response from LLM" :to-appear-once-in assistant-msg)
 
                     ;; Second user message should contain the additional content.
-                    (expect
-                     "Additional content for second message"
-                     :to-appear-once-in second-user-msg)
+                    (expect "Additional content for second message"
+                            :to-appear-once-in second-user-msg)
                     ;; Second user message should NOT contain the initial content.
                     (expect second-user-msg :not :to-match "Initial buffer content"))))))
         ;; Clean up.
@@ -810,9 +807,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                     (let ((error-message (cadr tool-messages)))
                       (expect (length error-message) :to-be 1)
                       (expect "File content too large" :to-appear-once-in (car error-message))
-                      (expect
-                       "exceeds maximum read length"
-                       :to-appear-once-in (car error-message)))))))
+                      (expect "exceeds maximum read length"
+                              :to-appear-once-in (car error-message)))))))
           ;; Clean up the large file
           (when (file-exists-p large-file-path)
             (delete-file large-file-path)))))
@@ -1129,15 +1125,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           (with-current-buffer (macher-patch-buffer)
             (let ((patch (buffer-string)))
               ;; Should contain diff header for file deletion
-              (expect
-               (regexp-quote
-                (concat
-                 "diff --git a/test-file.txt b/test-file.txt\n"
-                 "--- a/test-file.txt\n"
-                 "+++ /dev/null\n"
-                 "@@ -1 +0,0 @@\n"
-                 "-This file will be deleted"))
-               :to-appear-once-in patch)
+              (expect (regexp-quote
+                       (concat
+                        "diff --git a/test-file.txt b/test-file.txt\n"
+                        "--- a/test-file.txt\n"
+                        "+++ /dev/null\n"
+                        "@@ -1 +0,0 @@\n"
+                        "-This file will be deleted"))
+                      :to-appear-once-in patch)
 
               ;; Should contain the prompt for reference
               (expect "Test prompt to delete a file" :to-appear-once-in patch)))))))
@@ -1250,15 +1245,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           (with-current-buffer (macher-patch-buffer)
             (let ((patch (buffer-string)))
               ;; Should contain diff header for file creation
-              (expect
-               (regexp-quote
-                (concat
-                 "diff --git a/created-file.txt b/created-file.txt\n"
-                 "--- /dev/null\n"
-                 "+++ b/created-file.txt\n"
-                 "@@ -0,0 +1 @@\n"
-                 "+created content"))
-               :to-appear-once-in patch)
+              (expect (regexp-quote
+                       (concat
+                        "diff --git a/created-file.txt b/created-file.txt\n"
+                        "--- /dev/null\n"
+                        "+++ b/created-file.txt\n"
+                        "@@ -0,0 +1 @@\n"
+                        "+created content"))
+                      :to-appear-once-in patch)
 
               ;; Should contain the prompt for reference
               (expect "Test prompt to create a file" :to-appear-once-in patch)))))))
@@ -1377,9 +1371,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             ;; Second request should contain error message.
             (let ((error-message (cadr tool-messages)))
               (expect (length error-message) :to-be 1)
-              (expect
-               "File .non-existent.txt. not found in workspace"
-               :to-appear-once-in (car error-message)))))))
+              (expect "File .non-existent.txt. not found in workspace"
+                      :to-appear-once-in (car error-message)))))))
 
     (it "returns error when destination already exists"
       (funcall setup-backend
@@ -1417,9 +1410,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             ;; Second request should contain error message.
             (let ((error-message (cadr tool-messages)))
               (expect (length error-message) :to-be 1)
-              (expect
-               "Destination .other-file.txt. already exists"
-               :to-appear-once-in (car error-message)))))))
+              (expect "Destination .other-file.txt. already exists"
+                      :to-appear-once-in (car error-message)))))))
 
     (it "generates proper diff when file is moved"
       (funcall setup-backend
@@ -1456,26 +1448,24 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           (with-current-buffer (macher-patch-buffer)
             (let ((patch (buffer-string)))
               ;; Should contain diff header for file creation (destination)
-              (expect
-               (regexp-quote
-                (concat
-                 "diff --git a/moved-file.txt b/moved-file.txt\n"
-                 "--- /dev/null\n"
-                 "+++ b/moved-file.txt\n"
-                 "@@ -0,0 +1 @@\n"
-                 "+content to move"))
-               :to-appear-once-in patch)
+              (expect (regexp-quote
+                       (concat
+                        "diff --git a/moved-file.txt b/moved-file.txt\n"
+                        "--- /dev/null\n"
+                        "+++ b/moved-file.txt\n"
+                        "@@ -0,0 +1 @@\n"
+                        "+content to move"))
+                      :to-appear-once-in patch)
 
               ;; Should contain diff header for file deletion (source)
-              (expect
-               (regexp-quote
-                (concat
-                 "diff --git a/source-file.txt b/source-file.txt\n"
-                 "--- a/source-file.txt\n"
-                 "+++ /dev/null\n"
-                 "@@ -1 +0,0 @@\n"
-                 "-content to move"))
-               :to-appear-once-in patch)
+              (expect (regexp-quote
+                       (concat
+                        "diff --git a/source-file.txt b/source-file.txt\n"
+                        "--- a/source-file.txt\n"
+                        "+++ /dev/null\n"
+                        "@@ -1 +0,0 @@\n"
+                        "-content to move"))
+                      :to-appear-once-in patch)
 
               ;; Should contain the prompt for reference
               (expect "Test prompt to move a file" :to-appear-once-in patch)))))))
@@ -1518,12 +1508,12 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                   (expect (> (length tools) 2) :to-be-truthy)
                   ;; Check that :tools contains an expected tool.
                   (expect tools :to-be-truthy)
-                  (expect
-                   (seq-find
-                    (lambda (t)
-                      (string= (plist-get (plist-get t :function) :name) "write_file_in_workspace"))
-                    tools)
-                   :to-be-truthy))))
+                  (expect (seq-find
+                           (lambda (t)
+                             (string=
+                              (plist-get (plist-get t :function) :name) "write_file_in_workspace"))
+                           tools)
+                          :to-be-truthy))))
           ;; Clean up.
           (when (file-exists-p temp-file)
             (delete-file temp-file)))))
@@ -1671,9 +1661,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                 ;; Should not have an "already provided" section since nothing is in context.
                 (expect system-content :not :to-match "Files already provided above")
                 ;; Check that it mentions the project name in the description.
-                (expect
-                 (format "which is named `%s`" (file-name-nondirectory project-dir))
-                 :to-appear-once-in system-content)))))))
+                (expect (format "which is named `%s`" (file-name-nondirectory project-dir))
+                        :to-appear-once-in system-content)))))))
 
     (it "includes workspace info when both files and buffers are in context"
       (funcall setup-backend '("Test response"))
@@ -1739,13 +1728,11 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                       (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
                       ;; Check that files in context are in the "already provided" section.
                       (expect "Files already provided above" :to-appear-once-in system-content)
-                      (expect
-                       system-content
-                       :to-match "Files already provided above.*\n    src/context\\.el")
+                      (expect system-content
+                              :to-match "Files already provided above.*\n    src/context\\.el")
                       ;; Check that other files are in the "available for editing" section with proper structure.
-                      (expect
-                       "Other files available for editing:"
-                       :to-appear-once-in system-content)
+                      (expect "Other files available for editing:"
+                              :to-appear-once-in system-content)
                       (expect
                        system-content
                        :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    src/buffer\\.el")
@@ -1758,9 +1745,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                       ;; Check that buffer content appears in context (since buffer was added).
                       (expect "Buffer file content" :to-appear-once-in system-content)
                       ;; Check that it mentions the project name in the description.
-                      (expect
-                       (format "which is named `%s`" (file-name-nondirectory project-dir))
-                       :to-appear-once-in system-content))))))
+                      (expect (format "which is named `%s`" (file-name-nondirectory project-dir))
+                              :to-appear-once-in system-content))))))
           ;; Clean up the buffer.
           (when (buffer-live-p buffer-buffer)
             (kill-buffer buffer-buffer)))))
@@ -1822,9 +1808,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                   (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
                   ;; Check that files are properly separated between context and available.
                   (expect "Files already provided above" :to-appear-once-in system-content)
-                  (expect
-                   system-content
-                   :to-match "Files already provided above.*\n    src/main\\.el")
+                  (expect system-content
+                          :to-match "Files already provided above.*\n    src/main\\.el")
                   (expect "Other files available for editing:" :to-appear-once-in system-content)
                   (expect
                    system-content
@@ -1835,9 +1820,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                   ;; Check that file content appears in context.
                   (expect "Main file content" :to-appear-once-in system-content)
                   ;; Check that it mentions the project name in the description.
-                  (expect
-                   (format "which is named `%s`" (file-name-nondirectory project-dir))
-                   :to-appear-once-in system-content))))))))
+                  (expect (format "which is named `%s`" (file-name-nondirectory project-dir))
+                          :to-appear-once-in system-content))))))))
 
     (it "includes workspace info when only buffers are in context"
       (funcall setup-backend '("Test response"))
@@ -1910,9 +1894,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                        :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/third\\.el")
                       (expect "second content" :to-appear-once-in system-content)
                       ;; Check that it mentions the project name in the description.
-                      (expect
-                       (format "which is named `%s`" (file-name-nondirectory project-dir))
-                       :to-appear-once-in system-content))))))
+                      (expect (format "which is named `%s`" (file-name-nondirectory project-dir))
+                              :to-appear-once-in system-content))))))
           (when context-buffer
             (kill-buffer context-buffer))))))
 
@@ -1990,13 +1973,12 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
           (with-current-buffer action-buffer
             (let ((buffer-content (buffer-substring-no-properties (point-min) (point-max))))
-              (expect
-               buffer-content
-               :to-equal
-               (funcall action-buffer-content
-                        "Test successful request"
-                        "\n\nResponse content\n"
-                        'discuss)))))))
+              (expect buffer-content
+                      :to-equal
+                      (funcall action-buffer-content
+                               "Test successful request"
+                               "\n\nResponse content\n"
+                               'discuss)))))))
 
     (it "formats prompts/responses for successful requests with org UI"
       (funcall setup-backend '("Response content"))
@@ -2022,13 +2004,12 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect (derived-mode-p 'org-mode) :to-be-truthy)
               ;; Check that the content matches the expected org-mode format exactly.
               (let ((buffer-content (buffer-substring-no-properties (point-min) (point-max))))
-                (expect
-                 buffer-content
-                 :to-equal
-                 (funcall action-buffer-org-content
-                          "Test successful request with org"
-                          "\n\nResponse content\n"
-                          'discuss))))))))
+                (expect buffer-content
+                        :to-equal
+                        (funcall action-buffer-org-content
+                                 "Test successful request with org"
+                                 "\n\nResponse content\n"
+                                 'discuss))))))))
 
     (it "formats prompts/responses for error requests"
       (funcall setup-backend
@@ -2175,17 +2156,15 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (expect (car tool-messages) :to-be nil)
             (let ((search-result (cadr tool-messages)))
               (expect (length search-result) :to-be 1)
-              (expect
-               (car search-result)
-               :to-match "README.md:3:This is a test project with hello examples.")
+              (expect (car search-result)
+                      :to-match "README.md:3:This is a test project with hello examples.")
               (expect (car search-result) :to-match "config.yaml:1:name: hello-app")
               (expect (car search-result) :to-match "src/main.js:1:console.log('hello world');")
               (expect (car search-result) :to-match "src/main.js:3:  return 'hello universe';")
               (expect (car search-result) :to-match "src/utils.js:1:export function hello() {")
               (expect (car search-result) :to-match "src/utils.js:2:  return 'hello javascript';")
-              (expect
-               (car search-result)
-               :to-match "tests/test.js:1:test('hello test', () => {"))))))
+              (expect (car search-result)
+                      :to-match "tests/test.js:1:test('hello test', () => {"))))))
 
     (it "searches with regexp file filtering"
       (funcall setup-backend
@@ -2574,9 +2553,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (expect (car tool-messages) :to-be nil)
             (let ((error-message (cadr tool-messages)))
               (expect (length error-message) :to-be 1)
-              (expect
-               "Directory .nonexistent. not found"
-               :to-appear-once-in (car error-message))))))))
+              (expect "Directory .nonexistent. not found"
+                      :to-appear-once-in (car error-message))))))))
 
   (describe "patch generation"
     (it "does not generate a patch when no changes are made"
@@ -2642,15 +2620,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
           (with-current-buffer (macher-patch-buffer)
             (let ((patch (buffer-string)))
-              (expect
-               (regexp-quote
-                (concat
-                 "diff --git a/created.txt b/created.txt\n"
-                 "--- /dev/null\n"
-                 "+++ b/created.txt\n"
-                 "@@ -0,0 +1 @@\n"
-                 "+hello test"))
-               :to-appear-once-in patch)
+              (expect (regexp-quote
+                       (concat
+                        "diff --git a/created.txt b/created.txt\n"
+                        "--- /dev/null\n"
+                        "+++ b/created.txt\n"
+                        "@@ -0,0 +1 @@\n"
+                        "+hello test"))
+                      :to-appear-once-in patch)
 
               (expect "Test prompt to create a file" :to-appear-once-in patch))))))
 
@@ -2693,9 +2670,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Should contain the no-changes message
               (expect "No changes were made to any files" :to-appear-once-in patch)
               ;; Should contain the prompt for reference
-              (expect
-               "Test prompt that overwrites file with same contents"
-               :to-appear-once-in patch)
+              (expect "Test prompt that overwrites file with same contents"
+                      :to-appear-once-in patch)
               ;; Should NOT contain any diff content since no changes were made
               (expect patch :not :to-match "diff --git")
               (expect patch :not :to-match "@@")
@@ -2792,10 +2768,10 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (expect (macher-context-dirty-p context) :to-be-truthy)
 
             ;; Check that the file was actually edited by the tool.
-            (expect
-             (cdr
-              (macher-context--contents-for-file (expand-file-name "test.txt" project-dir) context))
-             :to-equal "modified content"))))))
+            (expect (cdr
+                     (macher-context--contents-for-file
+                      (expand-file-name "test.txt" project-dir) context))
+                    :to-equal "modified content"))))))
 
   (describe "gptel preset integration"
     :var (callback-called exit-code callback project-file-buffer orig-known-presets)

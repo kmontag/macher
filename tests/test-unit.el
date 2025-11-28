@@ -104,9 +104,8 @@
         (expect (car non-existent-contents) :to-be nil) ;; Original content should be nil.
         (expect (cdr non-existent-contents) :to-be nil) ;; New content should be nil.
         ;; Should be added to context's contents list.
-        (expect
-         (assoc (macher--normalize-path non-existent) (macher-context-contents context))
-         :to-be-truthy))))
+        (expect (assoc (macher--normalize-path non-existent) (macher-context-contents context))
+                :to-be-truthy))))
 
   (describe "macher-context--set-new-content-for-file"
     :var (context temp-file original-contents)
@@ -548,9 +547,8 @@
     (describe "numbered parameter support"
       (it "returns content with line numbers when numbered is true"
         (let ((content "line1\nline2\nline3\nline4"))
-          (expect
-           (macher--read-string content nil nil t)
-           :to-equal "1\tline1\n2\tline2\n3\tline3\n4\tline4")))
+          (expect (macher--read-string content nil nil t)
+                  :to-equal "1\tline1\n2\tline2\n3\tline3\n4\tline4")))
 
       (it "handles single line content with numbered parameter"
         (let ((content "single line"))
@@ -652,9 +650,8 @@
         ;; But if the original content's trailing newline is within the limit, include it
         (let ((content-with-newline "line1\nline2\nline3\n"))
           (expect (macher--read-string content-with-newline nil 3) :to-equal "line1\nline2\nline3")
-          (expect
-           (macher--read-string content-with-newline nil 4)
-           :to-equal "line1\nline2\nline3\n")))
+          (expect (macher--read-string content-with-newline nil 4)
+                  :to-equal "line1\nline2\nline3\n")))
 
       (it "handles trailing newline with offset and limit combined"
         ;; Combined offset+limit = same limit behavior applies
@@ -696,9 +693,8 @@
         (it "numbers all but the last trailing newline"
           ;; Multiple trailing newlines: all but the last get numbered
           (let ((content "line1\nline2\n\n\n"))
-            (expect
-             (macher--read-string content nil nil t)
-             :to-equal "1\tline1\n2\tline2\n3\t\n4\t\n"))
+            (expect (macher--read-string content nil nil t)
+                    :to-equal "1\tline1\n2\tline2\n3\t\n4\t\n"))
           (let ((content "line1\n\n\n"))
             (expect (macher--read-string content nil nil t) :to-equal "1\tline1\n2\t\n3\t\n")))
 
@@ -707,17 +703,15 @@
           (let ((content "line1\n\nline3\n"))
             (expect (macher--read-string content nil nil t) :to-equal "1\tline1\n2\t\n3\tline3\n"))
           (let ((content "line1\n\n\nline4"))
-            (expect
-             (macher--read-string content nil nil t)
-             :to-equal "1\tline1\n2\t\n3\t\n4\tline4")))
+            (expect (macher--read-string content nil nil t)
+                    :to-equal "1\tline1\n2\t\n3\t\n4\tline4")))
 
         (it "numbers blank lines in the middle of the content, even if at the end of the limit"
           ;; When limit cuts off content, "trailing" newlines in the middle get numbered.
           (let ((content "line1\nline2\n\nline4\nline5"))
             (expect (macher--read-string content nil 3 t) :to-equal "1\tline1\n2\tline2\n3\t")
-            (expect
-             (macher--read-string content nil 4 t)
-             :to-equal "1\tline1\n2\tline2\n3\t\n4\tline4")))
+            (expect (macher--read-string content nil 4 t)
+                    :to-equal "1\tline1\n2\tline2\n3\t\n4\tline4")))
 
         (it "combines numbered with offset and doesn't number trailing newlines"
           ;; Numbered with offset should still follow cat -n behavior.
@@ -730,18 +724,15 @@
           ;; With trailing newline.
           (let ((content "line1\nline2\nline3\nline4\n"))
             (expect (macher--read-string content nil 3 t) :to-equal "1\tline1\n2\tline2\n3\tline3")
-            (expect
-             (macher--read-string content nil 4 t)
-             :to-equal "1\tline1\n2\tline2\n3\tline3\n4\tline4")
-            (expect
-             (macher--read-string content nil 5 t)
-             :to-equal "1\tline1\n2\tline2\n3\tline3\n4\tline4\n"))
+            (expect (macher--read-string content nil 4 t)
+                    :to-equal "1\tline1\n2\tline2\n3\tline3\n4\tline4")
+            (expect (macher--read-string content nil 5 t)
+                    :to-equal "1\tline1\n2\tline2\n3\tline3\n4\tline4\n"))
 
           ;; No trailing newline.
           (let ((content "line1\nline2\nline3"))
-            (expect
-             (macher--read-string content nil 4 t)
-             :to-equal "1\tline1\n2\tline2\n3\tline3"))))))
+            (expect (macher--read-string content nil 4 t)
+                    :to-equal "1\tline1\n2\tline2\n3\tline3"))))))
 
   (describe "macher--edit-string"
     (describe "basic replacement behavior"
@@ -1053,10 +1044,10 @@
         (make-symbolic-link target-path symlink-path)
 
         ;; Mock workspace files to include the symlink.
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace) (append (macher--project-files (cdr workspace)) (list symlink-path))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (append (macher--project-files (cdr workspace)) (list symlink-path))))
 
         (let ((result (macher--tool-list-directory context ".")))
           (expect result :to-match "link: file-symlink ->")
@@ -1072,11 +1063,10 @@
         (make-symbolic-link target-dir dir-symlink-path)
 
         ;; Mock workspace files to include the directory symlink
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace)
-           (append (macher--project-files (cdr workspace)) (list dir-symlink-path))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (append (macher--project-files (cdr workspace)) (list dir-symlink-path))))
 
         (let ((result (macher--tool-list-directory context ".")))
           (expect result :to-match "link: dir-symlink ->")
@@ -1090,11 +1080,10 @@
         (make-symbolic-link "/nonexistent/target" broken-symlink-path)
 
         ;; Mock workspace files to include the broken symlink.
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace)
-           (append (macher--project-files (cdr workspace)) (list broken-symlink-path))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (append (macher--project-files (cdr workspace)) (list broken-symlink-path))))
 
         (let ((result (macher--tool-list-directory context ".")))
           (expect result :to-match "link: broken-symlink -> /nonexistent/target"))
@@ -1179,18 +1168,17 @@
 
         ;; Mock workspace files to exclude the untracked files from the files list.
         ;; This simulates files that exist on disk but aren't tracked by the workspace.
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace)
-           ;; Get the actual files from the real function but filter out untracked files.
-           (let ((files (macher--project-files (cdr workspace))))
-             (cl-remove-if
-              (lambda (file)
-                (or (string-match-p "untracked1\\.txt$" file)
-                    (string-match-p "untracked2\\.txt$" file)
-                    (string-match-p "untracked-sub\\.txt$" file)))
-              files))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  ;; Get the actual files from the real function but filter out untracked files.
+                  (let ((files (macher--project-files (cdr workspace))))
+                    (cl-remove-if
+                     (lambda (file)
+                       (or (string-match-p "untracked1\\.txt$" file)
+                           (string-match-p "untracked2\\.txt$" file)
+                           (string-match-p "untracked-sub\\.txt$" file)))
+                     files))))
 
         ;; Test that untracked files don't appear in directory listing.
         (let ((result (macher--tool-list-directory context ".")))
@@ -1272,13 +1260,12 @@
                 ;; Mock workspace-files to include the external file in the workspace files list.
                 ;; This simulates a scenario where the workspace configuration incorrectly includes
                 ;; files outside the workspace root.
-                (spy-on
-                 'macher--workspace-files
-                 :and-call-fake
-                 (lambda (workspace)
-                   ;; Get the actual project files and add our external file
-                   (let ((normal-files (macher--project-files (cdr workspace))))
-                     (append normal-files (list external-file)))))
+                (spy-on 'macher--workspace-files
+                        :and-call-fake
+                        (lambda (workspace)
+                          ;; Get the actual project files and add our external file
+                          (let ((normal-files (macher--project-files (cdr workspace))))
+                            (append normal-files (list external-file)))))
 
                 ;; Even though the external file is in the workspace-files list, we should not be
                 ;; able to list the external directory.
@@ -1668,12 +1655,11 @@
 
       (it "excludes files not in workspace-files list"
         ;; Mock workspace-files to exclude extra-file.
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace)
-           (let ((files (macher--project-files (cdr workspace))))
-             (cl-remove-if (lambda (file) (string-match-p "excluded\\.txt$" file)) files))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (let ((files (macher--project-files (cdr workspace))))
+                    (cl-remove-if (lambda (file) (string-match-p "excluded\\.txt$" file)) files))))
 
         (let ((result (macher--search-get-xref-matches context "hello")))
           ;; Should find files that are in workspace-files.
@@ -1684,12 +1670,11 @@
 
       (it "includes files from macher-context even if not in workspace-files"
         ;; Mock workspace-files to exclude extra-file.
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace)
-           (let ((files (macher--project-files (cdr workspace))))
-             (cl-remove-if (lambda (file) (string-match-p "excluded\\.txt$" file)) files))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (let ((files (macher--project-files (cdr workspace))))
+                    (cl-remove-if (lambda (file) (string-match-p "excluded\\.txt$" file)) files))))
 
         ;; Add content to context for the excluded file.
         (macher-context--set-new-content-for-file extra-file "hello from context" context)
@@ -1714,12 +1699,11 @@
           (setq context (macher--make-context :workspace (cons 'project mock-workspace-root)))
 
           ;; Mock workspace-files to return fake file list.
-          (spy-on
-           'macher--workspace-files
-           :and-return-value
-           '("~/test-project/src/main.el"
-             "~/test-project/tests/test-main.el"
-             "~/test-project/README.md"))
+          (spy-on 'macher--workspace-files
+                  :and-return-value
+                  '("~/test-project/src/main.el"
+                    "~/test-project/tests/test-main.el"
+                    "~/test-project/README.md"))
           ;; Mock workspace-root.
           (spy-on 'macher--workspace-root :and-return-value mock-workspace-root)))
 
@@ -1780,13 +1764,12 @@
          context)
 
         ;; Mock workspace-files to include these files.
-        (spy-on
-         'macher--workspace-files
-         :and-return-value
-         '("~/test-project/src/main.js"
-           "~/test-project/src/other.js"
-           "~/test-project/lib/main.js"
-           "~/test-project/tests/main.test.js"))
+        (spy-on 'macher--workspace-files
+                :and-return-value
+                '("~/test-project/src/main.js"
+                  "~/test-project/src/other.js"
+                  "~/test-project/lib/main.js"
+                  "~/test-project/tests/main.test.js"))
 
         ;; Test pattern that should only match files starting with "src/" (relative to workspace root).
         (let ((result (macher--search-get-xref-matches context "main" :file-regexp "^src/")))
@@ -1807,12 +1790,11 @@
          "~/test-project/src/utils/main.js" "utility main functions" context)
 
         ;; Mock workspace-files.
-        (spy-on
-         'macher--workspace-files
-         :and-return-value
-         '("~/test-project/src/main.js"
-           "~/test-project/src/components/button.js"
-           "~/test-project/src/utils/main.js"))
+        (spy-on 'macher--workspace-files
+                :and-return-value
+                '("~/test-project/src/main.js"
+                  "~/test-project/src/components/button.js"
+                  "~/test-project/src/utils/main.js"))
 
         ;; Test pattern when searching within "src" directory.
         (let ((result
@@ -1876,19 +1858,15 @@
       ;; Verify files are NOT already loaded in context.
       (let ((context-files-before (mapcar #'car (macher-context-contents context))))
         ;; Matching files should not be in context yet.
-        (expect
-         (member (expand-file-name "context-test1.txt" temp-dir) context-files-before)
-         :to-be nil)
-        (expect
-         (member (expand-file-name "context-test2.txt" temp-dir) context-files-before)
-         :to-be nil)
+        (expect (member (expand-file-name "context-test1.txt" temp-dir) context-files-before)
+                :to-be nil)
+        (expect (member (expand-file-name "context-test2.txt" temp-dir) context-files-before)
+                :to-be nil)
         ;; Non-matching files should not be in context yet.
-        (expect
-         (member (expand-file-name "no-match1.txt" temp-dir) context-files-before)
-         :to-be nil)
-        (expect
-         (member (expand-file-name "no-match2.txt" temp-dir) context-files-before)
-         :to-be nil)
+        (expect (member (expand-file-name "no-match1.txt" temp-dir) context-files-before)
+                :to-be nil)
+        (expect (member (expand-file-name "no-match2.txt" temp-dir) context-files-before)
+                :to-be nil)
 
         ;; Perform search that should find matches and load files into context.
         (let ((result (macher--search-get-xref-matches context "hello")))
@@ -1902,19 +1880,15 @@
           ;; Verify matched files are now loaded in context, but non-matching files are NOT.
           (let ((context-files-after (mapcar #'car (macher-context-contents context))))
             ;; Files with matches should now be loaded in context.
-            (expect
-             (member (expand-file-name "context-test1.txt" temp-dir) context-files-after)
-             :to-be-truthy)
-            (expect
-             (member (expand-file-name "context-test2.txt" temp-dir) context-files-after)
-             :to-be-truthy)
+            (expect (member (expand-file-name "context-test1.txt" temp-dir) context-files-after)
+                    :to-be-truthy)
+            (expect (member (expand-file-name "context-test2.txt" temp-dir) context-files-after)
+                    :to-be-truthy)
             ;; Files without matches should NOT be loaded in context.
-            (expect
-             (member (expand-file-name "no-match1.txt" temp-dir) context-files-after)
-             :to-be nil)
-            (expect
-             (member (expand-file-name "no-match2.txt" temp-dir) context-files-after)
-             :to-be nil)
+            (expect (member (expand-file-name "no-match1.txt" temp-dir) context-files-after)
+                    :to-be nil)
+            (expect (member (expand-file-name "no-match2.txt" temp-dir) context-files-after)
+                    :to-be nil)
 
             ;; Verify content was loaded correctly (without creating buffers).
             (let* ((file1-path (expand-file-name "context-test1.txt" temp-dir))
@@ -1945,11 +1919,13 @@
     (it "formats files mode output correctly"
       (let* ((matches-alist (macher--search-get-xref-matches context "hello"))
              (result (macher--search-format-files-mode matches-alist)))
-        (expect
-         result
-         :to-equal
-         (concat
-          "file1.txt (2 matches)\n" "file2.js (1 match)\n" "\n" "Total: 3 matches in 2 files"))))
+        (expect result
+                :to-equal
+                (concat
+                 "file1.txt (2 matches)\n"
+                 "file2.js (1 match)\n"
+                 "\n"
+                 "Total: 3 matches in 2 files"))))
 
     (it "handles empty matches alist"
       (let ((result (macher--search-format-files-mode '())))
@@ -2042,9 +2018,8 @@
       (let* ((matches-alist (funcall get-matches-alist "hello"))
              (result (macher--search-format-content-mode context matches-alist nil nil t)))
         ;; Verify exact output with line numbers: filename:line_number:matched_line.
-        (expect
-         result
-         :to-equal (concat "test.txt:2:hello world\n" "test.txt:3:hello universe\n"))))
+        (expect result
+                :to-equal (concat "test.txt:2:hello world\n" "test.txt:3:hello universe\n"))))
 
     (it "includes context lines when specified"
       (let* ((matches-alist (funcall get-matches-alist "hello world"))
@@ -2060,14 +2035,13 @@
         ;; Verify exact merged output: overlapping context should be merged into one continuous block.
         ;; Line 1 (before first match), Line 2 (first match), Line 3 (second match), Line 4 (after second match).
         ;; No separators (--) should appear since the context ranges overlap and merge.
-        (expect
-         result
-         :to-equal
-         (concat
-          "test.txt-line1\n"
-          "test.txt:hello world\n"
-          "test.txt:hello universe\n"
-          "test.txt-line4\n"))))
+        (expect result
+                :to-equal
+                (concat
+                 "test.txt-line1\n"
+                 "test.txt:hello world\n"
+                 "test.txt:hello universe\n"
+                 "test.txt-line4\n"))))
 
     (it "separates non-overlapping context ranges"
       ;; Create a file with widely separated matches to test separator behavior.
@@ -2083,17 +2057,16 @@
         ;; Verify output has separator (--) between non-overlapping context ranges.
         ;; Range 1: line1, hello first, line3
         ;; Range 2: line6, hello second, line8
-        (expect
-         result
-         :to-equal
-         (concat
-          "separate.txt-line1\n"
-          "separate.txt:hello first\n"
-          "separate.txt-line3\n"
-          "--\n"
-          "separate.txt-line6\n"
-          "separate.txt:hello second\n"
-          "separate.txt-line8\n"))))
+        (expect result
+                :to-equal
+                (concat
+                 "separate.txt-line1\n"
+                 "separate.txt:hello first\n"
+                 "separate.txt-line3\n"
+                 "--\n"
+                 "separate.txt-line6\n"
+                 "separate.txt:hello second\n"
+                 "separate.txt-line8\n"))))
 
     (it "handles large files and complex match patterns"
       ;; Create a large file with multiple overlapping and non-overlapping match ranges, including multi-match lines.
@@ -2197,9 +2170,8 @@
              (result
               (macher--search-format-content-mode context (list multiple-matches) nil nil nil)))
         ;; Verify that the line with multiple matches appears exactly once.
-        (expect
-         "multiple.txt:hello world and hello universe on same line"
-         :to-appear-once-in result)
+        (expect "multiple.txt:hello world and hello universe on same line"
+                :to-appear-once-in result)
         ;; Verify the result doesn't contain duplicate entries.
         (expect result :to-equal "multiple.txt:hello world and hello universe on same line\n")))
 
@@ -2215,20 +2187,18 @@
              (multi-matches (assoc "multi-context.txt" matches-alist))
              (result (macher--search-format-content-mode context (list multi-matches) 1 1 nil)))
         ;; Verify that the line with multiple matches appears exactly once as a match line.
-        (expect
-         "multi-context.txt:hello world and hello universe and hello again"
-         :to-appear-once-in result)
+        (expect "multi-context.txt:hello world and hello universe and hello again"
+                :to-appear-once-in result)
         ;; Verify context lines are included.
         (expect result :to-match "before line")
         (expect result :to-match "after line")
         ;; Full expected output.
-        (expect
-         result
-         :to-equal
-         (concat
-          "multi-context.txt-before line\n"
-          "multi-context.txt:hello world and hello universe and hello again\n"
-          "multi-context.txt-after line\n"))))
+        (expect result
+                :to-equal
+                (concat
+                 "multi-context.txt-before line\n"
+                 "multi-context.txt:hello world and hello universe and hello again\n"
+                 "multi-context.txt-after line\n"))))
 
     (it "renders long lines with multiple matches only once with ripgrep-style placeholder"
       ;; Test that long lines with multiple matches are only rendered once and show correct count.
@@ -2274,13 +2244,12 @@
           ;; Verify the long content is not present.
           (expect result :not :to-match (regexp-quote (substring long-segment 0 30)))
           ;; Full expected output.
-          (expect
-           result
-           :to-equal
-           (concat
-            "long-context-multi.txt-context before\n"
-            "long-context-multi.txt:[Omitted long line with 3 matches]\n"
-            "long-context-multi.txt-context after\n")))))
+          (expect result
+                  :to-equal
+                  (concat
+                   "long-context-multi.txt-context before\n"
+                   "long-context-multi.txt:[Omitted long line with 3 matches]\n"
+                   "long-context-multi.txt-context after\n")))))
 
     (it "replaces long lines with ripgrep-style placeholder in content mode (context lines)"
       ;; Test that long lines are replaced with ripgrep-style "[Omitted long line with N matches]" in context mode.
@@ -2475,27 +2444,25 @@
     (it "handles basic search functionality"
       (let ((result (macher--tool-search-helper context "hello")))
         ;; Verify exact files mode output structure with correct counts and totals.
-        (expect
-         result
-         :to-equal
-         (concat
-          "file1.txt (2 matches)\n"
-          "file2.js (1 match)\n"
-          "subdir/file3.py (1 match)\n"
-          "\n"
-          "Total: 4 matches in 3 files"))))
+        (expect result
+                :to-equal
+                (concat
+                 "file1.txt (2 matches)\n"
+                 "file2.js (1 match)\n"
+                 "subdir/file3.py (1 match)\n"
+                 "\n"
+                 "Total: 4 matches in 3 files"))))
 
     (it "handles content mode"
       (let ((result (macher--tool-search-helper context "hello" :mode "content")))
         ;; Verify exact content mode output with all matching lines from all files.
-        (expect
-         result
-         :to-equal
-         (concat
-          "file1.txt:hello world\n"
-          "file1.txt:hello universe\n"
-          "file2.js:hello javascript\n"
-          "subdir/file3.py:hello python\n"))))
+        (expect result
+                :to-equal
+                (concat
+                 "file1.txt:hello world\n"
+                 "file1.txt:hello universe\n"
+                 "file2.js:hello javascript\n"
+                 "subdir/file3.py:hello python\n"))))
 
     (it "applies head-limit correctly"
       (let ((result (macher--tool-search-helper context "hello" :head-limit 2)))
@@ -2548,9 +2515,8 @@
 
       (it "handles invalid regex patterns in search"
         ;; Test pattern with unmatched opening parenthesis - this should trigger regex parse error.
-        (expect
-         (macher--tool-search context "\\(describe \"search_in_workspace\"")
-         :to-throw 'user-error)))
+        (expect (macher--tool-search context "\\(describe \"search_in_workspace\"")
+                :to-throw 'user-error)))
 
     (describe "comprehensive tests"
       :var (context temp-dir)
@@ -2664,9 +2630,8 @@
         ;; Create mock tilde workspace
         (let ((tilde-context (macher--make-context :workspace '(project . "~/my-project/"))))
           ;; Mock workspace functions
-          (spy-on
-           'macher--workspace-files
-           :and-return-value '("~/my-project/main.py" "~/my-project/test.py"))
+          (spy-on 'macher--workspace-files
+                  :and-return-value '("~/my-project/main.py" "~/my-project/test.py"))
           (spy-on 'macher--workspace-root :and-return-value "~/my-project/")
 
           ;; Add context files
@@ -2792,10 +2757,10 @@
         (make-symbolic-link target-path symlink-path)
 
         ;; Mock workspace files to include the symlink
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace) (append (macher--project-files (cdr workspace)) (list symlink-path))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (append (macher--project-files (cdr workspace)) (list symlink-path))))
 
         (let ((result (macher--tool-read-file context "test-symlink")))
           (expect result :to-match "Symlink target:")
@@ -2809,11 +2774,10 @@
         (make-symbolic-link "/nonexistent/target" broken-symlink-path)
 
         ;; Mock workspace files to include the broken symlink
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace)
-           (append (macher--project-files (cdr workspace)) (list broken-symlink-path))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (append (macher--project-files (cdr workspace)) (list broken-symlink-path))))
 
         (let ((result (macher--tool-read-file context "broken-symlink")))
           (expect result :to-match "Symlink target:")
@@ -2827,11 +2791,10 @@
         (make-symbolic-link "./test-file.txt" rel-symlink-path)
 
         ;; Mock workspace files to include the relative symlink
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace)
-           (append (macher--project-files (cdr workspace)) (list rel-symlink-path))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (append (macher--project-files (cdr workspace)) (list rel-symlink-path))))
 
         (let ((result (macher--tool-read-file context "rel-symlink")))
           (expect result :to-match "Symlink target:")
@@ -2848,13 +2811,11 @@
         ;; Create test file for this test
         (write-region "line1\nline2\nline3\nline4" nil (expand-file-name "multiline.txt" temp-dir))
         ;; 1.0 should round to 1.
-        (expect
-         (macher--tool-read-file context "multiline.txt" 1.0)
-         :to-equal "line1\nline2\nline3\nline4")
+        (expect (macher--tool-read-file context "multiline.txt" 1.0)
+                :to-equal "line1\nline2\nline3\nline4")
         ;; 2.3 should round to 2.
-        (expect
-         (macher--tool-read-file context "multiline.txt" 2.3)
-         :to-equal "line2\nline3\nline4")
+        (expect (macher--tool-read-file context "multiline.txt" 2.3)
+                :to-equal "line2\nline3\nline4")
         ;; 2.7 should round to 3.
         (expect (macher--tool-read-file context "multiline.txt" 2.7) :to-equal "line3\nline4")
         ;; 40.0 should round to 40 (beyond bounds).
@@ -2868,13 +2829,11 @@
         ;; 2.3 should round to 2.
         (expect (macher--tool-read-file context "multiline.txt" nil 2.3) :to-equal "line1\nline2")
         ;; 2.7 should round to 3.
-        (expect
-         (macher--tool-read-file context "multiline.txt" nil 2.7)
-         :to-equal "line1\nline2\nline3")
+        (expect (macher--tool-read-file context "multiline.txt" nil 2.7)
+                :to-equal "line1\nline2\nline3")
         ;; 40.0 should round to 40 (beyond bounds, return all).
-        (expect
-         (macher--tool-read-file context "multiline.txt" nil 40.0)
-         :to-equal "line1\nline2\nline3\nline4"))
+        (expect (macher--tool-read-file context "multiline.txt" nil 40.0)
+                :to-equal "line1\nline2\nline3\nline4"))
 
       (it "handles negative float values by rounding them"
         ;; Create test file for this test
@@ -2884,13 +2843,11 @@
         ;; -2.3 should round to -2.
         (expect (macher--tool-read-file context "multiline.txt" -2.3) :to-equal "line3\nline4")
         ;; -2.7 should round to -3.
-        (expect
-         (macher--tool-read-file context "multiline.txt" -2.7)
-         :to-equal "line2\nline3\nline4")
+        (expect (macher--tool-read-file context "multiline.txt" -2.7)
+                :to-equal "line2\nline3\nline4")
         ;; -1.0 limit should round to -1 (4 - 1 = 3 lines).
-        (expect
-         (macher--tool-read-file context "multiline.txt" nil -1.0)
-         :to-equal "line1\nline2\nline3")
+        (expect (macher--tool-read-file context "multiline.txt" nil -1.0)
+                :to-equal "line1\nline2\nline3")
         ;; -2.3 limit should round to -2 (4 - 2 = 2 lines).
         (expect (macher--tool-read-file context "multiline.txt" nil -2.3) :to-equal "line1\nline2")
         ;; -2.7 limit should round to -3 (4 - 3 = 1 line).
@@ -2901,9 +2858,8 @@
         (write-region
          "line1\nline2\nline3\nline4\nline5" nil (expand-file-name "fiveline.txt" temp-dir))
         ;; 2.4 should round to 2, 2.6 should round to 3.
-        (expect
-         (macher--tool-read-file context "fiveline.txt" 2.4 2.6)
-         :to-equal "line2\nline3\nline4")
+        (expect (macher--tool-read-file context "fiveline.txt" 2.4 2.6)
+                :to-equal "line2\nline3\nline4")
         ;; 1.5 should round to 2, 1.4 should round to 1.
         (expect (macher--tool-read-file context "fiveline.txt" 1.5 1.4) :to-equal "line2")
         ;; Mix positive and negative floats: -2.3 should round to -2, 2.7 should round to 3.
@@ -2913,29 +2869,24 @@
         ;; Create test file for this test
         (write-region "line1\nline2\nline3\nline4" nil (expand-file-name "multiline.txt" temp-dir))
         ;; 1.8 should round to 2, 2.4 should round to 2.
-        (expect
-         (macher--tool-read-file context "multiline.txt" 1.8 2.4 t)
-         :to-equal "2\tline2\n3\tline3")
+        (expect (macher--tool-read-file context "multiline.txt" 1.8 2.4 t)
+                :to-equal "2\tline2\n3\tline3")
         ;; -1.5 should round to -2 (line3 start), 1.9 should round to 2 (2 lines).
-        (expect
-         (macher--tool-read-file context "multiline.txt" -1.5 1.9 t)
-         :to-equal "3\tline3\n4\tline4"))
+        (expect (macher--tool-read-file context "multiline.txt" -1.5 1.9 t)
+                :to-equal "3\tline3\n4\tline4"))
 
       (it "handles edge case float values"
         ;; Create a 3-line file for this test
         (write-region "line1\nline2\nline3" nil (expand-file-name "threeline.txt" temp-dir))
         ;; 0.4 should round to 0, which gets treated as 1.
-        (expect
-         (macher--tool-read-file context "threeline.txt" 0.4)
-         :to-equal "line1\nline2\nline3")
+        (expect (macher--tool-read-file context "threeline.txt" 0.4)
+                :to-equal "line1\nline2\nline3")
         ;; 0.6 should round to 1.
-        (expect
-         (macher--tool-read-file context "threeline.txt" 0.6)
-         :to-equal "line1\nline2\nline3")
+        (expect (macher--tool-read-file context "threeline.txt" 0.6)
+                :to-equal "line1\nline2\nline3")
         ;; Very small positive float should still round to 0 then treated as 1.
-        (expect
-         (macher--tool-read-file context "threeline.txt" 0.1)
-         :to-equal "line1\nline2\nline3")
+        (expect (macher--tool-read-file context "threeline.txt" 0.1)
+                :to-equal "line1\nline2\nline3")
         ;; Very small negative float should round to limit 0.
         (expect (macher--tool-read-file context "threeline.txt" nil -0.1) :to-equal ""))))
 
@@ -2991,12 +2942,10 @@
           (expect result :to-match "subdir/file3.md")
           ;; Should distinguish between files in context and files available for editing.
           ;; Files in context should be in "already provided" section with proper structure.
-          (expect
-           result
-           :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    file1\\.txt")
-          (expect
-           result
-           :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    file2\\.el")
+          (expect result
+                  :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    file1\\.txt")
+          (expect result
+                  :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    file2\\.el")
           ;; Files not in context should be in "available for editing" section.
           (expect
            result
@@ -3037,9 +2986,8 @@
           (expect result :to-match "WORKSPACE CONTEXT")
 
           ;; test.txt should be in the "already provided" section since it's in contexts
-          (expect
-           result
-           :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    test\\.txt")
+          (expect result
+                  :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    test\\.txt")
 
           ;; subdir/test.txt should be in "available for editing" since it's not in contexts
           (expect
@@ -3208,9 +3156,8 @@
           (let ((result (macher--project-workspace)))
             (expect result :to-be-truthy)
             (expect (car result) :to-be 'project)
-            (expect
-             (file-truename (directory-file-name (cdr result)))
-             :to-equal (file-truename (directory-file-name project-dir))))))
+            (expect (file-truename (directory-file-name (cdr result)))
+                    :to-equal (file-truename (directory-file-name project-dir))))))
 
       (it "returns nil when not in a project"
         (with-temp-buffer
@@ -3248,9 +3195,8 @@
           (let ((result (macher-workspace)))
             (expect result :to-be-truthy)
             (expect (car result) :to-be 'project)
-            (expect
-             (file-truename (directory-file-name (cdr result)))
-             :to-equal (file-truename (directory-file-name project-dir))))))
+            (expect (file-truename (directory-file-name (cdr result)))
+                    :to-equal (file-truename (directory-file-name project-dir))))))
 
       (it "falls back to file workspace when no project found"
         (with-temp-buffer
@@ -3308,9 +3254,8 @@
               (let ((result (macher-workspace test-buffer)))
                 (expect result :to-be-truthy)
                 (expect (car result) :to-be 'project)
-                (expect
-                 (file-truename (directory-file-name (cdr result)))
-                 :to-equal (file-truename (directory-file-name project-dir))))))))
+                (expect (file-truename (directory-file-name (cdr result)))
+                        :to-equal (file-truename (directory-file-name project-dir))))))))
 
       ;; Test the actual default hook behavior.
       (describe "integration tests"
@@ -3328,9 +3273,8 @@
             (let ((result (macher-workspace)))
               (expect result :to-be-truthy)
               (expect (car result) :to-be 'project)
-              (expect
-               (file-truename (directory-file-name (cdr result)))
-               :to-equal (file-truename (directory-file-name project-dir))))))))
+              (expect (file-truename (directory-file-name (cdr result)))
+                      :to-equal (file-truename (directory-file-name project-dir))))))))
 
     (describe "macher--workspace-root"
       (before-each
@@ -3427,12 +3371,11 @@
                 (expect (macher--workspace-root test-workspace) :to-equal temp-dir)
                 (expect (macher--workspace-name test-workspace) :to-equal "Test Workspace")
                 (let ((files (macher--workspace-files test-workspace)))
-                  (expect
-                   files
-                   :to-equal
-                   (list
-                    (expand-file-name "file1.txt" temp-dir)
-                    (expand-file-name "file2.txt" temp-dir)))))
+                  (expect files
+                          :to-equal
+                          (list
+                           (expand-file-name "file1.txt" temp-dir)
+                           (expand-file-name "file2.txt" temp-dir)))))
             ;; Clean up
             (when (file-exists-p temp-dir)
               (delete-directory temp-dir t)))))))
@@ -3481,13 +3424,13 @@
           (let ((tools (plist-get result :tools)))
             (expect (length tools) :to-equal 2)
             ;; Should contain the regular tool.
-            (expect
-             (cl-find-if (lambda (tool) (string= (gptel-tool-name tool) "regular_tool")) tools)
-             :to-be-truthy)
+            (expect (cl-find-if
+                     (lambda (tool) (string= (gptel-tool-name tool) "regular_tool")) tools)
+                    :to-be-truthy)
             ;; Should contain the macher tool.
-            (expect
-             (cl-find-if (lambda (tool) (string= (gptel-tool-name tool) "macher_tool")) tools)
-             :to-be-truthy)))))
+            (expect (cl-find-if
+                     (lambda (tool) (string= (gptel-tool-name tool) "macher_tool")) tools)
+                    :to-be-truthy)))))
 
     (it "reuses existing macher context from same workspace"
       (with-temp-buffer
@@ -3516,14 +3459,13 @@
           (let ((tools (plist-get result :tools)))
             (expect (length tools) :to-equal 2)
             ;; Should contain the existing tool.
-            (expect
-             (cl-find-if
-              (lambda (tool) (string= (gptel-tool-name tool) "existing_macher_tool")) tools)
-             :to-be-truthy)
+            (expect (cl-find-if
+                     (lambda (tool) (string= (gptel-tool-name tool) "existing_macher_tool")) tools)
+                    :to-be-truthy)
             ;; Should contain the new tool.
-            (expect
-             (cl-find-if (lambda (tool) (string= (gptel-tool-name tool) "new_macher_tool")) tools)
-             :to-be-truthy))
+            (expect (cl-find-if
+                     (lambda (tool) (string= (gptel-tool-name tool) "new_macher_tool")) tools)
+                    :to-be-truthy))
           ;; Verify the context was reused.
           (expect context-received :to-be existing-context))))
 
@@ -3559,29 +3501,26 @@
           (let ((tools (plist-get result :tools)))
             (expect (length tools) :to-equal 3)
             ;; Should not contain the old conflicting tool.
-            (expect
-             (cl-find-if
-              (lambda (tool)
-                (and (string= (gptel-tool-name tool) "conflicting_tool")
-                     (not (macher--tool-context tool))))
-              tools)
-             :to-be nil)
+            (expect (cl-find-if
+                     (lambda (tool)
+                       (and (string= (gptel-tool-name tool) "conflicting_tool")
+                            (not (macher--tool-context tool))))
+                     tools)
+                    :to-be nil)
             ;; Should contain the new conflicting tool.
-            (expect
-             (cl-find-if
-              (lambda (tool)
-                (and (string= (gptel-tool-name tool) "conflicting_tool")
-                     (macher--tool-context tool)))
-              tools)
-             :to-be-truthy)
+            (expect (cl-find-if
+                     (lambda (tool)
+                       (and (string= (gptel-tool-name tool) "conflicting_tool")
+                            (macher--tool-context tool)))
+                     tools)
+                    :to-be-truthy)
             ;; Should contain the other tool.
-            (expect
-             (cl-find-if (lambda (tool) (string= (gptel-tool-name tool) "other_tool")) tools)
-             :to-be-truthy)
+            (expect (cl-find-if (lambda (tool) (string= (gptel-tool-name tool) "other_tool")) tools)
+                    :to-be-truthy)
             ;; Should contain the unique tool.
-            (expect
-             (cl-find-if (lambda (tool) (string= (gptel-tool-name tool) "unique_tool")) tools)
-             :to-be-truthy)))))
+            (expect (cl-find-if
+                     (lambda (tool) (string= (gptel-tool-name tool) "unique_tool")) tools)
+                    :to-be-truthy)))))
 
     (it "creates new context when no existing macher tools found"
       (with-temp-buffer
@@ -3620,12 +3559,11 @@
               (preset '(:tools nil :prompt-transform-functions nil))
               (warning-triggered nil))
           ;; Mock the warn function to capture warnings.
-          (spy-on
-           'display-warning
-           :and-call-fake
-           (lambda (type msg &optional level buffer-name)
-             (when (string-match "No macher workspace found" msg)
-               (setq warning-triggered t))))
+          (spy-on 'display-warning
+                  :and-call-fake
+                  (lambda (type msg &optional level buffer-name)
+                    (when (string-match "No macher workspace found" msg)
+                      (setq warning-triggered t))))
           (let ((result (macher--merge-tools preset (lambda (context make-tool-function) nil))))
             ;; Should return the original preset unchanged.
             (expect result :to-equal preset)
@@ -3714,9 +3652,8 @@
            ;; Verify that the existing transform is preserved.
            (expect (member existing-transform gptel-prompt-transform-functions) :to-be-truthy)
            ;; Verify that macher transform is also present.
-           (expect
-            (member #'macher--prompt-transform-add-context gptel-prompt-transform-functions)
-            :to-be-truthy)))
+           (expect (member #'macher--prompt-transform-add-context gptel-prompt-transform-functions)
+                   :to-be-truthy)))
         ;; Verify that the global transforms list is restored after the preset.
         (expect gptel-prompt-transform-functions :to-equal (list existing-transform))
         ;; Verify that the existing transform was indeed in the captured transforms list.
@@ -3738,22 +3675,21 @@
            ;; Capture the tools list inside the preset context.
            (setq captured-tools gptel-tools)
            ;; Verify that the existing tool is preserved.
-           (expect
-            (cl-find-if
-             (lambda (tool) (string= (gptel-tool-name tool) "existing_tool")) gptel-tools)
-            :to-be-truthy)
+           (expect (cl-find-if
+                    (lambda (tool) (string= (gptel-tool-name tool) "existing_tool")) gptel-tools)
+                   :to-be-truthy)
            ;; Verify that macher tools are also present.
-           (expect
-            (cl-find-if
-             (lambda (tool) (string= (gptel-tool-name tool) "read_file_in_workspace")) gptel-tools)
-            :to-be-truthy)))
+           (expect (cl-find-if
+                    (lambda (tool)
+                      (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                    gptel-tools)
+                   :to-be-truthy)))
         ;; Verify that the global tools list is restored after the preset.
         (expect gptel-tools :to-equal (list existing-tool))
         ;; Verify that the existing tool was indeed in the captured tools list.
-        (expect
-         (cl-find-if
-          (lambda (tool) (string= (gptel-tool-name tool) "existing_tool")) captured-tools)
-         :to-be-truthy))))
+        (expect (cl-find-if
+                 (lambda (tool) (string= (gptel-tool-name tool) "existing_tool")) captured-tools)
+                :to-be-truthy))))
 
   (describe "macher-install"
     :var (original-presets)
@@ -3780,15 +3716,12 @@
       (let ((macher-preset (gptel-get-preset 'macher))
             (macher-ro-preset (gptel-get-preset 'macher-ro))
             (macher-notools-preset (gptel-get-preset 'macher-notools)))
-        (expect
-         (plist-get macher-preset :description)
-         :to-equal "Send macher workspace context + tools to read files and propose edits")
-        (expect
-         (plist-get macher-ro-preset :description)
-         :to-equal "Send macher workspace context + tools to read files")
-        (expect
-         (plist-get macher-notools-preset :description)
-         :to-equal "Send macher workspace context without tools"))))
+        (expect (plist-get macher-preset :description)
+                :to-equal "Send macher workspace context + tools to read files and propose edits")
+        (expect (plist-get macher-ro-preset :description)
+                :to-equal "Send macher workspace context + tools to read files")
+        (expect (plist-get macher-notools-preset :description)
+                :to-equal "Send macher workspace context without tools"))))
 
   (describe "macher-patch-buffer"
     (before-each
@@ -4173,9 +4106,8 @@
       ;; Verify in advance that there are no pending file modifications that might have been
       ;; introduced by other tests, as this would cause `save-some-buffers' to try prompting about
       ;; save.
-      (expect
-       (seq-find (lambda (b) (and (buffer-file-name b) (buffer-modified-p b))) (buffer-list))
-       :to-be nil)
+      (expect (seq-find (lambda (b) (and (buffer-file-name b) (buffer-modified-p b))) (buffer-list))
+              :to-be nil)
 
       ;; Use a buffer with the real file contents, to avoid prompts from `save-some-buffers'.
       (setq project-file-buffer (find-file-noselect project-file)))
@@ -4363,9 +4295,8 @@
 
         ;; Verify that the original handlers structure is preserved
         ;; (though the FSM's handlers will have been modified)
-        (expect
-         (length (gptel-fsm-handlers fsm))
-         :to-be-greater-than (length original-fsm-handlers)))))
+        (expect (length (gptel-fsm-handlers fsm))
+                :to-be-greater-than (length original-fsm-handlers)))))
 
   (describe "macher--add-termination-handler"
     :var (fsm test-handler handler-calls)
@@ -4505,9 +4436,8 @@
 
         ;; Verify that the original handlers structure is preserved
         ;; (though the FSM's handlers will have been modified)
-        (expect
-         (length (gptel-fsm-handlers fsm))
-         :to-be-greater-than (length original-fsm-handlers)))))
+        (expect (length (gptel-fsm-handlers fsm))
+                :to-be-greater-than (length original-fsm-handlers)))))
 
   (describe "macher--implement-prompt"
     :var (temp-file)
@@ -4635,13 +4565,12 @@
         (write-region "extra content" nil extra-file)
 
         ;; Spy on macher--workspace-files to exclude extra.txt from the files list.
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace)
-           ;; Get the actual files from the real function but filter out extra.txt.
-           (let ((files (macher--project-files (cdr workspace))))
-             (cl-remove-if (lambda (file) (string-match-p "extra\\.txt$" file)) files))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  ;; Get the actual files from the real function but filter out extra.txt.
+                  (let ((files (macher--project-files (cdr workspace))))
+                    (cl-remove-if (lambda (file) (string-match-p "extra\\.txt$" file)) files))))
 
         ;; Should succeed for files that are in the project.
         (let ((result (macher--resolve-workspace-path project-workspace "file1.txt")))
@@ -4668,10 +4597,10 @@
         (make-symbolic-link temp-file1 symlink-path)
 
         ;; Mock workspace files to include the symlink.
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace) (append (macher--project-files (cdr workspace)) (list symlink-path))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (append (macher--project-files (cdr workspace)) (list symlink-path))))
 
         (let ((result (macher--resolve-workspace-path project-workspace "test-symlink")))
           (expect result :to-equal symlink-path))))
@@ -4690,9 +4619,8 @@
         (make-symbolic-link target-dir symlink-dir)
 
         ;; Should throw error when accessing through symlinked directory.
-        (expect
-         (macher--resolve-workspace-path project-workspace "symlink-dir/target.txt")
-         :to-throw)))
+        (expect (macher--resolve-workspace-path project-workspace "symlink-dir/target.txt")
+                :to-throw)))
 
     (it "throws error for files in non-final path components"
       ;; Create a file within the workspace that will be used as a non-final path component.
@@ -4700,9 +4628,8 @@
         (write-region "file content" nil file-in-path)
 
         ;; Should throw error when trying to access through the file as if it were a directory.
-        (expect
-         (macher--resolve-workspace-path project-workspace "not-a-dir/target.txt")
-         :to-throw)))
+        (expect (macher--resolve-workspace-path project-workspace "not-a-dir/target.txt")
+                :to-throw)))
 
     (it "handles absolute paths within workspace"
       (let ((result (macher--resolve-workspace-path project-workspace temp-file1)))
@@ -4786,11 +4713,10 @@
         (make-symbolic-link "/nonexistent/target" broken-symlink)
 
         ;; Mock workspace files to include the broken symlink.
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace)
-           (append (macher--project-files (cdr workspace)) (list broken-symlink))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (append (macher--project-files (cdr workspace)) (list broken-symlink))))
 
         (let ((result (macher--resolve-workspace-path project-workspace "broken-symlink")))
           (expect result :to-equal broken-symlink))
@@ -4808,19 +4734,18 @@
         (make-symbolic-link target-file untracked-symlink)
 
         ;; Spy on macher--workspace-files to exclude the symlink from the files list.
-        (spy-on
-         'macher--workspace-files
-         :and-call-fake
-         (lambda (workspace)
-           ;; Get the actual files from the real function but filter out the symlink.
-           (let ((files (macher--project-files (cdr workspace))))
-             (cl-remove-if (lambda (file) (string-match-p "untracked-symlink$" file)) files))))
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  ;; Get the actual files from the real function but filter out the symlink.
+                  (let ((files (macher--project-files (cdr workspace))))
+                    (cl-remove-if
+                     (lambda (file) (string-match-p "untracked-symlink$" file)) files))))
 
         (unwind-protect
             ;; Should throw error - symlink exists but is not in the workspace files list.
-            (expect
-             (macher--resolve-workspace-path project-workspace "untracked-symlink")
-             :to-throw)
+            (expect (macher--resolve-workspace-path project-workspace "untracked-symlink")
+                    :to-throw)
           ;; Clean up
           (when (file-exists-p untracked-symlink)
             (delete-file untracked-symlink))
