@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // @ts-check
+/// <reference types="node" />
 // Generate elisp-autofmt definition stubs from packages.
 // Uses elisp-autofmt's --gen-defs to extract definitions, then converts to elisp.
 //
