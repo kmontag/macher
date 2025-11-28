@@ -4023,9 +4023,5 @@ success, or an error description on failure), EXECUTION (the
   (interactive)
   (macher-action 'discuss callback question))
 
-;; Local variables:
-;; elisp-autofmt-load-packages-local: ("cl-macs")
-;; end:
-
 (provide 'macher)
 ;;; macher.el ends here
