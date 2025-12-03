@@ -3483,16 +3483,15 @@ CALLBACK takes no arguments."
          (if (symbolp preset)
              (cdr (assq preset macher--presets-alist))
            preset)))
-    (let ((gptel-known-presets nil))
-      ;; Adapted from `gptel-with-preset'. Currently that macro sets all symbol values to nil before
-      ;; applying the preset (since it doesn't expect dynamic values), but we want to pull in
-      ;; existing values, so we can extend rather than overwrite things like 'gptel-tools'.
-      (let* ((preset-syms (gptel--preset-syms spec))
-             ;; Get the current values of all variables affected by the preset.
-             (preset-sym-values (mapcar #'symbol-value preset-syms)))
-        (cl-progv preset-syms preset-sym-values
-          (gptel--apply-preset spec)
-          (funcall callback))))))
+    ;; Adapted from `gptel-with-preset'. Currently that macro sets all symbol values to nil before
+    ;; applying the preset (since it doesn't expect dynamic values), but we want to pull in
+    ;; existing values, so we can extend rather than overwrite things like 'gptel-tools'.
+    (let* ((preset-syms (gptel--preset-syms spec))
+           ;; Get the current values of all variables affected by the preset.
+           (preset-sym-values (mapcar #'symbol-value preset-syms)))
+      (cl-progv preset-syms preset-sym-values
+        (gptel--apply-preset spec)
+        (funcall callback)))))
 
 (defun macher--preset-default ()
   "Set up the default macher preset with full editing capabilities."
