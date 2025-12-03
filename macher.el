@@ -879,10 +879,7 @@ Returns a workspace information string to be added to the request."
                       (+ (length files-in-context) (length files-available-for-editing)))
                      (truncated-files (- total-files listed-files)))
                 (when (> truncated-files 0)
-                  (insert
-                   (format "\n    ... and %d more files\n"
-                           truncated-files
-                           macher-context-string-max-files)))))
+                  (insert (format "\n    ... and %d more files\n" truncated-files)))))
             (insert "\n"))
 
           (insert "\n")
@@ -1016,10 +1013,7 @@ It adapts the prompt formatting based on the current major mode."
          ;; otherwise a markdown-style code block.
          (full-prompt-str
           (if is-org-mode
-              (concat
-               (format ":PROMPT:\n" truncated-summary)
-               (org-escape-code-in-string prompt)
-               "\n:END:\n")
+              (concat (format ":PROMPT:\n") (org-escape-code-in-string prompt) "\n:END:\n")
             (concat "```\n" prompt "\n```\n"))))
 
     (goto-char (point-max))
