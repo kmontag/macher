@@ -1,7 +1,7 @@
 ;;; demo-init.el --- Minimal init file for macher demos. -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; This file contains setup for automated demos of macher functionality. The demos in this directory
+;; This file contains setup for automated demos of macher functionality.  The demos in this directory
 ;; are intended to be run and recorded to generate screengrabs for the package README.
 
 ;;; Code:
@@ -139,13 +139,13 @@
 
 Once the key sequence has been received as input, call CALLBACK.
 
-The input is performed sequentially and asynchronously. Note that a
+The input is performed sequentially and asynchronously.  Note that a
 synchronous approach using `sleep-for' or similar would prevent any
 input from being processed until the current execution context exits.
 
-KEY-SEQUENCE should be a string like \"C-x a b\" with space-separated
-keys. Use \"<pause>\" to insert a delay, or \"<pause2>\", \"<pause5>\",
-etc. to pause for a number of seconds."
+KEY-SEQUENCE should be a string of space-separated keys in standard
+Emacs key notation.  Use \"<pause>\" to insert a delay, or
+\"<pause2>\", \"<pause5>\", etc. to pause for a number of seconds."
   (let ((keys (split-string key-sequence)))
     (if (null keys)
         ;; All keys processed, call the callback.

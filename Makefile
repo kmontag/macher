@@ -34,8 +34,13 @@ lint.%: $(EASK) .eask
 # the elisp-autofmt defs file shouldn't be checked.
 	$(EASK) --strict lint $* *.el demo/*.el tests/[a-z]*.el
 
+# The keywords linter doesn't take file arguments, so we define it separately.
+.PHONY: lint.keywords
+lint.keywords: $(EASK) .eask
+	$(EASK) --strict lint keywords
+
 .PHONY: lint
-lint: analyze lint.declare lint.package lint.regexps
+lint: analyze lint.checkdoc lint.declare lint.keywords lint.package lint.regexps
 
 # Compile is only used to check for byte-compilation errors/warnings. We remove the .elc files
 # afterward to avoid polluting the source directory and causing "source file newer than

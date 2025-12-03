@@ -32,21 +32,25 @@ ARGS will be forwarded."
     (apply method ollama args)))
 
 (cl-defmethod gptel--parse-buffer ((_backend macher-test-backend) &rest args)
+  "Parse buffer for macher-test-backend.  Delegates ARGS to Ollama."
   (apply #'macher--wrap-ollama-method #'gptel--parse-buffer args))
 
 (cl-defmethod gptel--parse-tool-results ((_backend macher-test-backend) &rest args)
+  "Parse tool results for macher-test-backend.  Delegates ARGS to Ollama."
   (apply #'macher--wrap-ollama-method #'gptel--parse-tool-results args))
 
 (cl-defmethod gptel--parse-response ((_backend macher-test-backend) response info)
+  "Parse RESPONSE with INFO for macher-test-backend.  Delegates to Ollama."
   (funcall #'macher--wrap-ollama-method #'gptel--parse-response response info))
 
 (cl-defmethod gptel--request-data ((_backend macher-test-backend) &rest args)
+  "Get request data for macher-test-backend.  Delegates ARGS to Ollama."
   (apply #'macher--wrap-ollama-method #'gptel--request-data args))
 
 (defun macher-test--send (preset prompt callback)
   "Send PROMPT with to the LLM with a macher PRESET applied.
 
-Invoke CALLBACK after the request completes. The response is handled in
+Invoke CALLBACK after the request completes.  The response is handled in
 the same way as with `gptel-send'."
   (macher--with-preset
    preset
