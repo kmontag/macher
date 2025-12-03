@@ -788,8 +788,6 @@ string function, potentially nil.
 
 Returns a workspace information string to be added to the request."
   (let* ((workspace (macher-workspace))
-         (workspace-type (car workspace))
-         (workspace-id (cdr workspace))
          (workspace-name (macher--workspace-name workspace))
          (workspace-files (macher--workspace-files workspace))
          ;; Extract normalized file paths from contexts for comparison.
@@ -905,8 +903,7 @@ without needing to put the full path in the buffer name."
          (workspace-id (cdr workspace))
          (hash-input (secure-hash 'sha256 (concat (format "%s" workspace-type) workspace-id)))
          (chars "abcdefghijklmnopqrstuvwxyz0123456789")
-         (hash-length (or length 16))
-         (result ""))
+         (hash-length (or length 16)))
     ;; Take the starting characters and map them to our character set.
     (dotimes (i hash-length result)
       (let* ((hex-char (aref hash-input i))
@@ -1131,16 +1128,13 @@ displays the patch buffer."
   (with-current-buffer (current-buffer)
     (display-buffer (current-buffer))))
 
-(defun macher--process-request (reason context fsm)
+(defun macher--process-request (_reason context fsm)
   "Process the macher CONTEXT throughout the request lifecycle.
 
 This is the default implementation of `macher-process-request-function'.
 It uses the `macher-patch-prepare-functions' and the
 `macher-patch-ready-hook' to create/handle a patch based on the changes
 made during the request.
-
-REASON is the reason that the processing function is being invoked. This
-argument is currently ignored.
 
 CONTEXT is the `macher-context' for the request being processed.
 
@@ -1222,7 +1216,6 @@ buffer and CREATED-P is t if the buffer was newly created, nil
 otherwise."
   (let* ((workspace (or workspace (macher-workspace)))
          (workspace-type (car workspace))
-         (workspace-id (cdr workspace))
          (workspace-name (macher--workspace-name workspace))
          (buffer-type-segment
           (if buffer-type
@@ -2117,7 +2110,6 @@ the 'xref-search-program' to perform the search."
              (lambda (entry)
                (let* ((file-path (car entry))
                       (contents (cdr entry))
-                      (orig-content (car contents))
                       (new-content (cdr contents)))
                  (and
                   ;; File has new content (not deleted).
@@ -3083,10 +3075,8 @@ otherwise returns (nil . nil)."
 
 ;;; Default Prompt Functions
 
-(defun macher--implement-prompt (input is-selected)
-  "Generate an implementation prompt for INPUT in the current buffer.
-
-IS-SELECTED specifies whether the input comes from the selected region."
+(defun macher--implement-prompt (input _is-selected)
+  "Generate an implementation prompt for INPUT in the current buffer."
   (let* ((workspace (macher-workspace))
          (filename (buffer-file-name))
          (relpath
@@ -3125,10 +3115,8 @@ IS-SELECTED specifies whether the input comes from the selected region."
              "\n\nIMPLEMENTATION REQUEST:\n\n%s")
             source-description input)))
 
-(defun macher--revise-prompt (input is-selected &optional patch-buffer)
+(defun macher--revise-prompt (input _is-selected &optional patch-buffer)
   "Generate a prompt for revising based on INPUT (revision instructions).
-
-IS-SELECTED specifies whether the input comes from the selected region.
 
 The contents of the PATCH-BUFFER (defaulting to the current workspace's
 patch buffer) are included in the generated prompt."
@@ -3158,28 +3146,22 @@ patch buffer) are included in the generated prompt."
               "")
             patch-content)))
 
-(defun macher--discuss-prompt (input is-selected)
+(defun macher--discuss-prompt (input _is-selected)
   "Generate a prompt for discussion based on INPUT.
-
-IS-SELECTED specifies whether the input comes from the selected region.
 
 Currently this is just a no-op transformation."
   input)
 
 
-(defun macher--patch-prepare-diff (context fsm callback)
+(defun macher--patch-prepare-diff (context _fsm callback)
   "Generate and add a diff to the current buffer for CONTEXT.
-CONTEXT is the macher-context object.
-FSM is the gptel-fsm struct for the request.
 CALLBACK must be called when preparation is complete."
   (let ((diff-text (macher--generate-patch-diff context)))
     (insert diff-text)
     (funcall callback)))
 
-(defun macher--patch-prepare-metadata (context fsm callback)
+(defun macher--patch-prepare-metadata (context _fsm callback)
   "Add metadata to the current patch buffer content for CONTEXT.
-CONTEXT is the macher-context object.
-FSM is the gptel-fsm struct for the request.
 CALLBACK must be called when preparation is complete."
   (let* ((workspace (macher-context-workspace context))
          (proj-name (macher--workspace-name workspace))
@@ -3193,8 +3175,6 @@ CALLBACK must be called when preparation is complete."
             (dotimes (_ 8 result)
               (let ((idx (random (length chars))))
                 (setq result (concat result (substring chars idx (1+ idx))))))))
-         (info (gptel-fsm-info fsm))
-         (data (plist-get info :data))
          (prompt (macher-context-prompt context))
          (header
           ;; Always start with the patch metadata header.
@@ -3825,8 +3805,7 @@ implements one possible workflow."
     (unless action-config
       (user-error (format "Unrecognized action: %s" action)))
 
-    (let* ((action-name (car action-config))
-           (action-function-or-plist (cdr action-config))
+    (let* ((action-function-or-plist (cdr action-config))
            (action-plist
             (if (functionp action-function-or-plist)
                 (apply action-function-or-plist action-args)
