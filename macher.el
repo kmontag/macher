@@ -903,9 +903,10 @@ without needing to put the full path in the buffer name."
          (workspace-id (cdr workspace))
          (hash-input (secure-hash 'sha256 (concat (format "%s" workspace-type) workspace-id)))
          (chars "abcdefghijklmnopqrstuvwxyz0123456789")
-         (hash-length (or length 16)))
+         (hash-length (or length 16))
+         (result ""))
     ;; Take the starting characters and map them to our character set.
-    (dotimes (i hash-length result)
+    (dotimes (i hash-length)
       (let* ((hex-char (aref hash-input i))
              (idx
               (mod
@@ -913,7 +914,8 @@ without needing to put the full path in the buffer name."
                    (- hex-char ?a -10)
                  (- hex-char ?0))
                (length chars))))
-        (setq result (concat result (substring chars idx (1+ idx))))))))
+        (setq result (concat result (substring chars idx (1+ idx))))))
+    result))
 
 (defun macher--action-buffer-setup-basic ()
   "Set up basic common behavior for action buffers.
