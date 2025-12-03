@@ -1242,7 +1242,7 @@ Otherwise, return nil if the buffer doesn't already exist.
 When WORKSPACE is nil, use the current buffer's workspace as determined
 by `macher-workspace'.
 
-Returns a cons cell (BUFFER .  CREATED-P) where BUFFER is the target
+Returns a cons cell (BUFFER . CREATED-P) where BUFFER is the target
 buffer and CREATED-P is t if the buffer was newly created, nil
 otherwise."
   (let* ((workspace (or workspace (macher-workspace)))
