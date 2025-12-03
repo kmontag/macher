@@ -37,6 +37,13 @@ lint.%: $(EASK) .eask
 .PHONY: lint
 lint: analyze lint.declare lint.package lint.regexps
 
+# Compile is only used to check for byte-compilation errors/warnings. We remove the .elc files
+# afterward to avoid polluting the source directory and causing "source file newer than
+# byte-compiled file" warnings during e.g. tests.
+.PHONY: compile
+compile: $(EASK) .eask
+	$(EASK) --strict compile; status=$$?; rm -f *.elc; exit $$status
+
 .PHONY: format
 format: format.elisp format.prettier
 

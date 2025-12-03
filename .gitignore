@@ -5,6 +5,7 @@
 /.github/terraform/terraform.tfstate
 /.github/terraform/terraform.tfstate.backup
 
-# Compiled demo images should be pushed to the `resources` branch, so that they can be referenced in
-# the README without bloating the main package branch.
 /demo/output/
+
+# Compilation artifacts.
+*.elc
