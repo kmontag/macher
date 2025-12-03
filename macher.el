@@ -2058,7 +2058,7 @@ with structure:
  ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)
 
 The search will be performed using `xref-matches-in-files', which uses
-the 'xref-search-program' to perform the search."
+the `xref-search-program' to perform the search."
   (require 'xref)
   (let* (
          ;; Set case-fold-search to enable case-insensitive search when needed. Note: xref uses
