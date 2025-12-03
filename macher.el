@@ -3489,8 +3489,8 @@ implementation details of the gptel preset system."
        :prompt-transform-functions nil)))
   "Alist of definitions for macher presets.
 
-Entries have the form (NAME . KEYS). NAME is the name to use (by
-default) when installing presets globally with `macher-install'. KEYS
+Entries have the form (NAME . KEYS).  NAME is the name to use (by
+default) when installing presets globally with `macher-install'.  KEYS
 are the keys to pass to `gptel-make-preset'.
 
 This list will be used to install presets globally, and also to create
@@ -3760,7 +3760,7 @@ This function registers three presets:
   no tools.
 
 NAMES is an optional alist of name overrides, whose entries are
-like (PRESET . NAME). PRESET is the preset's standard name symbol (e.g.
+like (PRESET . NAME).  PRESET is the preset's standard name symbol (e.g.
 ='macher-notools') and NAME is the symbol to actually register
 with gptel.  You can also pass a nil NAME to disable registering a preset
 globally.  For example:
