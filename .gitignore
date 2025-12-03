@@ -8,5 +8,4 @@
 /demo/output/
 
 # Compilation artifacts.
-/*-autoloads.el
 *.elc
