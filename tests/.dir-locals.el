@@ -10,4 +10,5 @@
      "subr-x"
      "./../.eask/gptel.el"
      "./../.eask/gptel-ollama.el"
-     "./../.eask/buttercup.el")))))
+     "./../.eask/buttercup.el"))
+   (sentence-end-double-space . t))))
