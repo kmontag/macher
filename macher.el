@@ -329,7 +329,7 @@ When generating the workspace context information, only up to this many
 files will be listed.
 
 Files from the gptel context are always included in the workspace
-context (even if their count exceeds this limit). Additional workspace
+context (even if their count exceeds this limit).  Additional workspace
 files will be included up to the remaining limit.
 
 Files are listed in the same order as returned by the workspace's files
@@ -339,7 +339,7 @@ alphabetical order.
 Set to nil to disable the limit entirely.
 
 Note: This value is used within the default `macher--context-string'
-function. If you customize `macher-context-string-function' to use a
+function.  If you customize `macher-context-string-function' to use a
 different function, this value will have no effect."
   :type '(choice (natnum :tag "Maximum number of files") (const :tag "No limit" nil))
   :group 'macher)
@@ -373,11 +373,11 @@ The function is called with three arguments:
 - FSM: the `gptel-fsm' (state machine) for the request.
 
 This function is only called for requests that actually create a
-`macher-context', i.e. requests with macher tools of some sort. The
+`macher-context', i.e. requests with macher tools of some sort.  The
 ='macher-notools' preset will not cause the hook to be called.
 
 The value of this variable will be stored at request-time and used
-throughout a particular request. This enables custom handling on a
+throughout a particular request.  This enables custom handling on a
 per-request basis."
   :type 'function
   :group 'macher)
@@ -388,7 +388,7 @@ per-request basis."
 
 Functions in this hook will be called inside an initially-empty
 temporary buffer (not the actual patch buffer), and should modify the
-buffer to contain the patch content. They will be called with three
+buffer to contain the patch content.  They will be called with three
 arguments:
 
 - CONTEXT: the `macher-context' associated with the request being
@@ -397,7 +397,7 @@ arguments:
 - FSM: the `gptel-fsm' struct for the request.
 
 - CALLBACK: a callback that must be called after the preparation step is
-  finished. This function can be called synchronously or asynchronously,
+  finished.  This function can be called synchronously or asynchronously,
   but it must be called in all cases.
 
 By default, the functions in this hook will populate the buffer with a
@@ -406,7 +406,7 @@ git-patch-style diff, and add metadata including the request prompt.
 If you want to add to this hook but also preserve the default behavior,
 make sure you call `add-hook' (or similar) _after_ requiring `macher'.
 If you call it beforehand, the default hook value will simply be
-ignored. If you're using `use-package', this means you should avoid the
+ignored.  If you're using `use-package', this means you should avoid the
 :hook keyword, and instead use `add-hook' in the :config section.
 
 This hook is run within the default `macher-process-request-function'.
@@ -423,7 +423,7 @@ is displayed when using macher actions that generate patches.
 
 This value controls the buffer-local setup that happens just after a
 patch buffer is created, and just before the
-`macher-patch-buffer-setup-hook' is fired. It effectively sets up a
+`macher-patch-buffer-setup-hook' is fired.  It effectively sets up a
 predefined \"pre\" function for the `macher-patch-buffer-setup-hook'.
 
 The choices are:
@@ -431,7 +431,7 @@ The choices are:
 - \\='diff - sets up `diff-mode', makes the buffer read-only, and adds
   buffer-local hooks to display the patch buffer when it's ready.
 
-- nil - don't perform any patch buffer setup. The patch buffer will
+- nil - don't perform any patch buffer setup.  The patch buffer will
   just be a `fundamental-mode' buffer which receives the patch content.
   Use this if you want full control over the patch buffer UI - you can
   customize the `macher-patch-buffer-setup-hook' and
@@ -447,12 +447,12 @@ The choices are:
   "Hook run when creating new macher patch buffers.
 
 Functions in this hook are called with no arguments in the newly created
-patch buffer. The buffer will already have its workspace set up (i.e.
+patch buffer.  The buffer will already have its workspace set up (i.e.
 `macher-workspace' can be used to get the associated workspace) and
 `default-directory' set to the workspace root.
 
 The base UI configuration is controlled by `macher-patch-buffer-ui'
-and is applied before this hook runs. This hook can be used for
+and is applied before this hook runs.  This hook can be used for
 additional customization on top of the base configuration.
 
 If you want full control over the patch buffer UI, set
@@ -467,7 +467,7 @@ setup from scratch."
 Functions in this hook will be called inside the patch buffer, with its
 contents initialized to the result of the
 `macher-patch-prepare-functions' (i.e. the contents of the temporary
-preparation buffer after running those functions). They will be called
+preparation buffer after running those functions).  They will be called
 with no arguments.
 
 The patch buffer's `default-directory' will be set to the workspace
@@ -475,9 +475,9 @@ root, and `macher-workspace' can be called to retrieve the associated
 workspace.
 
 The base UI configuration is controlled by `macher-patch-buffer-ui'
-and will modify this hook buffer-locally in the patch buffer. This is
+and will modify this hook buffer-locally in the patch buffer.  This is
 what handles setting up `diff-mode' and displaying the patch buffer when
-it's ready. If you set `macher-patch-buffer-ui' to nil, you'll probably
+it's ready.  If you set `macher-patch-buffer-ui' to nil, you'll probably
 also want to add something to this hook which at least displays the
 patch buffer.
 
@@ -499,7 +499,7 @@ This function is called with two arguments:
   create tools.
 
 The function should return a list of tools that provide read-only access
-to the workspace. Only tools created via the MAKE-TOOL-FUNCTION may be
+to the workspace.  Only tools created via the MAKE-TOOL-FUNCTION may be
 returned - these will be scoped to the current request, and will not be
 added to the global gptel registry."
   :type 'function
@@ -517,7 +517,7 @@ This function is called with two arguments:
   create tools.
 
 The function should return a list of tools that provide read/write access
-to the workspace. Only tools created via the MAKE-TOOL-FUNCTION may be
+to the workspace.  Only tools created via the MAKE-TOOL-FUNCTION may be
 returned - these will be scoped to the current request, and will not be
 added to the global gptel registry."
   :type 'function
@@ -581,7 +581,7 @@ representing the workspace type and PLIST contains the following keys:
 
 - :get-name - Function to get a descriptive name for the workspace.
 
-- :get-files - Function to get files in the workspace. Returned paths
+- :get-files - Function to get files in the workspace.  Returned paths
   can be absolute, or relative to the workspace root.
 
 All functions receive the workspace ID as a string argument, i.e. the
@@ -612,7 +612,7 @@ The workspace represents the conceptual space where the LLM edits files.
 From the LLM's perspective, when a request is made, the entire
 workspace is loaded into in-memory editing buffers.")
 
-;; Prevent the stored workspace from being cleared when changing major modes. See
+;; Prevent the stored workspace from being cleared when changing major modes.  See
 ;; `kill-all-local-variables'.
 (put 'macher--workspace 'permanent-local t)
 
@@ -638,21 +638,21 @@ or is aborted.")
   included).
 
   Note the prompt is captured via a prompt transform that gets appended
-  to 'gptel-prompt-transform-functions' when applying macher presets. If
+  to 'gptel-prompt-transform-functions' when applying macher presets.  If
   the prompt is modified by other transforms that get added later in the
   chain (e.g. via other presets), these modifications won't be picked
   up.
 
 - PROCESS-REQUEST-FUNCTION is the function to process the request
-  throughout its lifecycle. This will be set to the current value of
+  throughout its lifecycle.  This will be set to the current value of
   `macher-process-request-function' at the time a request is made.
 
 - DATA is an arbitrary user-defined data object that you can manipulate
   in custom tools.
 
 - DIRTY-P is a boolean flag indicating whether any changes have been
-  made to the workspace during the request. This defaults to nil and is
-  set to t by the edit tools when they make changes. Custom tools that
+  made to the workspace during the request.  This defaults to nil and is
+  set to t by the edit tools when they make changes.  Custom tools that
   make changes should set this flag explicitly."
   (contents nil)
   (workspace)
@@ -679,8 +679,8 @@ or is aborted.")
 - SOURCE is the source buffer where the action was initiated.
 
 - CONTEXT will be passed as the :context key when calling
-  `gptel-request'. This is a user-defined object that can be read from
-  the `gptel-fsm' (state machine) associated with the request. Functions
+  `gptel-request'.  This is a user-defined object that can be read from
+  the `gptel-fsm' (state machine) associated with the request.  Functions
   in `macher-before-action-functions' can modify this field."
   (action)
   (prompt)
@@ -749,7 +749,7 @@ The return value is always a cons cell of the form (TYPE . ID) where:
 
 If the buffer-local variable `macher--workspace` is nil, this function
 runs the functions in `macher-workspace-functions' until one returns a
-non-nil workspace cons cell. If no function returns a workspace,
+non-nil workspace cons cell.  If no function returns a workspace,
 it returns nil."
   (with-current-buffer (or buffer (current-buffer))
     (or macher--workspace (cl-some #'funcall macher-workspace-functions))))
