@@ -925,7 +925,7 @@ Returns a workspace information string to be added to the request."
 (defun macher--workspace-hash (workspace &optional length)
   "Generate a unique hash for WORKSPACE.
 
-LENGTH specifies the number of characters in the hash (default 16). This
+LENGTH specifies the number of characters in the hash (default 16).  This
 can be used, for example, to ensure unique buffer names per workspace,
 without needing to put the full path in the buffer name."
   (let* ((workspace-type (car workspace))
@@ -965,7 +965,7 @@ performed."
   "Set up a slightly more opinionated action buffer UI.
 
 This setup is shared among the symbol `default' and symbol `org' UI
-configurations. The function enables `gptel-mode' and sets up
+configurations.  The function enables `gptel-mode' and sets up
 auto-scrolling and line wrapping."
   ;; Enable gptel-mode for a nice header and LLM interaction feedback.
   (gptel-mode 1)
@@ -990,7 +990,7 @@ before running the `macher-action-buffer-setup-hook'."
      (macher--action-buffer-setup-ui)
      (macher--action-buffer-setup-basic))
     ('org
-     ;; Use org as the major mode. Tool output blocks will be auto-folded.
+     ;; Use org as the major mode.  Tool output blocks will be auto-folded.
      (require 'gptel-org)
      (org-mode)
      (macher--action-buffer-setup-ui)
@@ -1006,7 +1006,7 @@ before running the `macher-action-buffer-setup-hook'."
 
 This is added buffer-locally (in the action buffer) to the
 `macher-before-action-functions' when using any of the predefined
-`macher-action-buffer-ui' configurations. If you set
+`macher-action-buffer-ui' configurations.  If you set
 `macher-action-buffer-ui' to nil, this function will never be called.
 
 This function takes an EXECUTION object (a `macher-action-execution'
@@ -1021,7 +1021,7 @@ It adapts the prompt formatting based on the current major mode."
          (summary (macher-action-execution-summary execution))
          (action (macher-action-execution-action execution))
          (action-str (symbol-name action))
-         ;; Use some custom formatting if we're in org mode. Otherwise, format for markdown.
+         ;; Use some custom formatting if we're in org mode.  Otherwise, format for markdown.
          (is-org-mode (derived-mode-p 'org-mode))
          (header-prefix
           (if is-org-mode
@@ -1081,12 +1081,12 @@ It adapts the prompt formatting based on the current major mode."
 
 This is added buffer-locally (in the action buffer) to the
 `macher-after-action-functions' when using the `basic', `default', or
-`org' UI configurations. If you set `macher-action-buffer-ui' to nil,
+`org' UI configurations.  If you set `macher-action-buffer-ui' to nil,
 this function will never be called.
 
 The function just inserts the prefix for the next prompt if it wasn't
 already inserted by gptel - that is, if the request was aborted or ended
-in an error. The marker info from the gptel FSM is used for placement."
+in an error.  The marker info from the gptel FSM is used for placement."
   (let* ((info (gptel-fsm-info fsm))
          ;; This should always be present.
          (start-marker (plist-get info :position))
@@ -1102,7 +1102,7 @@ in an error. The marker info from the gptel FSM is used for placement."
 
         (when-let ((prefix (alist-get major-mode gptel-prompt-prefix-alist)))
           ;; Check if we're at the end of the gptel prompt prefix, i.e. the one that was just
-          ;; inserted due to the completion of the request. If not (this is the case if the request
+          ;; inserted due to the completion of the request.  If not (this is the case if the request
           ;; ended with an error or abort), insert it so we're prepared for the next prompt.
           (unless (and (>= (point) (length prefix))
                        (string=
@@ -1154,7 +1154,7 @@ displays the patch buffer."
   (when (derived-mode-p 'diff-mode)
     (diff-setup-buffer-type))
 
-  ;; Display the buffer. Do this in a no-op buffer context to avoid changing the actual current
+  ;; Display the buffer.  Do this in a no-op buffer context to avoid changing the actual current
   ;; buffer.
   (with-current-buffer (current-buffer)
     (display-buffer (current-buffer))))
@@ -1233,7 +1233,7 @@ CONTEXT and FSM are the same as passed to the
 (defun macher--get-buffer (buffer-type &optional workspace create)
   "Get a macher buffer with BUFFER-TYPE associated with WORKSPACE.
 
-BUFFER-TYPE can be any string or nil. The return value for a given
+BUFFER-TYPE can be any string or nil.  The return value for a given
 BUFFER-TYPE is shared across all files in the same workspace.
 
 If CREATE is non-nil, create the buffer if it doesn't already exist.
@@ -1242,7 +1242,7 @@ Otherwise, return nil if the buffer doesn't already exist.
 When WORKSPACE is nil, use the current buffer's workspace as determined
 by `macher-workspace'.
 
-Returns a cons cell (BUFFER . CREATED-P) where BUFFER is the target
+Returns a cons cell (BUFFER .  CREATED-P) where BUFFER is the target
 buffer and CREATED-P is t if the buffer was newly created, nil
 otherwise."
   (let* ((workspace (or workspace (macher-workspace)))
@@ -1334,9 +1334,9 @@ Ensures paths are consistently handled throughout the codebase."
   "Prepare editing buffers for any workspace files that are in the gptel context.
 
 CONTEXTS is the list of gptel contexts as passed to the context string
-function. MACHER-CONTEXT is a `macher-context' struct. This function
+function.  MACHER-CONTEXT is a `macher-context' struct.  This function
 creates implementation buffers for any files that are within both the
-gptel context and the current workspace. This ensures that those
+gptel context and the current workspace.  This ensures that those
 workspace file contents are frozen at request time, even if the files
 are modified on disk before editing operations occur - that is, it
 ensures that the LLM can trust that file contents provided to it in the
@@ -1359,11 +1359,11 @@ context won't change before it can edit them."
 (defun macher--resolve-workspace-path (workspace rel-path)
   "Get the full path for REL-PATH within the WORKSPACE.
 
-The path will be resolved relative to the workspace root. '.' and '..'
+The path will be resolved relative to the workspace root.  '.' and '..'
 are handled as standard relative path segments.
 
 Raises an error if the LLM doesn't have permission to interact with the
-path. Specifically, an error is thrown if:
+path.  Specifically, an error is thrown if:
 
 - The path resolves somewhere outside the workspace root, and isn't
   present in the workspace's files list.
@@ -1385,13 +1385,13 @@ filename, and in practice it would be unexpected for the LLM to pass
 them in.
 
 Note also that paths outside the workspace root are allowed _if_ they
-appear in the workspace's files list. This won't be the case for the
+appear in the workspace's files list.  This won't be the case for the
 built-in workspace types, but might be relevant for custom workspace
 types."
   (let* (
          ;; We don't really want to deal with the `file-truename', as this would resolve symlinks
          ;; and might mess up the path structure when dealing with relative paths like
-         ;; "../sibling-dir-in-custom-workspace/". However, we will be using `expand-file-name' to
+         ;; "../sibling-dir-in-custom-workspace/".  However, we will be using `expand-file-name' to
          ;; resolve the path, which expands some path components like "~" into real directories -
          ;; so, in order to more easily check whether the resolved path is inside the workspace
          ;; root, we expand these components immediately.
@@ -1471,16 +1471,16 @@ types."
 - CONTENT is the full string content to read from.
 
 - OFFSET, if provided, specifies the line number to start reading
-  from (1-based). For negative values, starts at that many lines before
+  from (1-based).  For negative values, starts at that many lines before
   the end of the file.
 
 - LIMIT, if provided, specifies the number of lines to read from the
-  start position. For negative values, the actual limit is computed as
-  (total_lines + limit). For example, with a 100-line file: limit=10
+  start position.  For negative values, the actual limit is computed as
+  (total_lines + limit).  For example, with a 100-line file: limit=10
   reads 10 lines, limit=-10 reads 90 lines (100 + (-10)).
 
 - SHOW-LINE-NUMBERS, if non-nil, formats output in cat -n style with
-  line numbers. Lines are formatted as \"[spaces for alignment][line
+  line numbers.  Lines are formatted as \"[spaces for alignment][line
   number][tab][line content]\".
 
 If neither OFFSET nor LIMIT is provided, returns the full content.
@@ -1525,8 +1525,8 @@ Returns the processed content as a string."
        (show-line-numbers
         ;; Format with line numbers (cat -n style).
         (let* ((actual-start-line (1+ start-idx))
-               ;; `cat -n` includes the trailing newline if present, but doesn't number it. We
-               ;; handle this as a special case. If:
+               ;; `cat -n` includes the trailing newline if present, but doesn't number it.  We
+               ;; handle this as a special case.  If:
                ;;
                ;; - the last line is empty
                ;; - we're looking at the actual last line of the content (i.e. not a blank line in
@@ -1589,7 +1589,7 @@ If SET-DIRTY-P is non-nil, sets the dirty-p flag on the context."
             "Get or create contents for FILE-PATH in the current context.
 
 Returns a cons cell (orig-content . new-content) of strings for the
-file. Also updates the context's :contents alist."
+file.  Also updates the context's :contents alist."
             (let ((full-path (funcall resolve-workspace-path file-path)))
               (macher-context--contents-for-file full-path context))))
          (full-path (funcall resolve-workspace-path path))
@@ -1605,7 +1605,7 @@ file. Also updates the context's :contents alist."
       ;; Call the callback with the file content.
       (funcall callback full-path new-content))))
 
-;; The workspace tools are somewhat inspired by the reference filesystem MCP. See
+;; The workspace tools are somewhat inspired by the reference filesystem MCP.  See
 ;; https://github.com/modelcontextprotocol/servers/blob/main/src/filesystem/README.md.
 
 (defun macher--tool-read-file (context path &optional offset limit show-line-numbers)
@@ -1623,8 +1623,8 @@ LIMIT, if provided, specifies the number of lines to read.
 SHOW-LINE-NUMBERS, if non-nil, formats output in cat -n style with line numbers.
 
 Returns the file contents as a string, with optional
-offset/limit/show-line-numbers processing. For symlinks, returns the target
-path instead of following the link. Signals an error if the file is not
+offset/limit/show-line-numbers processing.  For symlinks, returns the target
+path instead of following the link.  Signals an error if the file is not
 found in the workspace."
   (let* ((workspace (macher-context-workspace context))
          (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
@@ -1642,7 +1642,7 @@ found in the workspace."
        path
        (lambda (_full-path new-content)
          ;; Some LLMs (for example qwen3-coder at time of writing) seem to have trouble invoking
-         ;; tools with integer inputs - they'll always pass e.g. '1.0' instead of '1'. Therefore we
+         ;; tools with integer inputs - they'll always pass e.g. '1.0' instead of '1'.  Therefore we
          ;; need to support float inputs, which in general we handle by rounding to the nearest
          ;; integer.
          (let* ((parsed-offset
@@ -1673,7 +1673,7 @@ RECURSIVE, if non-nil, recursively lists subdirectories.
 
 SIZES, if non-nil, includes file sizes in the output.
 
-Returns a formatted string listing the directory contents. Files are
+Returns a formatted string listing the directory contents.  Files are
 prefixed with \"file:\" and directories with \"dir:\" to be clear to
 LLMs.
 
@@ -1901,8 +1901,8 @@ NEW-TEXT is the replacement text.
 REPLACE-ALL, if non-nil, replaces all occurrences; otherwise errors if
 multiple matches exist.
 
-Returns nil on success. Signals an error if the file is not found or if
-the edit operation fails. Sets the dirty-p flag on the context to
+Returns nil on success.  Signals an error if the file is not found or if
+the edit operation fails.  Sets the dirty-p flag on the context to
 indicate changes."
   ;; Handle :json-false inputs for replace-all parameter.
   (let ((replace-all (and replace-all (not (eq replace-all :json-false)))))
@@ -1930,19 +1930,19 @@ CONTEXT is a `macher-context' struct containing workspace information.
 PATH is the path to the file, relative to the workspace root.
 
 EDITS is a vector of edit operations, each containing :old_string and
-:new_string. For compatibility with LLMs that don't support array
+:new_string.  For compatibility with LLMs that don't support array
 arguments, a JSON string representing an array is also accepted.
 
-All edits are applied in sequence to the same file. Each edit requires
-exact whitespace matching. If any edit fails, the entire operation
+All edits are applied in sequence to the same file.  Each edit requires
+exact whitespace matching.  If any edit fails, the entire operation
 fails.
 
-Returns nil on success. Signals an error if the file is not found or if
-any edit operation fails. Sets the dirty-p flag on the context to
+Returns nil on success.  Signals an error if the file is not found or if
+any edit operation fails.  Sets the dirty-p flag on the context to
 indicate changes."
-  ;; Validate that edits is a vector, i.e. a JSON array. Ideally the argument should
+  ;; Validate that edits is a vector, i.e. a JSON array.  Ideally the argument should
   ;; have been sent as an actual array, but some LLMs seem to have trouble with this,
-  ;; and instead send JSON strings which decode to an array. Allow both cases, as
+  ;; and instead send JSON strings which decode to an array.  Allow both cases, as
   ;; although the string case technically violates the tool signature, we can still
   ;; handle it unambiguously.
   (unless (vectorp edits)
@@ -1997,7 +1997,7 @@ CONTENT is the complete new content for the file.
 Use with caution as it will overwrite existing files without warning.
 Handles text content with proper encoding.
 
-Returns nil on success. Sets the dirty-p flag on the context to indicate
+Returns nil on success.  Sets the dirty-p flag on the context to indicate
 changes."
   (let* ((workspace (macher-context-workspace context))
          (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
@@ -2018,11 +2018,11 @@ SOURCE-PATH is the source path relative to the workspace root.
 DESTINATION-PATH is the destination path relative to the workspace root.
 
 Can move files between directories and rename them in a single operation.
-If the destination exists, the operation will fail. Works across different
+If the destination exists, the operation will fail.  Works across different
 directories and can be used for simple renaming within the same directory.
 
-Returns nil on success. Signals an error if the source file is not found or
-if the destination already exists. Sets the dirty-p flag on the context to
+Returns nil on success.  Signals an error if the source file is not found or
+if the destination already exists.  Sets the dirty-p flag on the context to
 indicate changes."
   (let* ((workspace (macher-context-workspace context))
          (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
@@ -2054,7 +2054,7 @@ REL-PATH is the path to the file, relative to the workspace root.
 The file must exist and will be marked for deletion in the patch.
 Permanently removes the file from the workspace.
 
-Returns nil on success. Signals an error if the file is not found.
+Returns nil on success.  Signals an error if the file is not found.
 Sets the dirty-p flag on the context to indicate changes."
   ;; Use the helper function to delete the file.
   (macher--with-workspace-file context rel-path
@@ -2090,7 +2090,7 @@ The search will be performed using `xref-matches-in-files', which uses
 the `xref-search-program' to perform the search."
   (require 'xref)
   (let* (
-         ;; Set case-fold-search to enable case-insensitive search when needed. Note: xref uses
+         ;; Set case-fold-search to enable case-insensitive search when needed.  Note: xref uses
          ;; `grep-expand-template' to generate the command, which performs a case-insensitive search
          ;; if/only if `case-fold-search' is truthy and `isearch-no-upper-case-p' is true for the
          ;; regexp in question.
@@ -2212,7 +2212,7 @@ the `xref-search-program' to perform the search."
                        ;; won't change before they're accessed.
                        (_ (macher-context--contents-for-file original-file context))
                        ;; Always show results relative to workspace root (like grep relative to
-                       ;; cwd). Special case: if path points to a single file, show the original
+                       ;; cwd).  Special case: if path points to a single file, show the original
                        ;; path parameter.
                        (rel-path
                         (if (and path
@@ -2233,7 +2233,7 @@ the `xref-search-program' to perform the search."
                         ;; Note this pushes to the beginning of the list.
                         (push (cons rel-path (list match)) results)))))))
 
-            ;; Return the results - temp files are cleaned up in the unwind-protect. Each entry was
+            ;; Return the results - temp files are cleaned up in the unwind-protect.  Each entry was
             ;; prepended to the results array, so we need to use `reverse' to restore the original
             ;; order of the workspace's file list.
             (reverse results))
@@ -2321,7 +2321,7 @@ The inner lists of the MATCHES-ALIST contain `xref-match-item' structs."
                 (let*
                     ((file-content
                       (if entry
-                          ;; File is in context, use the current content (new-content). Note: deleted
+                          ;; File is in context, use the current content (new-content).  Note: deleted
                           ;; files (where new-content is nil) are filtered out during the search phase, so
                           ;; we should never encounter them here, but it doesn't really matter if we do -
                           ;; we'll just have nil file-content in that case.
@@ -2413,7 +2413,7 @@ The inner lists of the MATCHES-ALIST contain `xref-match-item' structs."
                                   (setq output (concat output line-format))
                                   (setq i (1+ i)))))))))))
 
-              ;; Simple content mode without before/after lines. In this case, xref has already
+              ;; Simple content mode without before/after lines.  In this case, xref has already
               ;; loaded enough information to render each line, so we don't need to read the entire
               ;; file/split it into lines.
               (let ((processed-lines (make-hash-table :test 'eq)))
@@ -2484,7 +2484,7 @@ Keyword arguments:
 
 - HEAD-LIMIT: limits output to first N lines (like `head -N`).
 
-Returns formatted search results as a string. Considers workspace context
+Returns formatted search results as a string.  Considers workspace context
 including any pending changes, creations, or deletions.
 
 HEAD-LIMIT applies to the final formatted output and works exactly like
@@ -2497,7 +2497,7 @@ piping the results through `head -N`."
     (when (and head-limit (< head-limit 0))
       (error "Head-limit cannot be negative"))
 
-    ;; Handle float inputs by rounding to integers, like the read tool does. Some LLMs seem to have
+    ;; Handle float inputs by rounding to integers, like the read tool does.  Some LLMs seem to have
     ;; trouble invoking tools with integer inputs.
     (let* ((parsed-lines-after
             (when lines-after
@@ -2583,7 +2583,7 @@ mode only).
 HEAD-LIMIT limits output to first N lines (equivalent to piping through
 `head -N`).
 
-Returns formatted search results as a string. Considers workspace
+Returns formatted search results as a string.  Considers workspace
 context including any pending changes, creations, or deletions."
   (macher--tool-search-helper
    context
@@ -2896,7 +2896,7 @@ the global gptel registry when the request completes."
 (defun macher--edit-string (content old-string new-string &optional replace-all)
   "In CONTENT string, replace OLD-STRING with NEW-STRING.
 
-If REPLACE-ALL is non-nil, replace all occurrences. Otherwise, error if
+If REPLACE-ALL is non-nil, replace all occurrences.  Otherwise, error if
 multiple matches exist and replace only single occurrences.
 
 Return the new content string if the replacement was successful, or signal
@@ -2929,7 +2929,7 @@ an error if it was not."
           (error
            (concat
             "Found %d matches of the string to replace, but replace_all is false. "
-            "To replace all occurrences, set replace_all to true. To replace only one "
+            "To replace all occurrences, set replace_all to true.  To replace only one "
             "occurrence, please provide more context to uniquely identify the instance")
            matches))
          (t
@@ -2953,7 +2953,7 @@ an error if it was not."
 
 (defun macher--generate-patch-diff (context)
   "Generate a raw diff to populate the patch buffer.
-CONTEXT is the `macher-context' object. Returns the generated diff text."
+CONTEXT is the `macher-context' object.  Returns the generated diff text."
   (let* ((contents-alist (macher-context-contents context))
          (workspace (macher-context-workspace context))
          (base-dir (macher--workspace-root workspace))
@@ -3022,7 +3022,7 @@ CONTEXT is the `macher-context' object. Returns the generated diff text."
 (defun macher-context--set-new-content-for-file (path content context)
   "Set the new content for PATH to CONTENT in the given CONTEXT.
 
-PATH is any absolute file path. By default, macher will only call this
+PATH is any absolute file path.  By default, macher will only call this
 for paths within the CONTEXT's workspace..
 
 CONTENT is the string content to use for the file, or nil if the file
@@ -3041,7 +3041,7 @@ Updates the CONTEXT's :contents alist with the new content mapping."
         (let ((contents (cdr existing-entry)))
           (setcdr contents content)
           contents)
-      ;; Create new entry. For new files, orig-content is nil.
+      ;; Create new entry.  For new files, orig-content is nil.
       (let* ((orig-content
               (if (file-exists-p normalized-path)
                   (with-temp-buffer
@@ -3061,7 +3061,7 @@ Updates the CONTEXT's :contents alist with the new content mapping."
 
 Returns a cons cell \\=(orig-content new-content).
 
-PATH can be any absolute file path. By default, macher will only call
+PATH can be any absolute file path.  By default, macher will only call
 this for paths within the CONTEXT's workspace.
 
 Returns a cons cell (orig-content . new-content) of strings for the file.
@@ -3069,7 +3069,7 @@ If the orig-content is nil, the file is being created; if the new-content
 is nil, the file is being deleted.
 
 Also updates the CONTEXT's :contents alist if the relevant entry was not
-yet present. In that case, loads file contents if the file exists;
+yet present.  In that case, loads file contents if the file exists;
 otherwise returns (nil . nil)."
   (cl-assert (macher-context-p context) nil "CONTEXT must be a macher-context struct")
   ;; Normalize the path for consistent lookup.
@@ -3197,7 +3197,7 @@ CALLBACK must be called when preparation is complete."
   (let* ((workspace (macher-context-workspace context))
          (proj-name (macher--workspace-name workspace))
          (initial-text (buffer-string))
-         ;; Generate a unique patch ID as a random 8-character alphanumeric string. The result here
+         ;; Generate a unique patch ID as a random 8-character alphanumeric string.  The result here
          ;; isn't really important - it's just used to help the LLM link the prompt with its
          ;; eventual generated patch.
          (patch-id
@@ -3239,12 +3239,12 @@ CALLBACK must be called when preparation is complete."
 ;;; Tool Management
 ;;
 ;; We use a potentially-too-clever overload of the :category field on gptel tool objects to allow
-;; the `macher-context' to be retrieved from existing tool definitions. Normally the :category is
+;; the `macher-context' to be retrieved from existing tool definitions.  Normally the :category is
 ;; expected to be a string, but since we're not adding tools to the global registry, it should
 ;; hopefully never be accessed elsewhere.
 ;;
 ;; This enables sharing of the `macher-context' across all tools for a request, even when they're
-;; added across multiple presets. It also allows for sensible merging of tools with request forms
+;; added across multiple presets.  It also allows for sensible merging of tools with request forms
 ;; like "@macher-ro @macher my query".
 
 (defun macher--tool-context (tool)
@@ -3274,7 +3274,7 @@ PRESET is a gptel spec containing at least the :tools and
 these fields in the environment at this point.
 
 TOOLS-FUNCTION is a function that accepts two arguments: CONTEXT and
-MAKE-TOOL-FUNCTION. The correct `macher-context' will be extracted from
+MAKE-TOOL-FUNCTION.  The correct `macher-context' will be extracted from
 any existing macher tools, or created if no matching tools are present.
 
 If any tools with the same name as the generated ones are present in
@@ -3324,8 +3324,8 @@ completion, and storing the outgoing FSM in `macher--fsm-latest'.
 
 Returns a cons cell (macher-context . updated-preset).
 
-If no workspace can be determined from the current buffer, returns (nil
-. preset) with no modifications"
+If no workspace can be determined from the current buffer, returns
+\(nil . preset) with no modifications."
 
   (if-let ((workspace (macher-workspace)))
     (let* ((context (macher--make-context :workspace workspace))
@@ -3370,7 +3370,7 @@ If no workspace can be determined from the current buffer, returns (nil
            (prompt-transform-termination-handler
             (lambda (fsm) (macher--add-termination-handler fsm termination-handler)))
 
-           ;; Global transforms list including our custom ones. Note that our custom transforms
+           ;; Global transforms list including our custom ones.  Note that our custom transforms
            ;; won't actually modify the prompt - they're simply there to capture information and
            ;; hook into the request lifecycle.
            (updated-prompt-transforms
@@ -3395,26 +3395,26 @@ If no workspace can be determined from the current buffer, returns (nil
   "Get a spec for a gptel preset whose values are set dynamically.
 
 - SPEC-FUNCTION is a function which returns a partial spec based on the
-  current environment. This spec should only contain keys that directly
+  current environment.  This spec should only contain keys that directly
   correspond to gptel variables, e.g. :use-tools,
   :prompt-transform-functions, etc.
 
 - BASELINE-SPEC is the baseline preset specification (minus :pre and :post
-  functions). Keys returned by SPEC-FUNCTION should appear in this baseline
+  functions).  Keys returned by SPEC-FUNCTION should appear in this baseline
   definition.
 
 For the moment, this function is a bit of a hack, and dependent on some
 implementation details of the gptel preset system."
-  ;; Local value to store the spec between invocations of the created pre/post functions. We assume
+  ;; Local value to store the spec between invocations of the created pre/post functions.  We assume
   ;; that these functions will always be called in succession, i.e. if :pre is called, :post will be
   ;; called synchronously afterwards, with no other calls to :pre in between.
   ;;
   ;; We (ab)use the fact that, between the :pre and :post functions, `gptel--apply-preset' will use
   ;; its provided setter to set the values of all the 'gptel-*' variables associated with the
-  ;; baseline spec. Although the provided setter won't always be a normal `set', it appears that it
-  ;; will always work such that using normal `set' in the :post function will behave correctly. In
+  ;; baseline spec.  Although the provided setter won't always be a normal `set', it appears that it
+  ;; will always work such that using normal `set' in the :post function will behave correctly.  In
   ;; some cases, `gptel--apply-preset' will run with a buffer-local setter, after which we can use
-  ;; `set' and still only affect the buffer-local value. In the setter associated with the transient
+  ;; `set' and still only affect the buffer-local value.  In the setter associated with the transient
   ;; menu's oneshot setting, a post-response hook is added to reset to the original value, so it
   ;; doesn't matter if we change it again in :post.
   ;;
@@ -3494,7 +3494,7 @@ default) when installing presets globally with `macher-install'. KEYS
 are the keys to pass to `gptel-make-preset'.
 
 This list will be used to install presets globally, and also to create
-ephemeral presets when using workspace actions. These ephemeral presets
+ephemeral presets when using workspace actions.  These ephemeral presets
 allow us to reuse gptel's preset functionality when making requests
 programmatically, without relying on certain names or config existing in
 the global state.")
@@ -3503,7 +3503,7 @@ the global state.")
   "Run the CALLBACK with the macher PRESET applied.
 
 PRESET is a key from the `macher--presets-alist', or a raw preset spec
-like \\='(:use-tools t). Note that this function does not accept a name
+like \\='(:use-tools t).  Note that this function does not accept a name
 from the global gptel registry - it's for cases where you want to use a
 well-defined preset independent of how gptel is currently configured.
 
@@ -3512,7 +3512,7 @@ CALLBACK takes no arguments."
          (if (symbolp preset)
              (cdr (assq preset macher--presets-alist))
            preset)))
-    ;; Adapted from `gptel-with-preset'. Currently that macro sets all symbol values to nil before
+    ;; Adapted from `gptel-with-preset'.  Currently that macro sets all symbol values to nil before
     ;; applying the preset (since it doesn't expect dynamic values), but we want to pull in
     ;; existing values, so we can extend rather than overwrite things like 'gptel-tools'.
     (let* ((preset-syms (gptel--preset-syms spec))
@@ -3576,14 +3576,14 @@ The HANDLER will receive one argument when the request terminates
 successfully or otherwise:
 
 - FSM: the `gptel-fsm' struct for the request (the same one passed to
-  this function). This can be used to extract a more specific
+  this function).  This can be used to extract a more specific
   termination reason - for example, standard gptel requests will end up
   in the the ='DONE' or ='ERRS' state, which can be extracted from the FSM.
 
 The request is considered to have terminated when the FSM reaches a
 state with no possible transitions to another state."
   (let* (
-         ;; An alist of states mapped to potential next states. See `gptel-request--transitions'.
+         ;; An alist of states mapped to potential next states.  See `gptel-request--transitions'.
          (transitions (gptel-fsm-table fsm))
 
          ;; An alist of states mapped to their handler functions.
@@ -3599,7 +3599,7 @@ state with no possible transitions to another state."
          ;; Filter down to states that either don't appear as keys, or appear as keys but have no
          ;; possible next states - that is, states which can't transition to any other states.
          ;;
-         ;; In the case of 'gptel-request--transitions', this will be '(DONE ERRS). This is
+         ;; In the case of 'gptel-request--transitions', this will be '(DONE ERRS).  This is
          ;; currently the only transitions list used by gptel, but this logic ensures we catch
          ;; termination even when using a custom list.
          (terminal-states
@@ -3641,7 +3641,7 @@ The HANDLER will receive one argument:
 The handler will be called once for each state transition throughout the
 request lifecycle."
   (let* (
-         ;; An alist of states mapped to potential next states. See `gptel-request--transitions'.
+         ;; An alist of states mapped to potential next states.  See `gptel-request--transitions'.
          (transitions (gptel-fsm-table fsm))
 
          ;; An alist of states mapped to their handler functions.
@@ -3687,12 +3687,12 @@ successfully or otherwise:
   example, standard gptel requests will end up in the the ='DONE' or ='ERRS'
   state, which can be extracted using `gptel-fsm-state'.
 
-This is a thin wrapper around `gptel-request'. The PROMPT and KEYS will
-be passed directly to `gptel-request'. Note that the CALLBACK parameter
+This is a thin wrapper around `gptel-request'.  The PROMPT and KEYS will
+be passed directly to `gptel-request'.  Note that the CALLBACK parameter
 here is different than the :callback key accepted by `gptel-request',
 which might also be included."
   (let* (
-         ;; Get the transforms that were already passed (possibly nil). Note gptel generally expects
+         ;; Get the transforms that were already passed (possibly nil).  Note gptel generally expects
          ;; callers to pass `gptel-prompt-transform-functions' for this argument, but we don't make
          ;; any assumptions here.
          (transforms (plist-get keys :transforms))
@@ -3720,7 +3720,7 @@ which might also be included."
                 ;; Send the request and get the state machine.
                 (fsm (apply #'gptel-request prompt keys))
 
-                ;; Extract the actual gptel callback for handling responses. By default this will
+                ;; Extract the actual gptel callback for handling responses.  By default this will
                 ;; generally be gptel--insert-response or gptel-curl--stream-insert-response.
                 (info (gptel-fsm-info fsm))
                 (fsm-callback (plist-get info :callback))
@@ -3750,7 +3750,7 @@ gptel request using the \"@preset\" syntax, for example:
 This function registers three presets:
 
 - @macher: Send contextual information about the workspace + tools to
-  read files and propose edits. At the end of the request, update the
+  read files and propose edits.  At the end of the request, update the
   patch buffer.
 
 - @macher-ro: Send contextual information about the workspace + tools to
@@ -3762,8 +3762,8 @@ This function registers three presets:
 NAMES is an optional alist of name overrides, whose entries are
 like (PRESET . NAME). PRESET is the preset's standard name symbol (e.g.
 ='macher-notools') and NAME is the symbol to actually register
-with gptel. You can also pass a nil NAME to disable registering a preset
-globally. For example:
+with gptel.  You can also pass a nil NAME to disable registering a preset
+globally.  For example:
 
 \\='((macher . m) (macher-ro . mr) (macher-notools . nil))"
 
@@ -3817,7 +3817,7 @@ When called interactively, prompts the user to select an ACTION from
 those available in the `macher-actions-alist'.
 
 Note that macher presets can be used with any gptel request, and you
-don't need to use this function to use macher. This function simply
+don't need to use this function to use macher.  This function simply
 implements one possible workflow."
   (interactive (let* ((actions (mapcar #'car macher-actions-alist))
                       (action-names (mapcar #'symbol-name actions))
@@ -3876,12 +3876,12 @@ implements one possible workflow."
                                (error-type (plist-get error :type))
                                (error-msg (plist-get error :message)))
                           (or error-msg (format "%s: %s" error-type http-msg))))
-                       ;; Otherwise, consider the request successful. In practice the state should
+                       ;; Otherwise, consider the request successful.  In practice the state should
                        ;; always be 'DONE here.
                        (t
                         nil))))
 
-                  ;; Call the original callback if provided. Don't change the buffer for this, to
+                  ;; Call the original callback if provided.  Don't change the buffer for this, to
                   ;; avoid any potential issues with killed buffers.
                   (when (functionp callback)
                     (funcall callback error execution fsm))
@@ -3901,7 +3901,7 @@ implements one possible workflow."
            preset
            (lambda ()
              ;; Just like `gptel-send', but with a prompt specified directly, and with the callback on
-             ;; termination. Use the potentially modified prompt and context from the execution
+             ;; termination.  Use the potentially modified prompt and context from the execution
              ;; object.
              (macher--gptel-request request-callback
                                     (macher-action-execution-prompt execution)
@@ -3934,15 +3934,15 @@ BUF defaults to the current buffer if not specified."
   "Process (e.g. display a patch for) the latest macher request.
 
 Extracts the macher context from the FSM and calls the configured
-`macher-process-request-function'. You can use this, for example, to
+`macher-process-request-function'.  You can use this, for example, to
 show the patch associated with an in-progress or aborted request.
 
-REASON is the reason that the processing function is being invoked. This
-will be forwarded to the `macher-process-request-function'. Defaults to
+REASON is the reason that the processing function is being invoked.  This
+will be forwarded to the `macher-process-request-function'.  Defaults to
 ='interactive' when called interactively, or any custom value can be
 provided.
 
-FSM is an optional `gptel-fsm' (state machine) for the request. If not
+FSM is an optional `gptel-fsm' (state machine) for the request.  If not
 provided, defaults the most recent macher request for the current
 buffer (i.e. the local value of `macher--fsm-latest')."
   (interactive (list 'interactive))
@@ -3984,7 +3984,7 @@ When called non-interactively, INSTRUCTIONS can be a string or nil.
 If nil, the user will be prompted.
 
 If CALLBACK is provided, it will be called when the implementation
-process completes. The callback will receive three arguments: ERROR (nil
+process completes.  The callback will receive three arguments: ERROR (nil
 on success, a string error description on failure, or the symbol ='abort'
 if the request was aborted), EXECUTION (the `macher-action-execution'
 object for the action), and FSM (the `gptel-fsm' object for the request)."
@@ -4005,7 +4005,7 @@ The function identifies the patch buffer associated with the current buffer's
 project and sends a revision request based on the provided instructions.
 
 If CALLBACK is provided, it will be called when the revision process
-completes. The callback will receive three arguments: ERROR (nil on
+completes.  The callback will receive three arguments: ERROR (nil on
 success, or an error description on failure), EXECUTION (the
 `macher-action-execution' object for the action), and FSM (the
 `gptel-fsm' object for the request)."
@@ -4019,14 +4019,14 @@ success, or an error description on failure), EXECUTION (the
 When called interactively, get the question from the selected region or
 prompt for it in the minibuffer.
 
-When called non-interactively, QUESTION can be a string or nil. If nil,
+When called non-interactively, QUESTION can be a string or nil.  If nil,
 the user will be prompted.
 
 This creates a conversational request without proposing any changes
 to the codebase.
 
 If CALLBACK is provided, it will be called when the discussion
-completes. The callback will receive three arguments: ERROR (nil on
+completes.  The callback will receive three arguments: ERROR (nil on
 success, or an error description on failure), EXECUTION (the
 `macher-action-execution' object for the action), and FSM (the
 `gptel-fsm' object for the request)."
