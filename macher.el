@@ -3823,18 +3823,6 @@ implements one possible workflow."
       (unless action-config
         (error "Unknown action: %s" action))
 
-      ;; Handle the older action format with a warning. This fallback will be removed in a future
-      ;; update.
-      (when (plist-get action-plist :transform)
-        (warn
-         (concat
-          "The format for entries in the macher-actions-plist has changed."
-          "See the docstring for details."
-          "Please update the definition for action '%s'."))
-        (setq action-plist
-              (macher-action-from-region-or-input
-               (plist-get action-plist :prompt) (plist-get action-plist :transform))))
-
       (let* ((prompt (plist-get action-plist :prompt))
              (preset (or (plist-get action-plist :preset) 'macher))
              (summary (plist-get action-plist :summary))
