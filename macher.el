@@ -37,10 +37,11 @@
 (require 'gptel-context)
 (require 'cl-lib)
 
-;; Declare external functions. Note these libraries are explicitly required at runtime before these
-;; functions are actually called.
+;; Declare external functions. The associated libraries are explicitly required at runtime before
+;; these functions are actually called. Note that Eask's "declare" linter should flag any
+;; declarations that don't actually exist.
 (declare-function diff-setup-buffer-type "diff-mode")
-(declare-function org-escape-code-in-string "org")
+(declare-function org-escape-code-in-string "org-src")
 (declare-function xref-item-location "xref")
 (declare-function xref-item-summary "xref")
 (declare-function xref-file-location-file "xref")
@@ -1022,7 +1023,10 @@ It adapts the prompt formatting based on the current major mode."
          ;; otherwise a markdown-style code block.
          (full-prompt-str
           (if is-org-mode
-              (concat (format ":PROMPT:\n") (org-escape-code-in-string prompt) "\n:END:\n")
+              (progn
+                ;; Should already be required, but just for good measure.
+                (require 'org-src)
+                (concat (format ":PROMPT:\n") (org-escape-code-in-string prompt) "\n:END:\n"))
             (concat "```\n" prompt "\n```\n"))))
 
     (goto-char (point-max))
