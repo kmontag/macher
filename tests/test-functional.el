@@ -4,7 +4,7 @@
 ;; Functional tests for macher.el that interact with a real LLM.
 ;; Uses very simple prompts to ensure that even weak LLMs can handle them correctly.
 ;;
-;; These are not intended to be exhaustive tests of tool functionality. They're intended
+;; These are not intended to be exhaustive tests of tool functionality.  They're intended
 ;; to catch issues in the general end-to-end implementation workflow.
 ;;
 ;; Backend selection:

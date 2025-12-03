@@ -46,7 +46,7 @@ ARGS will be forwarded."
 (defun macher-test--send (preset prompt callback)
   "Send PROMPT with to the LLM with a macher PRESET applied.
 
-Invoke CALLBACK after the request completes. The response is handled in
+Invoke CALLBACK after the request completes.  The response is handled in
 the same way as with `gptel-send'."
   (macher--with-preset
    preset
