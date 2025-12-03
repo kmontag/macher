@@ -37,6 +37,15 @@
 (require 'gptel-context)
 (require 'cl-lib)
 
+;; Declare external functions. Note these libraries are explicitly required at runtime before these
+;; functions are actually called.
+(declare-function diff-setup-buffer-type "diff-mode")
+(declare-function org-escape-code-in-string "org")
+(declare-function xref-item-location "xref")
+(declare-function xref-item-summary "xref")
+(declare-function xref-file-location-file "xref")
+(declare-function xref-file-location-line "xref")
+
 ;;; Preliminary definitions needed for defcustom defaults
 
 (defun macher-action-from-region-or-input (input-prompt transform preset &optional input)
