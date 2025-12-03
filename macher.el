@@ -3691,29 +3691,30 @@ This is a thin wrapper around `gptel-request'.  The PROMPT and KEYS will
 be passed directly to `gptel-request'.  Note that the CALLBACK parameter
 here is different than the :callback key accepted by `gptel-request',
 which might also be included."
-  (let* (
-         ;; Get the transforms that were already passed (possibly nil).  Note gptel generally expects
-         ;; callers to pass `gptel-prompt-transform-functions' for this argument, but we don't make
-         ;; any assumptions here.
-         (transforms (plist-get keys :transforms))
+  (let*
+      (
+       ;; Get the transforms that were already passed (possibly nil).  Note gptel generally expects
+       ;; callers to pass `gptel-prompt-transform-functions' for this argument, but we don't make
+       ;; any assumptions here.
+       (transforms (plist-get keys :transforms))
 
-         ;; Prompt transform which hooks into the lifecycle and causes the callback to be invoked at
-         ;; the end of the request lifecycle.
-         (prompt-transform
-          (when callback
-            (lambda (fsm)
-              (macher--add-termination-handler
-               fsm
-               (lambda (fsm)
-                 "Invoke the user-provided callback after the FSM reached a terminal state"
-                 (funcall callback nil fsm))))))
+       ;; Prompt transform which hooks into the lifecycle and causes the callback to be invoked at
+       ;; the end of the request lifecycle.
+       (prompt-transform
+        (when callback
+          (lambda (fsm)
+            (macher--add-termination-handler
+             fsm
+             (lambda (fsm)
+               "Invoke the user-provided callback after the FSM reached a terminal state"
+               (funcall callback nil fsm))))))
 
-         ;; Transforms list including our callback transform.
-         (updated-transforms
-          (append
-           transforms
-           (when prompt-transform
-             (list prompt-transform)))))
+       ;; Transforms list including our callback transform.
+       (updated-transforms
+        (append
+         transforms
+         (when prompt-transform
+           (list prompt-transform)))))
     (setq keys (plist-put (copy-sequence keys) :transforms updated-transforms))
 
     (when-let* (
