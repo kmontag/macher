@@ -2560,6 +2560,326 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect "Directory .nonexistent. not found"
                       :to-appear-once-in (car error-message))))))))
 
+  ;; Tests ensuring that non-project files are hidden for real git repositories.
+  (describe "git file visibility"
+    :var (git-temp-dir git-project-dir)
+
+    (before-each
+      (setq git-temp-dir (make-temp-file "macher-git-test" t))
+      (setq git-project-dir (expand-file-name "test-project" git-temp-dir))
+      (make-directory git-project-dir t)
+
+      ;; Initialize git repo.
+      (let ((default-directory git-project-dir))
+        (call-process "git" nil nil nil "init")
+        (call-process "git" nil nil nil "config" "user.email" "test@example.com")
+        (call-process "git" nil nil nil "config" "user.name" "Test User"))
+
+      ;; Create a .gitignore file.
+      (write-region "*.secret\nsecrets/\n" nil (expand-file-name ".gitignore" git-project-dir))
+
+      ;; Create a test file and gitignored files.
+      (write-region "test content" nil (expand-file-name "test.txt" git-project-dir))
+      (write-region "secret data" nil (expand-file-name "api.secret" git-project-dir))
+      (make-directory (expand-file-name "secrets" git-project-dir))
+      (write-region
+       "password=123456" nil (expand-file-name "secrets/passwords.txt" git-project-dir))
+
+      ;; Commit the tracked files.
+      (let ((default-directory git-project-dir))
+        (call-process "git" nil nil nil "add" ".gitignore")
+        (call-process "git" nil nil nil "add" "test.txt")
+        (call-process "git" nil nil nil "commit" "-m" "Initial commit")))
+
+    (after-each
+      (when (file-exists-p git-temp-dir)
+        (delete-directory git-temp-dir t)))
+
+    (it "prevents reading files in .git directory"
+      (funcall setup-backend '("Test response"))
+      (let ((git-file (expand-file-name ".git/config" git-project-dir)))
+        ;; Verify the git config file exists.
+        (expect (file-exists-p git-file) :to-be-truthy)
+
+        (with-temp-buffer
+          (set-visited-file-name (expand-file-name "test.txt" git-project-dir))
+          (let ((callback-called nil)
+                (exit-code nil))
+            (macher-test--send
+             'macher-ro "Test prompt"
+             (macher-test--make-once-only-callback
+              (lambda (cb-exit-code cb-fsm)
+                (setq callback-called t)
+                (setq exit-code cb-exit-code))))
+
+            (let ((timeout 0))
+              (while (and (not callback-called) (< timeout 100))
+                (sleep-for 0.1)
+                (setq timeout (1+ timeout))))
+
+            (expect callback-called :to-be-truthy)
+            (expect exit-code :to-be nil)
+
+            ;; Verify that .git files are not in the workspace files list.
+            (let* ((workspace `(project . ,git-project-dir))
+                   (workspace-files (macher--workspace-files workspace)))
+              (expect (cl-some (lambda (f) (string-match-p "\\.git/" f)) workspace-files)
+                      :to-be nil))))))
+
+    (describe "list_directory_in_workspace"
+      (it "does not list .git directory"
+        (funcall setup-backend
+                 '((:tool-calls
+                    [(:function (:name "list_directory_in_workspace" :arguments (:path ".")))])
+                   "Listed the directory"))
+
+        (with-temp-buffer
+          (set-visited-file-name (expand-file-name "test.txt" git-project-dir))
+          (let ((callback-called nil)
+                (exit-code nil))
+            (macher-test--send
+             'macher-ro "Test prompt"
+             (macher-test--make-once-only-callback
+              (lambda (cb-exit-code cb-fsm)
+                (setq callback-called t)
+                (setq exit-code cb-exit-code))))
+
+            (let ((timeout 0))
+              (while (and (not callback-called) (< timeout 100))
+                (sleep-for 0.1)
+                (setq timeout (1+ timeout))))
+
+            (expect callback-called :to-be-truthy)
+            (expect exit-code :to-be nil)
+
+            ;; Check that the tool response does not contain .git.
+            (let* ((requests (funcall received-requests))
+                   (tool-messages (funcall messages-of-type requests "tool")))
+              (expect (length tool-messages) :to-be 2)
+              (expect (car tool-messages) :to-be nil)
+              (let ((listing (cadr tool-messages)))
+                (expect (length listing) :to-be 1)
+                (expect (car listing) :not :to-match "\\.git"))))))
+
+      (it "does not list gitignored files"
+        (funcall setup-backend
+                 '((:tool-calls
+                    [(:function (:name "list_directory_in_workspace" :arguments (:path ".")))])
+                   "Listed the directory"))
+
+        (with-temp-buffer
+          (set-visited-file-name (expand-file-name "test.txt" git-project-dir))
+          (let ((callback-called nil)
+                (exit-code nil))
+            (macher-test--send
+             'macher-ro "Test prompt"
+             (macher-test--make-once-only-callback
+              (lambda (cb-exit-code cb-fsm)
+                (setq callback-called t)
+                (setq exit-code cb-exit-code))))
+
+            (let ((timeout 0))
+              (while (and (not callback-called) (< timeout 100))
+                (sleep-for 0.1)
+                (setq timeout (1+ timeout))))
+
+            (expect callback-called :to-be-truthy)
+            (expect exit-code :to-be nil)
+
+            ;; Check that the tool response does not contain gitignored files.
+            (let* ((requests (funcall received-requests))
+                   (tool-messages (funcall messages-of-type requests "tool")))
+              (expect (length tool-messages) :to-be 2)
+              (expect (car tool-messages) :to-be nil)
+              (let ((listing (cadr tool-messages)))
+                (expect (length listing) :to-be 1)
+                ;; Should contain tracked files.
+                (expect (car listing) :to-match "test\\.txt")
+                (expect (car listing) :to-match "\\.gitignore")
+                ;; Should NOT contain gitignored files.
+                (expect (car listing) :not :to-match "api\\.secret")
+                (expect (car listing) :not :to-match "secrets")))))))
+
+    (describe "read_file_in_workspace"
+      (it "cannot read files in .git directory"
+        (funcall setup-backend
+                 '((:tool-calls
+                    [(:function (:name "read_file_in_workspace" :arguments (:path ".git/config")))])
+                   "Tried to read git config"))
+
+        (with-temp-buffer
+          (set-visited-file-name (expand-file-name "test.txt" git-project-dir))
+          (let ((callback-called nil)
+                (exit-code nil))
+            (macher-test--send
+             'macher-ro "Test prompt"
+             (macher-test--make-once-only-callback
+              (lambda (cb-exit-code cb-fsm)
+                (setq callback-called t)
+                (setq exit-code cb-exit-code))))
+
+            (let ((timeout 0))
+              (while (and (not callback-called) (< timeout 100))
+                (sleep-for 0.1)
+                (setq timeout (1+ timeout))))
+
+            (expect callback-called :to-be-truthy)
+            (expect exit-code :to-be nil)
+
+            ;; Check that the tool response contains an error.
+            (let* ((requests (funcall received-requests))
+                   (tool-messages (funcall messages-of-type requests "tool")))
+              (expect (length tool-messages) :to-be 2)
+              (expect (car tool-messages) :to-be nil)
+              (let ((error-message (cadr tool-messages)))
+                (expect (length error-message) :to-be 1)
+                (expect "not in the workspace files list"
+                        :to-appear-once-in (car error-message)))))))
+
+      (it "cannot read gitignored files"
+        (funcall setup-backend
+                 '((:tool-calls
+                    [(:function (:name "read_file_in_workspace" :arguments (:path "api.secret")))])
+                   "Tried to read secret file"))
+
+        (with-temp-buffer
+          (set-visited-file-name (expand-file-name "test.txt" git-project-dir))
+          (let ((callback-called nil)
+                (exit-code nil))
+            (macher-test--send
+             'macher-ro "Test prompt"
+             (macher-test--make-once-only-callback
+              (lambda (cb-exit-code cb-fsm)
+                (setq callback-called t)
+                (setq exit-code cb-exit-code))))
+
+            (let ((timeout 0))
+              (while (and (not callback-called) (< timeout 100))
+                (sleep-for 0.1)
+                (setq timeout (1+ timeout))))
+
+            (expect callback-called :to-be-truthy)
+            (expect exit-code :to-be nil)
+
+            ;; Check that the tool response contains an error.
+            (let* ((requests (funcall received-requests))
+                   (tool-messages (funcall messages-of-type requests "tool")))
+              (expect (length tool-messages) :to-be 2)
+              (expect (car tool-messages) :to-be nil)
+              (let ((error-message (cadr tool-messages)))
+                (expect (length error-message) :to-be 1)
+                (expect "not in the workspace files list"
+                        :to-appear-once-in (car error-message)))))))
+
+      (it "cannot read files in gitignored directories"
+        (funcall setup-backend
+                 '((:tool-calls
+                    [(:function
+                      (:name "read_file_in_workspace" :arguments (:path "secrets/passwords.txt")))])
+                   "Tried to read file in gitignored directory"))
+
+        (with-temp-buffer
+          (set-visited-file-name (expand-file-name "test.txt" git-project-dir))
+          (let ((callback-called nil)
+                (exit-code nil))
+            (macher-test--send
+             'macher-ro "Test prompt"
+             (macher-test--make-once-only-callback
+              (lambda (cb-exit-code cb-fsm)
+                (setq callback-called t)
+                (setq exit-code cb-exit-code))))
+
+            (let ((timeout 0))
+              (while (and (not callback-called) (< timeout 100))
+                (sleep-for 0.1)
+                (setq timeout (1+ timeout))))
+
+            (expect callback-called :to-be-truthy)
+            (expect exit-code :to-be nil)
+
+            ;; Check that the tool response contains an error.
+            (let* ((requests (funcall received-requests))
+                   (tool-messages (funcall messages-of-type requests "tool")))
+              (expect (length tool-messages) :to-be 2)
+              (expect (car tool-messages) :to-be nil)
+              (let ((error-message (cadr tool-messages)))
+                (expect (length error-message) :to-be 1)
+                (expect "not in the workspace files list"
+                        :to-appear-once-in (car error-message))))))))
+
+    (describe "search_in_workspace"
+      (it "does not search in .git directory"
+        (funcall setup-backend
+                 '((:tool-calls
+                    [(:function (:name "search_in_workspace" :arguments (:pattern "test")))])
+                   "Searched for test"))
+
+        (with-temp-buffer
+          (set-visited-file-name (expand-file-name "test.txt" git-project-dir))
+          (let ((callback-called nil)
+                (exit-code nil))
+            (macher-test--send
+             'macher-ro "Test prompt"
+             (macher-test--make-once-only-callback
+              (lambda (cb-exit-code cb-fsm)
+                (setq callback-called t)
+                (setq exit-code cb-exit-code))))
+
+            (let ((timeout 0))
+              (while (and (not callback-called) (< timeout 100))
+                (sleep-for 0.1)
+                (setq timeout (1+ timeout))))
+
+            (expect callback-called :to-be-truthy)
+            (expect exit-code :to-be nil)
+
+            ;; Check that search results don't include .git files.
+            (let* ((requests (funcall received-requests))
+                   (tool-messages (funcall messages-of-type requests "tool")))
+              (expect (length tool-messages) :to-be 2)
+              (expect (car tool-messages) :to-be nil)
+              (let ((search-result (cadr tool-messages)))
+                (expect (length search-result) :to-be 1)
+                ;; Should find test.txt.
+                (expect (car search-result) :to-match "test\\.txt")
+                ;; Should NOT find anything in .git.
+                (expect (car search-result) :not :to-match "\\.git"))))))
+
+      (it "does not search gitignored files"
+        (funcall setup-backend
+                 '((:tool-calls
+                    [(:function (:name "search_in_workspace" :arguments (:pattern "password")))])
+                   "Searched for password"))
+
+        (with-temp-buffer
+          (set-visited-file-name (expand-file-name "test.txt" git-project-dir))
+          (let ((callback-called nil)
+                (exit-code nil))
+            (macher-test--send
+             'macher-ro "Test prompt"
+             (macher-test--make-once-only-callback
+              (lambda (cb-exit-code cb-fsm)
+                (setq callback-called t)
+                (setq exit-code cb-exit-code))))
+
+            (let ((timeout 0))
+              (while (and (not callback-called) (< timeout 100))
+                (sleep-for 0.1)
+                (setq timeout (1+ timeout))))
+
+            (expect callback-called :to-be-truthy)
+            (expect exit-code :to-be nil)
+
+            ;; Check that search results don't include gitignored files.
+            (let* ((requests (funcall received-requests))
+                   (tool-messages (funcall messages-of-type requests "tool")))
+              (expect (length tool-messages) :to-be 2)
+              (expect (car tool-messages) :to-be nil)
+              (let ((search-result (cadr tool-messages)))
+                (expect (length search-result) :to-be 1)
+                ;; Should find "No matches found" since "password" only appears in gitignored files.
+                (expect (car search-result) :to-equal "No matches found."))))))))
+
   (describe "patch generation"
     (it "does not generate a patch when no changes are made"
       (funcall setup-backend '("No changes needed."))
