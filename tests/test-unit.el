@@ -1258,6 +1258,33 @@
         (delete-directory empty-untracked-dir t)
         (delete-directory untracked-dir-with-files t)))
 
+    (it "correctly handles directories with similar name prefixes"
+      ;; Create directories "foo" and "foobar" to test that listing "foo" doesn't match "foobar".
+      (let ((foo-dir (expand-file-name "foo" temp-dir))
+            (foobar-dir (expand-file-name "foobar" temp-dir)))
+        (make-directory foo-dir)
+        (make-directory foobar-dir)
+        (write-region "content in foo" nil (expand-file-name "file-in-foo.txt" foo-dir))
+        (write-region "content in foobar" nil (expand-file-name "file-in-foobar.txt" foobar-dir))
+
+        ;; List contents of "foo" directory.
+        (let ((result (macher--tool-list-directory context "foo")))
+          ;; Should contain file in foo directory.
+          (expect result :to-match "file-in-foo\\.txt")
+          ;; Should NOT contain file from foobar directory.
+          (expect result :not :to-match "file-in-foobar\\.txt"))
+
+        ;; List contents of root - both directories should appear.
+        (let ((result (macher--tool-list-directory context ".")))
+          ;; Both directories should appear. Use word boundaries (\\b) to ensure exact matches.
+          ;; This prevents "foo" from matching "foobar" as a substring.
+          (expect result :to-match "\\bfoo\\b")
+          (expect result :to-match "\\bfoobar\\b"))
+
+        ;; Clean up.
+        (delete-directory foo-dir t)
+        (delete-directory foobar-dir t)))
+
     (it "does not allow listing directories outside the workspace root"
       ;; Try to list parent directory (should fail).
       (let ((parent-dir (file-name-directory (directory-file-name temp-dir))))
