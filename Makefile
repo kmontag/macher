@@ -92,8 +92,11 @@ format.elisp.check: $(EASK) .eask
 			(dolist (file (cdr command-line-args-left)) \
 			  (find-file file) \
 			  (editorconfig-apply) \
-			  (let ((original (buffer-string))) \
-			    (elisp-autofmt-buffer) \
+			  (let ((original (buffer-string)) \
+			        (result (elisp-autofmt-buffer))) \
+			    (unless result \
+			      (message \"elisp-autofmt-buffer failed for: %s\" file) \
+			      (setq failed t)) \
 			    (if (string= original (buffer-string)) \
 			        (message \"OK: %s\" file) \
 			      (message \"File needs formatting: %s\" file) \
