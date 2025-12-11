@@ -2652,14 +2652,22 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (expect callback-called :to-be-truthy)
             (expect exit-code :to-be nil)
 
-            ;; Check that the tool response does not contain .git.
+            ;; Check that .git does not appear in the listing, except as part of .gitignore
+            ;; filename.  This is more robust than checking for a specific format like "dir: .git"
+            ;; since the output format might change. We explicitly allow .gitignore to contain .git
+            ;; in its name.
             (let* ((requests (funcall received-requests))
                    (tool-messages (funcall messages-of-type requests "tool")))
               (expect (length tool-messages) :to-be 2)
               (expect (car tool-messages) :to-be nil)
-              (let ((listing (cadr tool-messages)))
+              (let* ((listing (cadr tool-messages))
+                     (listing-text (car listing))
+                     ;; Remove all occurrences of .gitignore from the listing.
+                     (listing-without-gitignore
+                      (replace-regexp-in-string "\\.gitignore" "" listing-text)))
                 (expect (length listing) :to-be 1)
-                (expect (car listing) :not :to-match "\\.git"))))))
+                ;; After removing .gitignore, there should be no .git remaining.
+                (expect listing-without-gitignore :not :to-match "\\.git"))))))
 
       (it "does not list gitignored files"
         (funcall setup-backend
