@@ -1793,17 +1793,31 @@ Signals an error if the directory is not found in the workspace."
                            ;; Exclude . and .. meta-directories to prevent infinite recursion.
                            (unless (or (string= entry ".") (string= entry ".."))
                              (let ((entry-full-path (expand-file-name entry current-path)))
-                               ;; Include if it's in the workspace files list OR it's a directory.
-                               (or (cl-some
-                                    (lambda (workspace-file)
-                                      ;; Handle both absolute and relative paths in workspace-files.
-                                      (let ((normalized-workspace-file
-                                             (if (file-name-absolute-p workspace-file)
-                                                 workspace-file
-                                               (expand-file-name workspace-file workspace-root))))
-                                        (string= entry-full-path normalized-workspace-file)))
-                                    workspace-files)
-                                   (file-directory-p entry-full-path)))))
+                               ;; Include if it's in the workspace files list.
+                               (or
+                                (cl-some
+                                 (lambda (workspace-file)
+                                   ;; Handle both absolute and relative paths in workspace-files.
+                                   (let ((normalized-workspace-file
+                                          (if (file-name-absolute-p workspace-file)
+                                              workspace-file
+                                            (expand-file-name workspace-file workspace-root))))
+                                     (string= entry-full-path normalized-workspace-file)))
+                                 workspace-files)
+                                ;; OR if it's a directory that has workspace files under it.
+                                (and (file-directory-p entry-full-path)
+                                     (cl-some
+                                      (lambda (workspace-file)
+                                        (let ((normalized-workspace-file
+                                               (if (file-name-absolute-p workspace-file)
+                                                   workspace-file
+                                                 (expand-file-name workspace-file workspace-root))))
+                                          ;; Check if this workspace file is under this directory.
+                                          (string-prefix-p
+                                           (file-name-as-directory
+                                            entry-full-path)
+                                           normalized-workspace-file)))
+                                      workspace-files))))))
                          all-disk-files))
                     '()))
                  ;; Add any newly created files from the context.
