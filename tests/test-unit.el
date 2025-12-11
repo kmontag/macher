@@ -1223,6 +1223,41 @@
         (delete-file untracked-file2)
         (delete-file subdir-untracked)))
 
+    (it "does not list directories that don't contain workspace files"
+      ;; Create directories on disk that don't contain any workspace files.  Note this not only
+      ;; tests that empty directories won't appear, but also that things ike node_modules/ and .git/
+      ;; won't appear.
+      (let ((empty-untracked-dir (expand-file-name "untracked-empty" temp-dir))
+            (untracked-dir-with-files (expand-file-name "untracked-with-files" temp-dir)))
+        (make-directory empty-untracked-dir)
+        (make-directory untracked-dir-with-files)
+        (write-region
+         "untracked content" nil (expand-file-name "untracked.txt" untracked-dir-with-files))
+
+        ;; Mock workspace files to exclude these directories entirely.
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  ;; Get the actual files but filter out anything in untracked directories.
+                  (let ((files (macher--project-files (cdr workspace))))
+                    (cl-remove-if
+                     (lambda (file)
+                       (or (string-match-p "untracked-empty" file)
+                           (string-match-p "untracked-with-files" file)))
+                     files))))
+
+        ;; Test that untracked directories don't appear in listing.
+        (let ((result (macher--tool-list-directory context ".")))
+          ;; Should contain workspace directories.
+          (expect result :to-match "dir: subdir")
+          ;; Should NOT contain directories that have no workspace files.
+          (expect result :not :to-match "untracked-empty")
+          (expect result :not :to-match "untracked-with-files"))
+
+        ;; Clean up.
+        (delete-directory empty-untracked-dir t)
+        (delete-directory untracked-dir-with-files t)))
+
     (it "does not allow listing directories outside the workspace root"
       ;; Try to list parent directory (should fail).
       (let ((parent-dir (file-name-directory (directory-file-name temp-dir))))
