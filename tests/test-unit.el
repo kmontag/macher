@@ -4858,7 +4858,85 @@
 
         ;; Test that absolute paths outside the workspace fail (even under home).
         (let ((outside-home-path (expand-file-name "other-project/file.txt" "~")))
-          (expect (macher--resolve-workspace-path home-workspace outside-home-path) :to-throw))))))
+          (expect (macher--resolve-workspace-path home-workspace outside-home-path) :to-throw)))))
+
+  (describe "macher--patch-prepare-metadata"
+    (it "does not insert empty line between diff and prompt comments"
+      (let* ((workspace `(project . "/tmp/test-workspace"))
+             (context (macher--make-context :workspace workspace :prompt "test prompt"))
+             callback-called)
+        (with-temp-buffer
+          ;; Insert a mock diff.
+          (insert "diff --git a/test.py b/test.py\n")
+          (insert "--- a/test.py\n")
+          (insert "+++ b/test.py\n")
+          (insert "@@ -1 +1 @@\n")
+          (insert "-old line\n")
+          (insert "+new line\n")
+          (insert "\\ No newline at end of file\n")
+          ;; Call the metadata function.
+          (macher--patch-prepare-metadata context nil (lambda () (setq callback-called t)))
+          ;; Verify callback was called.
+          (expect callback-called :to-be t)
+          ;; Check the buffer content.
+          (let* ((content (buffer-string))
+                 (all-lines (split-string content "\n"))
+                 (lines
+                  (if (string-empty-p (car (last all-lines)))
+                      (butlast all-lines)
+                    all-lines))
+                 (after-diff nil)
+                 (diff-ended nil))
+            ;; Should not have two consecutive newlines before the comment section.
+            (expect content :not :to-match "\n\n# ---")
+            ;; Should have exactly one newline before the separator.
+            (expect content :to-match "\\ No newline at end of file\n# ---")
+            ;; Verify all lines after the diff start with #.
+            (dolist (line lines)
+              (when (string-match-p "^\\\\ No newline at end of file$" line)
+                (setq diff-ended t))
+              (when diff-ended
+                (unless (string-match-p "^\\\\ No newline at end of file$" line)
+                  (expect (string-prefix-p "#" line) :to-be t))))))))
+
+    (it "formats patch with prompt correctly"
+      (let* ((workspace `(project . "/tmp/test-project"))
+             (context (macher--make-context :workspace workspace :prompt "implement hello world"))
+             callback-called)
+        (with-temp-buffer
+          ;; Insert a simple diff.
+          (insert "diff --git a/hello.py b/hello.py\n")
+          (insert "+print('hello world')\n")
+          ;; Call the metadata function.
+          (macher--patch-prepare-metadata context nil (lambda () (setq callback-called t)))
+          ;; Verify callback was called.
+          (expect callback-called :to-be t)
+          ;; Check buffer content has the expected structure.
+          (let* ((content (buffer-string))
+                 (lines (split-string content "\n"))
+                 (diff-ended nil))
+            ;; Should start with patch metadata.
+            (expect content :to-match "^# Patch ID: [a-z0-9]\\{8\\}\n")
+            (expect content :to-match "# Project: test-project\n")
+            ;; Should contain the diff.
+            (expect content :to-match "diff --git a/hello.py")
+            ;; Should contain the prompt section.
+            (expect content :to-match "# PROMPT for patch ID")
+            (expect content :to-match "# implement hello world")
+            ;; Should not have empty line between diff and comments.
+            (expect content :not :to-match "print('hello world')\n\n# ---")
+            ;; Verify all lines after the diff start with # (except for a single trailing newline at
+            ;; the very end, which is acceptable).
+            (let ((line-num 0))
+              (dolist (line lines)
+                (when diff-ended
+                  ;; Allow empty line only if it's the last line (trailing newline).
+                  (unless (and (string-empty-p line) (= line-num (1- (length lines))))
+                    (expect (string-prefix-p "#" line) :to-be t)))
+                (when (string-equal "+print('hello world')" line)
+                  (setq diff-ended t))
+                (setq line-num (1+ line-num))))
+            (expect diff-ended :to-be t)))))))
 
 (provide 'test-unit)
 ;;; test-unit.el ends here
