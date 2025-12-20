@@ -4863,14 +4863,17 @@
             (expect content :to-match "# implement hello world")
             ;; Should not have empty line between diff and comments.
             (expect content :not :to-match "print('hello world')\n\n# ---")
-            ;; Verify all lines after the diff start with #. Newer versions of diff-mode are a bit
-            ;; more robust with comment handling, but the version in Emacs 30 requires no stray
-            ;; empty lines, even trailing newlines.
-            (dolist (line lines)
-              (when diff-ended
-                (expect (string-prefix-p "#" line) :to-be t))
-              (when (string-equal "+print('hello world')" line)
-                (setq diff-ended t)))
+            ;; Verify all lines after the diff start with # (except for a single trailing newline at
+            ;; the very end, which is acceptable).
+            (let ((line-num 0))
+              (dolist (line lines)
+                (when diff-ended
+                  ;; Allow empty line only if it's the last line (trailing newline).
+                  (unless (and (string-empty-p line) (= line-num (1- (length lines))))
+                    (expect (string-prefix-p "#" line) :to-be t)))
+                (when (string-equal "+print('hello world')" line)
+                  (setq diff-ended t))
+                (setq line-num (1+ line-num))))
             (expect diff-ended :to-be t)))))))
 
 (provide 'test-unit)
