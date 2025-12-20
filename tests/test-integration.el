@@ -2589,17 +2589,23 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           (expect exit-code :to-be nil)
           (expect (gptel-fsm-state fsm) :to-be 'DONE))))
 
+    ;; Tests to ensure that `diff-apply-buffer` applies cleanly with generated patches.
     (describe "suitability for diff-apply-buffer"
-      (it "works when the new content has no trailing newline"
-        (let ((new-content "line one\nline two"))
+      :var*
+      ((test-patch-content nil)
+       ;; Helper to run diff-apply-buffer test with given old and new content.
+       (run-diff-apply-test
+        (lambda (old-content new-content)
+          "Run a diff-apply-buffer test with OLD-CONTENT as the original file and NEW-CONTENT as the replacement.
+Sets `test-patch-content' to the generated patch content for additional assertions."
           (funcall setup-backend
                    `((:tool-calls
                       [(:function
                         (:name
                          "write_file_in_workspace"
-                         :arguments (:content ,new-content :path "src/main.el")))])
+                         :arguments (:content ,new-content :path "test.txt")))])
                      "Modified file"))
-          (funcall setup-project "diff-apply-test")
+          (funcall setup-project "diff-apply-test" `(("test.txt" . ,old-content)))
           (let* ((callback-called nil)
                  (exit-code nil)
                  (fsm nil)
@@ -2627,15 +2633,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Capture the patch buffer while we still have workspace context.
               (setq patch-buffer (macher-patch-buffer)))
 
-            ;; Now verify the patch format is correct for diff-apply-buffer. Do this outside the
-            ;; with-temp-buffer to ensure the buffer named after the file (which gets the LLM
-            ;; response inserted) is killed first, so diff-apply-buffer loads the actual file
-            ;; from disk.
+            ;; Apply the patch outside the with-temp-buffer to ensure the buffer named after the
+            ;; file (which gets the LLM response inserted) is killed first, so diff-apply-buffer
+            ;; loads the actual file from disk.
             (with-current-buffer patch-buffer
-              (let ((patch-content (buffer-string))
+              (setq test-patch-content (buffer-string))
+              (let (
                     ;; Disable require-final-newline so diff-apply-buffer doesn't add trailing
-                    ;; newlines when saving. This matches typical user configuration for files
-                    ;; that intentionally lack trailing newlines.
+                    ;; newlines when saving.
                     (require-final-newline nil)
                     (mode-require-final-newline nil))
                 (call-interactively #'diff-apply-buffer)
@@ -2646,8 +2651,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                   (expect (buffer-string) :to-equal new-content))
 
                 ;; Verify the prompt comments section is present.
-                (expect patch-content :to-match "# PROMPT for patch ID")
-                (expect patch-content :to-match "# Modify a file")
+                (expect test-patch-content :to-match "# PROMPT for patch ID")
+                (expect test-patch-content :to-match "# Modify a file")
 
                 ;; Clean up file buffers created by diff-apply-buffer.
                 (dolist (buf (buffer-list))
@@ -2655,6 +2660,63 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                     (with-current-buffer buf
                       (set-buffer-modified-p nil))
                     (kill-buffer buf)))))))))
+
+      ;; TODO: Tests where original file has no trailing newline trigger "Try to auto-fix word-wrap
+      ;; damage?" prompt in diff-mode. Skipping until we understand why.
+      (xit "works when neither file has a trailing newline"
+        (funcall run-diff-apply-test "old line one\nold line two" "new line one\nnew line two"))
+
+      (it "works when both files have a trailing newline"
+        (funcall run-diff-apply-test "old line one\nold line two\n" "new line one\nnew line two\n"))
+
+      ;; TODO: Tests where original file has no trailing newline trigger "Try to auto-fix word-wrap
+      ;; damage?" prompt in diff-mode. Skipping until we understand why.
+      (xit "works when only the new file has a trailing newline"
+        (funcall run-diff-apply-test "old line one\nold line two" "new line one\nnew line two\n"))
+
+      (it "works when only the old file has a trailing newline"
+        (funcall run-diff-apply-test "old line one\nold line two\n" "new line one\nnew line two"))
+
+      (it "works with multi-hunk patches"
+        (funcall run-diff-apply-test
+                 ;; Old content with distinctive sections.
+                 (concat
+                  "header line 1\n"
+                  "header line 2\n"
+                  "header line 3\n"
+                  "\n"
+                  "middle section line 1\n"
+                  "middle section line 2\n"
+                  "middle section line 3\n"
+                  "middle section line 4\n"
+                  "middle section line 5\n"
+                  "\n"
+                  "footer line 1\n"
+                  "footer line 2\n"
+                  "footer line 3\n")
+                 ;; New content: header and footer changed, middle unchanged.
+                 (concat
+                  "NEW header line 1\n"
+                  "NEW header line 2\n"
+                  "NEW header line 3\n"
+                  "\n"
+                  "middle section line 1\n"
+                  "middle section line 2\n"
+                  "middle section line 3\n"
+                  "middle section line 4\n"
+                  "middle section line 5\n"
+                  "\n"
+                  "NEW footer line 1\n"
+                  "NEW footer line 2\n"
+                  "NEW footer line 3\n"))
+        ;; Verify the patch has multiple hunks.
+        (let ((hunk-count 0))
+          (with-temp-buffer
+            (insert test-patch-content)
+            (goto-char (point-min))
+            (while (re-search-forward "^@@" nil t)
+              (setq hunk-count (1+ hunk-count))))
+          (expect hunk-count :to-be 2))))
 
     (it "displays a patch when changes are made"
       (funcall setup-backend
