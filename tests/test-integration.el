@@ -1134,7 +1134,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                         "diff --git a/test-file.txt b/test-file.txt\n"
                         "--- a/test-file.txt\n"
                         "+++ /dev/null\n"
-                        "@@ -1 +0,0 @@\n"
+                        "@@ -1,1 +0,0 @@\n"
                         "-This file will be deleted"))
                       :to-appear-once-in patch)
 
@@ -1254,7 +1254,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                         "diff --git a/created-file.txt b/created-file.txt\n"
                         "--- /dev/null\n"
                         "+++ b/created-file.txt\n"
-                        "@@ -0,0 +1 @@\n"
+                        "@@ -0,0 +1,1 @@\n"
                         "+created content"))
                       :to-appear-once-in patch)
 
@@ -1457,7 +1457,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                         "diff --git a/moved-file.txt b/moved-file.txt\n"
                         "--- /dev/null\n"
                         "+++ b/moved-file.txt\n"
-                        "@@ -0,0 +1 @@\n"
+                        "@@ -0,0 +1,1 @@\n"
                         "+content to move"))
                       :to-appear-once-in patch)
 
@@ -1467,7 +1467,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                         "diff --git a/source-file.txt b/source-file.txt\n"
                         "--- a/source-file.txt\n"
                         "+++ /dev/null\n"
-                        "@@ -1 +0,0 @@\n"
+                        "@@ -1,1 +0,0 @@\n"
                         "-content to move"))
                       :to-appear-once-in patch)
 
@@ -2758,7 +2758,7 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                         "diff --git a/created.txt b/created.txt\n"
                         "--- /dev/null\n"
                         "+++ b/created.txt\n"
-                        "@@ -0,0 +1 @@\n"
+                        "@@ -0,0 +1,1 @@\n"
                         "+hello test"))
                       :to-appear-once-in patch)
 
