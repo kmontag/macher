@@ -3228,25 +3228,16 @@ CALLBACK must be called when preparation is complete."
     ;; Add the prompt as metadata if it exists.
     (goto-char (point-max))
     (when prompt
-      ;; A blank line after the prompt metadata (all beginning with comemnts) represents the
-      ;; trailing newline at the end of the patched file(s).  However, if the last line begins with
-      ;; "\", it's a "\ No newline at end of file" marker, indicating no trailing newline - in that
-      ;; case we need to omit the blank line, otherwise diff-mode won't parse the patch correctly.
-      (let ((needs-blank-line
-             (save-excursion
-               (goto-char (point-max))
-               (forward-line -1)
-               (not (looking-at-p "\\\\")))))
-        (insert
-         (concat
-
-          "# -----------------------------\n"
-          (format "# PROMPT for patch ID %s:\n" patch-id)
-          "# -----------------------------\n"
-          ;; Add comment prefix to each line of the prompt.
-          (replace-regexp-in-string "^" "# " prompt)
-          (when needs-blank-line
-            "\n")))))
+      (insert
+       (concat
+        ;; Don't add any stray newlines, they can break the diff-mode parsing.
+        "# -----------------------------\n"
+        (format "# PROMPT for patch ID %s:\n" patch-id)
+        "# -----------------------------\n"
+        ;; Add comment prefix to each line of the prompt.
+        (replace-regexp-in-string "^" "# " prompt)
+        ;; A trailing newline at the end appears to be okay.
+        "\n")))
 
     ;; Note: The original prompt is no longer stored in the context structure.
     ;; If prompt tracking is needed, it should be added to the context structure.
