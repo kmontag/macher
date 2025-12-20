@@ -1763,39 +1763,51 @@ Signals an error if the directory is not found in the workspace."
 
          (collect-entries
           (current-path current-rel-path depth)
-          ;; Get all entries from the directory (if it exists on disk) plus any context files.
+          ;; Build entries list by iterating through workspace files.
           (let* ((workspace-files (macher--workspace-files workspace))
-                 ;; Only include disk entries that are in the workspace files list.
-                 (disk-entries
-                  (if (file-directory-p current-path)
-                      (let ((all-disk-files (directory-files current-path)))
-                        (cl-remove-if-not
-                         (lambda (entry)
-                           ;; Exclude . and .. meta-directories to prevent infinite recursion.
-                           (unless (or (string= entry ".") (string= entry ".."))
-                             (let ((entry-full-path (expand-file-name entry current-path)))
-                               ;; Include if it's in the workspace files list OR it's a directory.
-                               (or (cl-some
-                                    (lambda (workspace-file)
-                                      ;; Handle both absolute and relative paths in workspace-files.
-                                      (let ((normalized-workspace-file
-                                             (if (file-name-absolute-p workspace-file)
-                                                 workspace-file
-                                               (expand-file-name workspace-file workspace-root))))
-                                        (string= entry-full-path normalized-workspace-file)))
-                                    workspace-files)
-                                   (file-directory-p entry-full-path)))))
-                         all-disk-files))
-                    '()))
+                 (current-path-as-dir (file-name-as-directory current-path))
+                 ;; Hash table to collect unique entries (both files and directories).
+                 (entries-hash (make-hash-table :test 'equal))
+
+                 ;; Process workspace files to find immediate children.
+                 (_
+                  (dolist (workspace-file workspace-files)
+                    (let* ((normalized-file
+                            (if (file-name-absolute-p workspace-file)
+                                workspace-file
+                              (expand-file-name workspace-file workspace-root)))
+                           ;; Check if this file is under current-path.
+                           (relative-to-current
+                            (when (string-prefix-p current-path-as-dir normalized-file)
+                              (substring normalized-file (length current-path-as-dir)))))
+                      ;; If the file is under current path, extract the immediate child.
+                      (when relative-to-current
+                        (let ((first-component
+                               (if (string-match "/" relative-to-current)
+                                   ;; Has subdirectories - take the first directory component.
+                                   (substring relative-to-current 0 (match-beginning 0))
+                                 ;; Direct child file.
+                                 relative-to-current)))
+                          (unless (string-empty-p first-component)
+                            (puthash first-component t entries-hash)))))))
+
                  ;; Add any newly created files from the context.
                  (context-new-files (collect-new-context-files current-path))
+                 (_
+                  (dolist (file context-new-files)
+                    (puthash file t entries-hash)))
+
                  ;; Add any directories implied by context files.
                  (context-new-directories (collect-new-context-directories current-path))
-                 ;; Combine and deduplicate.
+                 (_
+                  (dolist (dir context-new-directories)
+                    (puthash dir t entries-hash)))
+
+                 ;; Convert hash table to list.
                  (all-entries
-                  (cl-remove-duplicates (append
-                                         disk-entries context-new-files context-new-directories)
-                                        :test #'string=)))
+                  (let ((entries '()))
+                    (maphash (lambda (key _value) (push key entries)) entries-hash)
+                    entries)))
             ;; Process entries if we have any entries to process.
             (when (> (length all-entries) 0)
               (dolist (entry all-entries)
