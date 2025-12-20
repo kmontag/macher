@@ -1156,9 +1156,10 @@ displays the patch buffer."
     ;; Fix hunk headers to have line counts as well as starting lines even for one-line changes,
     ;; e.g.`=@@ -1 +1 @@=` becomes `=@@ -1,1 +1,1 @@=`. This allows `diff-apply-buffer' to work in a
     ;; wider range of cases, particularly when content is being replaced at the end of the
-    ;; file. Note the unified diff explicitly uses the more compact format when the line count is
-    ;; exactly 1, so there's not really a good way to get this format out of the diff command
-    ;; directly.
+    ;; file. `diff-mode' normally runs this automatically when the buffer is modified interactively.
+    ;;
+    ;; Note the unified diff explicitly uses the more compact format when the line count is exactly
+    ;; 1, so there's not really a good way to get this format out of the diff command directly.
     (diff-fixup-modifs (point-min) (point-max)))
 
   ;; Display the buffer.  Do this in a no-op buffer context to avoid changing the actual current
