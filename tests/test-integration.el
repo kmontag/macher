@@ -1903,37 +1903,44 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           (when context-buffer
             (kill-buffer context-buffer))))))
 
-  (describe "default before- and after-action handlers"
+  (describe "default before-action handler"
     :var*
     (callback-called
      exit-code fsm callback project-file-buffer
      ;; Get the exact expected action buffer contents after a single macher action, with the default
      ;; settings. This will need to be updated if the default UI changes.
+     ;;
+     ;; Note: The trailing prompt prefix is added by gptel after a successful response. For
+     ;; error/abort cases, there's no trailing prefix since no follow-up request has been started.
      (action-buffer-content
-      (lambda (request response action)
+      (lambda (request response action include-trailing-prefix)
         (format (concat
                  ;; Header.
                  "### `%s` %s\n"
                  ;; Full prompt.
                  "```\n%s\n```\n"
-                 ;; Response.
-                 "%s\n"
-                 ;; Next prompt prefix.
-                 "### ")
+                 ;; Response (may be empty for error/abort).
+                 "%s"
+                 ;; Trailing prefix only for successful responses.
+                 (if include-trailing-prefix
+                     "\n### "
+                   ""))
                 action request request response)))
      ;; Get the exact expected action buffer contents for org-mode buffers after a single macher action.
      ;; This will need to be updated if the org UI changes.
      (action-buffer-org-content
-      (lambda (request response action)
+      (lambda (request response action &optional include-trailing-prefix)
         (format (concat
                  ;; Org-mode header with action as tag.
                  "*** %s :%s:\n"
                  ;; Prompt block.
                  ":PROMPT:\n%s\n:END:\n"
-                 ;; Response.
-                 "%s\n"
-                 ;; Next prompt prefix (empty for org).
-                 "*** ")
+                 ;; Response (may be empty for error/abort).
+                 "%s"
+                 ;; Trailing prefix only for successful responses.
+                 (if include-trailing-prefix
+                     "\n*** "
+                   ""))
                 request action request response))))
 
     (before-each
@@ -1965,7 +1972,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
         (let ((action-buffer (macher-action-buffer)))
           (expect action-buffer :to-be-truthy)
-          ;; Wait for the async response
+          ;; Wait for the async response.
           (let ((timeout 0))
             (while (and (not callback-called) (< timeout 100))
               (sleep-for 0.1)
@@ -1982,7 +1989,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                       (funcall action-buffer-content
                                "Test successful request"
                                "\n\nResponse content\n"
-                               'discuss)))))))
+                               'discuss
+                               t)))))))
 
     (it "formats prompts/responses for successful requests with org UI"
       (funcall setup-backend '("Response content"))
@@ -2013,7 +2021,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                         (funcall action-buffer-org-content
                                  "Test successful request with org"
                                  "\n\nResponse content\n"
-                                 'discuss))))))))
+                                 'discuss
+                                 t))))))))
 
     (it "formats prompts/responses for error requests"
       (funcall setup-backend
@@ -2037,9 +2046,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (let ((buffer-content (buffer-substring-no-properties (point-min) (point-max))))
               (expect
                buffer-content
-               ;; No response text, but we should see the proper overall formatting, i.e. including
-               ;; the prompt and the trailing prompt prefix.
-               :to-equal (funcall action-buffer-content "Test error request" "" 'discuss)))))))
+               ;; No response text. No trailing prefix.
+               :to-equal (funcall action-buffer-content "Test error request" "" 'discuss nil)))))))
 
     (it "inserts abort status text after aborted requests"
       (funcall setup-backend '("This response should not be received"))
@@ -2060,9 +2068,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (let ((buffer-content (buffer-substring-no-properties (point-min) (point-max))))
               (expect
                buffer-content
-               ;; No response text, but we should see the proper overall formatting, i.e. including
-               ;; the prompt and the trailing prompt prefix.
-               :to-equal (funcall action-buffer-content "Test abort request" "" 'discuss))))))))
+               ;; No response text. No trailing prefix.
+               :to-equal (funcall action-buffer-content "Test abort request" "" 'discuss nil))))))))
 
   (describe "search_in_workspace"
     (before-each

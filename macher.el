@@ -958,9 +958,8 @@ This also handles displaying the action buffer when actions are
 performed."
   ;; Include tool results.
   (setq-local gptel-include-tool-results t)
-  ;; Set up the buffer-local hooks to insert prompts and headings.
-  (add-hook 'macher-before-action-functions #'macher--before-action nil t)
-  (add-hook 'macher-after-action-functions #'macher--after-action nil t))
+  ;; Set up the buffer-local hook to insert prompts and headings.
+  (add-hook 'macher-before-action-functions #'macher--before-action nil t))
 
 (defun macher--action-buffer-setup-ui ()
   "Set up a slightly more opinionated action buffer UI.
@@ -1054,9 +1053,16 @@ It adapts the prompt formatting based on the current major mode."
 
     (goto-char (point-max))
 
-    ;; If the buffer is empty, insert the prefix first.
-    (when (and (= (point-min) (point-max)) (alist-get major-mode gptel-prompt-prefix-alist))
-      (insert (alist-get major-mode gptel-prompt-prefix-alist)))
+    ;; Insert the prefix if point isn't immediately preceded by it.
+    (when-let ((prefix (alist-get major-mode gptel-prompt-prefix-alist)))
+      (let ((prefix-length (length prefix)))
+        (unless (and (>= (point) (+ (point-min) prefix-length))
+                     (string=
+                      (buffer-substring-no-properties (- (point) prefix-length) (point)) prefix))
+          ;; Ensure prefix starts on its own line.
+          (unless (bolp)
+            (insert "\n"))
+          (insert prefix))))
 
     ;; Header string.
     (insert (format "%s%s%s\n" header-prefix truncated-summary header-postfix))
@@ -1076,40 +1082,6 @@ It adapts the prompt formatting based on the current major mode."
     ;; (since `display-buffer' may change the selected buffer).
     (with-current-buffer (current-buffer)
       (display-buffer (current-buffer)))))
-
-(defun macher--after-action (_err _execution fsm)
-  "Default function for after-action handling.
-
-This is added buffer-locally (in the action buffer) to the
-`macher-after-action-functions' when using the `basic', `default', or
-`org' UI configurations.  If you set `macher-action-buffer-ui' to nil,
-this function will never be called.
-
-The function just inserts the prefix for the next prompt if it wasn't
-already inserted by gptel - that is, if the request was aborted or ended
-in an error.  The marker info from the gptel FSM is used for placement."
-  (let* ((info (gptel-fsm-info fsm))
-         ;; This should always be present.
-         (start-marker (plist-get info :position))
-         ;; This might be nil if the request ended with an error/abort before any response was
-         ;; received.
-         (tracking-marker (plist-get info :tracking-marker))
-         (current-marker (or tracking-marker start-marker)))
-    ;; The current marker should always be non-nil, but don't error out if it's missing/both markers
-    ;; were nil for some reason.
-    (when current-marker
-      (save-excursion
-        (goto-char current-marker)
-
-        (when-let ((prefix (alist-get major-mode gptel-prompt-prefix-alist)))
-          ;; Check if we're at the end of the gptel prompt prefix, i.e. the one that was just
-          ;; inserted due to the completion of the request.  If not (this is the case if the request
-          ;; ended with an error or abort), insert it so we're prepared for the next prompt.
-          (unless (and (>= (point) (length prefix))
-                       (string=
-                        prefix
-                        (buffer-substring-no-properties (- (point) (length prefix)) (point))))
-            (insert "\n" prefix)))))))
 
 (defun macher--patch-buffer-setup-diff ()
   "Set up `diff-mode' and related settings for patch buffers.
