@@ -3228,8 +3228,7 @@ CALLBACK must be called when preparation is complete."
         (format "# PROMPT for patch ID %s:\n" patch-id)
         "# -----------------------------\n"
         ;; Add comment prefix to each line of the prompt.
-        (replace-regexp-in-string "^" "# " prompt)
-        "\n")))
+        (replace-regexp-in-string "^" "# " prompt))))
 
     ;; Note: The original prompt is no longer stored in the context structure.
     ;; If prompt tracking is needed, it should be added to the context structure.

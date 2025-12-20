@@ -4844,21 +4844,14 @@
         (with-temp-buffer
           ;; Insert a simple diff.
           (insert "diff --git a/hello.py b/hello.py\n")
-          (insert "+print('hello world')")
+          (insert "+print('hello world')\n")
           ;; Call the metadata function.
           (macher--patch-prepare-metadata context nil (lambda () (setq callback-called t)))
           ;; Verify callback was called.
           (expect callback-called :to-be t)
           ;; Check buffer content has the expected structure.
           (let* ((content (buffer-string))
-                 (all-lines (split-string content "\n"))
-                 ;; We don't care about a trailing newline - but we'll need to make sure that there
-                 ;; are no other blank lines after the patch content. Remove the last line (if it's
-                 ;; empty) for simplicity.
-                 (lines
-                  (if (string-empty-p (car (last all-lines)))
-                      (butlast all-lines)
-                    all-lines))
+                 (lines (split-string content "\n"))
                  (diff-ended nil))
             ;; Should start with patch metadata.
             (expect content :to-match "^# Patch ID: [a-z0-9]\\{8\\}\n")
@@ -4870,13 +4863,15 @@
             (expect content :to-match "# implement hello world")
             ;; Should not have empty line between diff and comments.
             (expect content :not :to-match "print('hello world')\n\n# ---")
-            ;; Verify all lines after the diff start with #.
+            ;; Verify all lines after the diff start with #. Newer versions of diff-mode are a bit
+            ;; more robust with comment handling, but the version in Emacs 30 requires no stray
+            ;; empty lines, even trailing newlines.
             (dolist (line lines)
-              (when (string-match-p "^\\+print('hello world')$" line)
-                (setq diff-ended t))
               (when diff-ended
-                (unless (string-match-p "^\\+print('hello world')$" line)
-                  (expect (string-prefix-p "#" line) :to-be t))))))))))
+                (expect (string-prefix-p "#" line) :to-be t))
+              (when (string-equal "+print('hello world')" line)
+                (setq diff-ended t)))
+            (expect diff-ended :to-be t)))))))
 
 (provide 'test-unit)
 ;;; test-unit.el ends here
