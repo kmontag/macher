@@ -3226,7 +3226,7 @@ CALLBACK must be called when preparation is complete."
         ;; Generate a clear separator for the prompt.
         "# -----------------------------\n"
         (format "# PROMPT for patch ID %s:\n" patch-id)
-        "# -----------------------------\n\n"
+        "# -----------------------------\n"
         ;; Add comment prefix to each line of the prompt.
         (replace-regexp-in-string "^" "# " prompt)
         "\n")))
