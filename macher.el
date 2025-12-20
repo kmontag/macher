@@ -1059,6 +1059,9 @@ It adapts the prompt formatting based on the current major mode."
         (unless (and (>= (point) (+ (point-min) prefix-length))
                      (string=
                       (buffer-substring-no-properties (- (point) prefix-length) (point)) prefix))
+          ;; Ensure prefix starts on its own line.
+          (unless (bolp)
+            (insert "\n"))
           (insert prefix))))
 
     ;; Header string.
