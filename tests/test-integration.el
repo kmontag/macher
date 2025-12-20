@@ -2661,18 +2661,13 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                       (set-buffer-modified-p nil))
                     (kill-buffer buf)))))))))
 
-      ;; TODO: Tests where original file has no trailing newline trigger "Try to auto-fix word-wrap
-      ;; damage?" prompt in diff-mode. Skipping until we understand why.
-      (xit "works when neither file has a trailing newline"
-        (funcall run-diff-apply-test "old line one\nold line two" "new line one\nnew line two"))
-
+      ;; Note: cases where the original file has no trailing newline will trigger a "Try to auto-fix
+      ;; word-wrap damage?" prompt in diff-mode, due to a false positive result from
+      ;; `diff-sanity-check-hunk' in such cases (it basically thinks the no-trailing-newline marker
+      ;; is an artifact of an accidental wrapping operation).  If this gets fixed upstream, we can
+      ;; add tests for such cases.
       (it "works when both files have a trailing newline"
         (funcall run-diff-apply-test "old line one\nold line two\n" "new line one\nnew line two\n"))
-
-      ;; TODO: Tests where original file has no trailing newline trigger "Try to auto-fix word-wrap
-      ;; damage?" prompt in diff-mode. Skipping until we understand why.
-      (xit "works when only the new file has a trailing newline"
-        (funcall run-diff-apply-test "old line one\nold line two" "new line one\nnew line two\n"))
 
       (it "works when only the old file has a trailing newline"
         (funcall run-diff-apply-test "old line one\nold line two\n" "new line one\nnew line two"))
