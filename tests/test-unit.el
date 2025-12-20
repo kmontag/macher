@@ -3892,9 +3892,8 @@
         (with-temp-buffer
           (setq-local macher--workspace '(test . "/tmp/test"))
           (macher--action-buffer-setup)
-          ;; Check that the basic hooks were added.
+          ;; Check that the before-action hook was added.
           (expect (member #'macher--before-action macher-before-action-functions) :to-be-truthy)
-          (expect (member #'macher--after-action macher-after-action-functions) :to-be-truthy)
           ;; Check that gptel-mode is NOT enabled (basic doesn't enable it).
           (expect (bound-and-true-p gptel-mode) :to-be nil))))
 
@@ -3907,9 +3906,8 @@
           (expect (bound-and-true-p gptel-mode) :to-be-truthy)
           ;; Check that visual-line-mode is enabled.
           (expect (bound-and-true-p visual-line-mode) :to-be-truthy)
-          ;; Check that hooks were added.
-          (expect (member #'macher--before-action macher-before-action-functions) :to-be-truthy)
-          (expect (member #'macher--after-action macher-after-action-functions) :to-be-truthy))))
+          ;; Check that the before-action hook was added.
+          (expect (member #'macher--before-action macher-before-action-functions) :to-be-truthy))))
 
     (it "sets up org UI correctly"
       (let ((macher-action-buffer-ui 'org))
@@ -3920,9 +3918,8 @@
           (expect (derived-mode-p 'org-mode) :to-be-truthy)
           ;; Check that gptel-mode is enabled.
           (expect (bound-and-true-p gptel-mode) :to-be-truthy)
-          ;; Check that hooks were added.
-          (expect (member #'macher--before-action macher-before-action-functions) :to-be-truthy)
-          (expect (member #'macher--after-action macher-after-action-functions) :to-be-truthy))))
+          ;; Check that the before-action hook was added.
+          (expect (member #'macher--before-action macher-before-action-functions) :to-be-truthy))))
 
     (it "performs no setup when UI is nil"
       (let ((macher-action-buffer-ui nil))
@@ -3931,7 +3928,6 @@
           (macher--action-buffer-setup)
           ;; Check that no hooks were added.
           (expect (member #'macher--before-action macher-before-action-functions) :to-be nil)
-          (expect (member #'macher--after-action macher-after-action-functions) :to-be nil)
           ;; Check that gptel-mode is NOT enabled.
           (expect (bound-and-true-p gptel-mode) :to-be nil)
           ;; Check that major mode is still fundamental-mode.
@@ -3942,6 +3938,72 @@
         (with-temp-buffer
           (setq-local macher--workspace '(test . "/tmp/test"))
           (expect (macher--action-buffer-setup) :to-throw 'user-error)))))
+
+  (describe "macher--before-action"
+    (describe "prefix insertion"
+      (it "inserts prefix at beginning of empty buffer"
+        (with-temp-buffer
+          (setq-local gptel-prompt-prefix-alist '((fundamental-mode . "### ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'test
+                  :prompt "Test prompt"
+                  :summary "Test prompt"
+                  :buffer (current-buffer))))
+            (macher--before-action execution)
+            ;; The buffer should start with the prefix.
+            (expect (buffer-substring-no-properties 1 5) :to-equal "### "))))
+
+      (it "inserts newline before prefix when not at beginning of line"
+        (with-temp-buffer
+          (setq-local gptel-prompt-prefix-alist '((fundamental-mode . "### ")))
+          ;; Put some content that doesn't end with a newline.
+          (insert "previous response content")
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'test
+                  :prompt "Test prompt"
+                  :summary "Test prompt"
+                  :buffer (current-buffer))))
+            (macher--before-action execution)
+            ;; Check that a newline was inserted before the prefix.
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect content :to-match "previous response content\n### ")))))
+
+      (it "does not insert extra newline when already at beginning of line"
+        (with-temp-buffer
+          (setq-local gptel-prompt-prefix-alist '((fundamental-mode . "### ")))
+          ;; Put some content that ends with a newline.
+          (insert "previous response content\n")
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'test
+                  :prompt "Test prompt"
+                  :summary "Test prompt"
+                  :buffer (current-buffer))))
+            (macher--before-action execution)
+            ;; Check that no extra newline was added.
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect content :to-match "previous response content\n### ")
+              ;; Should not have double newlines.
+              (expect content :not :to-match "previous response content\n\n### ")))))
+
+      (it "does not insert prefix if buffer already ends with it"
+        (with-temp-buffer
+          (setq-local gptel-prompt-prefix-alist '((fundamental-mode . "### ")))
+          ;; Buffer already ends with the prefix.
+          (insert "previous content\n### ")
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'test
+                  :prompt "Test prompt"
+                  :summary "Test prompt"
+                  :buffer (current-buffer))))
+            (macher--before-action execution)
+            ;; Prefix should not be duplicated.
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              ;; The header and prompt will be added, but not another prefix before them.
+              (expect content :to-match "^previous content\n### `test` Test prompt")))))))
 
   (describe "macher--make-tool and macher--tool-context"
     :var (original-tools)
@@ -4353,12 +4415,17 @@
         (expect gptel-request--handlers :to-equal original-handlers)
 
         ;; Verify that the FSM's transitions table is unchanged
-        (expect (gptel-fsm-table fsm) :to-equal original-fsm-transitions)
+        (expect (gptel-fsm-table fsm) :to-equal original-transitions)
 
-        ;; Verify that the original handlers structure is preserved
-        ;; (though the FSM's handlers will have been modified)
-        (expect (length (gptel-fsm-handlers fsm))
-                :to-be-greater-than (length original-fsm-handlers)))))
+        ;; Verify that our handler was actually added to the FSM in the right places.
+        (expect (gptel-fsm-handlers fsm) :not :to-equal original-handlers)
+        (let ((found-handler-states nil))
+          (dolist (state-handlers (gptel-fsm-handlers fsm))
+            (when (member test-handler (cdr state-handlers))
+              (push (car state-handlers) found-handler-states)))
+          (let ((expected-handler-states '(DONE ERRS TOOL TYPE WAIT)))
+            (expect (length found-handler-states) :to-equal (length expected-handler-states))
+            (expect found-handler-states :to-have-same-items-as expected-handler-states))))))
 
   (describe "macher--add-termination-handler"
     :var (fsm test-handler handler-calls)
@@ -4496,10 +4563,15 @@
         ;; Verify that the FSM's transitions table is unchanged
         (expect (gptel-fsm-table fsm) :to-equal original-fsm-transitions)
 
-        ;; Verify that the original handlers structure is preserved
-        ;; (though the FSM's handlers will have been modified)
-        (expect (length (gptel-fsm-handlers fsm))
-                :to-be-greater-than (length original-fsm-handlers)))))
+        ;; Verify that our handler was actually added to the FSM in the right places.
+        (expect (gptel-fsm-handlers fsm) :not :to-equal original-handlers)
+        (let ((found-handler-states nil))
+          (dolist (state-handlers (gptel-fsm-handlers fsm))
+            (when (member test-handler (cdr state-handlers))
+              (push (car state-handlers) found-handler-states)))
+          (let ((expected-handler-states '(DONE ERRS)))
+            (expect (length found-handler-states) :to-equal (length expected-handler-states))
+            (expect found-handler-states :to-have-same-items-as expected-handler-states))))))
 
   (describe "macher--implement-prompt"
     :var (temp-file)
