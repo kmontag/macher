@@ -2589,6 +2589,73 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           (expect exit-code :to-be nil)
           (expect (gptel-fsm-state fsm) :to-be 'DONE))))
 
+    (describe "suitability for diff-apply-buffer"
+      (it "works when the new content has no trailing newline"
+        (let ((new-content "line one\nline two"))
+          (funcall setup-backend
+                   `((:tool-calls
+                      [(:function
+                        (:name
+                         "write_file_in_workspace"
+                         :arguments (:content ,new-content :path "src/main.el")))])
+                     "Modified file"))
+          (funcall setup-project "diff-apply-test")
+          (let* ((callback-called nil)
+                 (exit-code nil)
+                 (fsm nil)
+                 (patch-buffer nil))
+            (with-temp-buffer
+              (set-visited-file-name project-file)
+              (macher-test--send
+               'macher "Modify a file"
+               (macher-test--make-once-only-callback
+                (lambda (cb-exit-code cb-fsm)
+                  (setq callback-called t)
+                  (setq exit-code cb-exit-code)
+                  (setq fsm cb-fsm))))
+
+              ;; Wait for the async response.
+              (let ((timeout 0))
+                (while (and (not callback-called) (< timeout 100))
+                  (sleep-for 0.1)
+                  (setq timeout (1+ timeout))))
+
+              (expect callback-called :to-be-truthy)
+              (expect exit-code :to-be nil)
+              (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+              ;; Capture the patch buffer while we still have workspace context.
+              (setq patch-buffer (macher-patch-buffer)))
+
+            ;; Now verify the patch format is correct for diff-apply-buffer. Do this outside the
+            ;; with-temp-buffer to ensure the buffer named after the file (which gets the LLM
+            ;; response inserted) is killed first, so diff-apply-buffer loads the actual file
+            ;; from disk.
+            (with-current-buffer patch-buffer
+              (let ((patch-content (buffer-string))
+                    ;; Disable require-final-newline so diff-apply-buffer doesn't add trailing
+                    ;; newlines when saving. This matches typical user configuration for files
+                    ;; that intentionally lack trailing newlines.
+                    (require-final-newline nil)
+                    (mode-require-final-newline nil))
+                (call-interactively #'diff-apply-buffer)
+
+                (expect (file-exists-p project-file) :to-be-truthy)
+                (with-temp-buffer
+                  (insert-file-contents project-file)
+                  (expect (buffer-string) :to-equal new-content))
+
+                ;; Verify the prompt comments section is present.
+                (expect patch-content :to-match "# PROMPT for patch ID")
+                (expect patch-content :to-match "# Modify a file")
+
+                ;; Clean up file buffers created by diff-apply-buffer.
+                (dolist (buf (buffer-list))
+                  (when (buffer-file-name buf)
+                    (with-current-buffer buf
+                      (set-buffer-modified-p nil))
+                    (kill-buffer buf)))))))))
+
     (it "displays a patch when changes are made"
       (funcall setup-backend
                `((:tool-calls
