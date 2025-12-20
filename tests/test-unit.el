@@ -4353,12 +4353,17 @@
         (expect gptel-request--handlers :to-equal original-handlers)
 
         ;; Verify that the FSM's transitions table is unchanged
-        (expect (gptel-fsm-table fsm) :to-equal original-fsm-transitions)
+        (expect (gptel-fsm-table fsm) :to-equal original-transitions)
 
-        ;; Verify that the original handlers structure is preserved
-        ;; (though the FSM's handlers will have been modified)
-        (expect (length (gptel-fsm-handlers fsm))
-                :to-be-greater-than (length original-fsm-handlers)))))
+        ;; Verify that our handler was actually added to the FSM in the right places.
+        (expect (gptel-fsm-handlers fsm) :not :to-equal original-handlers)
+        (let ((found-handler-states nil))
+          (dolist (state-handlers (gptel-fsm-handlers fsm))
+            (when (member test-handler (cdr state-handlers))
+              (push (car state-handlers) found-handler-states)))
+          (let ((expected-handler-states '(DONE ERRS TOOL TYPE WAIT)))
+            (expect (length found-handler-states) :to-equal (length expected-handler-states))
+            (expect found-handler-states :to-have-same-items-as expected-handler-states))))))
 
   (describe "macher--add-termination-handler"
     :var (fsm test-handler handler-calls)
@@ -4496,10 +4501,15 @@
         ;; Verify that the FSM's transitions table is unchanged
         (expect (gptel-fsm-table fsm) :to-equal original-fsm-transitions)
 
-        ;; Verify that the original handlers structure is preserved
-        ;; (though the FSM's handlers will have been modified)
-        (expect (length (gptel-fsm-handlers fsm))
-                :to-be-greater-than (length original-fsm-handlers)))))
+        ;; Verify that our handler was actually added to the FSM in the right places.
+        (expect (gptel-fsm-handlers fsm) :not :to-equal original-handlers)
+        (let ((found-handler-states nil))
+          (dolist (state-handlers (gptel-fsm-handlers fsm))
+            (when (member test-handler (cdr state-handlers))
+              (push (car state-handlers) found-handler-states)))
+          (let ((expected-handler-states '(DONE ERRS)))
+            (expect (length found-handler-states) :to-equal (length expected-handler-states))
+            (expect found-handler-states :to-have-same-items-as expected-handler-states))))))
 
   (describe "macher--implement-prompt"
     :var (temp-file)
