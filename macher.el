@@ -1803,33 +1803,6 @@ Ensures paths are consistently handled throughout the codebase."
       (expand-file-name path)
     (error "PATH must be an absolute file path")))
 
-(defun macher--collect-context-file-contents (contexts)
-  "Collect file contents for gptel context files.
-
-CONTEXTS is the list of gptel contexts as returned by
-`gptel-context--collect'.  This function reads the current contents of
-any files in the context and returns them as an alist.
-
-Returns an alist of (normalized-path . content-string) pairs for files
-that exist.  Non-existent files and buffer contexts are skipped.
-
-This function is intended to be called at request time to capture the
-current state of context files, ensuring that edits made after the
-request is sent don't affect the macher context's view of those files."
-  (let ((result nil))
-    (dolist (context-entry contexts)
-      (let ((source (car context-entry)))
-        ;; Only process file paths (strings), not buffers.
-        (when (and (stringp source) (file-exists-p source))
-          (let* ((full-path (expand-file-name source))
-                 (normalized-path (macher--normalize-path full-path))
-                 (file-content
-                  (with-temp-buffer
-                    (insert-file-contents full-path)
-                    (buffer-substring-no-properties (point-min) (point-max)))))
-            (push (cons normalized-path file-content) result)))))
-    (nreverse result)))
-
 (defun macher--resolve-workspace-path (workspace rel-path)
   "Get the full path for REL-PATH within the WORKSPACE.
 
