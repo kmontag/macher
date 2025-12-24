@@ -507,13 +507,13 @@ sent (or a preset is being applied).  It receives no arguments.  You can
 use `macher-workspace' to get the buffer's current workspace.
 
 The function should return a workspace information string that can be
-included in the system prompt,
+included in the system prompt.
 
 As long as `macher-preset-base' is applied, any instances of the
 `macher-context-string-placeholder' in the system prompt will be
 replaced with the result of this function.
 
-Set this to nil to simply remove "
+Set this to nil to disable workspace context injection.
   :type '(function :tag "Workspace string function")
   :group 'macher-workspace)
 
