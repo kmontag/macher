@@ -365,8 +365,17 @@ actions."
   :type
   '(alist
     :key-type symbol
-    ;; TODO: Make this more specific.
-    :value-type (plist :key-type keyword :value-type (choice string symbol function)))
+    :value-type
+    (choice
+     (function :tag "Function that generates action plist")
+     (plist
+      :tag "Action plist"
+      :options
+      ((:prompt (string :tag "Full prompt string to send to the LLM"))
+       (:preset
+        (choice (symbol :tag "Preset symbol") (plist :tag "Preset spec plist"))
+        :tag "Preset to use (optional, defaults to 'macher)")
+       (:summary (string :tag "Summarized prompt (optional)"))))))
   :group 'macher-actions)
 
 (defcustom macher-action-buffer-ui 'default
