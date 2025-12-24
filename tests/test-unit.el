@@ -5301,7 +5301,536 @@
                 (when (string-equal "+print('hello world')" line)
                   (setq diff-ended t))
                 (setq line-num (1+ line-num))))
-            (expect diff-ended :to-be t)))))))
+            (expect diff-ended :to-be t))))))
+
+  (describe "macher--system-ensure-placeholder-or-context-string"
+    :var (original-placeholder original-marker-start)
+
+    (before-each
+      (setq original-placeholder macher-context-string-placeholder)
+      (setq original-marker-start macher-context-string-marker-start))
+
+    (after-each
+      (setq macher-context-string-placeholder original-placeholder)
+      (setq macher-context-string-marker-start original-marker-start))
+
+    (describe "string input"
+      (it "appends placeholder to string without placeholder or marker"
+        (let ((result
+               (macher--system-ensure-placeholder-or-context-string
+                "You are a helpful assistant.")))
+          (expect
+           result
+           :to-equal (concat "You are a helpful assistant." macher-context-string-placeholder))))
+
+      (it "does not modify string already containing placeholder"
+        (let ((system (concat "You are a helpful assistant." macher-context-string-placeholder)))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "does not modify string already containing marker-start"
+        (let ((system
+               (concat
+                "You are a helpful assistant."
+                macher-context-string-marker-start
+                "context"
+                macher-context-string-marker-end)))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "returns string unchanged when placeholder is nil"
+        (let ((macher-context-string-placeholder nil)
+              (system "You are a helpful assistant."))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "handles empty string"
+        (let ((result (macher--system-ensure-placeholder-or-context-string "")))
+          (expect result :to-equal macher-context-string-placeholder)))
+
+      (it "handles string with placeholder in middle"
+        (let ((system (concat "Start " macher-context-string-placeholder " End")))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "handles string with marker-start in middle"
+        (let ((system
+               (concat
+                "Start "
+                macher-context-string-marker-start
+                "context"
+                macher-context-string-marker-end
+                " End")))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system)))))
+
+    (describe "list input"
+      (it "appends placeholder to first element of list"
+        (let* ((system '("System message" "user message" "assistant message"))
+               (result (macher--system-ensure-placeholder-or-context-string system)))
+          (expect (car result)
+                  :to-equal (concat "System message" macher-context-string-placeholder))
+          (expect (cdr result) :to-equal '("user message" "assistant message"))))
+
+      (it "does not modify list with placeholder in first element"
+        (let* ((first-elem (concat "System message" macher-context-string-placeholder))
+               (system (list first-elem "user message" "assistant message"))
+               (result (macher--system-ensure-placeholder-or-context-string system)))
+          (expect result :to-equal system)))
+
+      (it "does not modify list with marker-start in first element"
+        (let* ((first-elem
+                (concat
+                 "System message"
+                 macher-context-string-marker-start
+                 "context"
+                 macher-context-string-marker-end))
+               (system (list first-elem "user message"))
+               (result (macher--system-ensure-placeholder-or-context-string system)))
+          (expect result :to-equal system)))
+
+      (it "returns list unchanged when placeholder is nil"
+        (let ((macher-context-string-placeholder nil)
+              (system '("System message" "user message")))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "handles single-element list"
+        (let* ((system '("System message"))
+               (result (macher--system-ensure-placeholder-or-context-string system)))
+          (expect (car result)
+                  :to-equal (concat "System message" macher-context-string-placeholder))
+          (expect (cdr result) :to-be nil)))
+
+      (it "does not mutate original list"
+        (let* ((original-first "System message")
+               (system (list original-first "user message"))
+               (result (macher--system-ensure-placeholder-or-context-string system)))
+          (expect (car system) :to-equal original-first)
+          (expect result :not :to-be system))))
+
+    (describe "function input"
+      (it "wraps function that returns string without placeholder"
+        (let* ((fn (lambda () "Dynamic system message"))
+               (result (macher--system-ensure-placeholder-or-context-string fn)))
+          (expect (functionp result) :to-be-truthy)
+          ;; The wrapper evaluates the function and adds placeholder.
+          (spy-on 'gptel--parse-directive :and-return-value "Dynamic system message")
+          (let ((evaluated (funcall result)))
+            (expect
+             evaluated
+             :to-equal (concat "Dynamic system message" macher-context-string-placeholder)))))
+
+      (it "wraps function that returns string with placeholder"
+        (let* ((with-placeholder (concat "Dynamic message" macher-context-string-placeholder))
+               (fn (lambda () with-placeholder))
+               (result (macher--system-ensure-placeholder-or-context-string fn)))
+          (expect (functionp result) :to-be-truthy)
+          (spy-on 'gptel--parse-directive :and-return-value with-placeholder)
+          (let ((evaluated (funcall result)))
+            (expect evaluated :to-equal with-placeholder))))
+
+      (it "wraps function that returns list"
+        (let* ((fn (lambda () '("System" "user")))
+               (result (macher--system-ensure-placeholder-or-context-string fn)))
+          (expect (functionp result) :to-be-truthy)
+          (spy-on 'gptel--parse-directive :and-return-value '("System" "user"))
+          (let ((evaluated (funcall result)))
+            (expect (car evaluated) :to-equal (concat "System" macher-context-string-placeholder))
+            (expect (cdr evaluated) :to-equal '("user")))))
+
+      (it "wrapper handles function returning list with placeholder"
+        (let* ((first-elem (concat "System" macher-context-string-placeholder))
+               (fn (lambda () (list first-elem "user")))
+               (result (macher--system-ensure-placeholder-or-context-string fn)))
+          (expect (functionp result) :to-be-truthy)
+          (spy-on 'gptel--parse-directive :and-return-value (list first-elem "user"))
+          (let ((evaluated (funcall result)))
+            (expect (car evaluated) :to-equal first-elem)))))
+
+    (describe "idempotency"
+      (it "is idempotent for strings"
+        (let* ((system "You are a helpful assistant.")
+               (result1 (macher--system-ensure-placeholder-or-context-string system))
+               (result2 (macher--system-ensure-placeholder-or-context-string result1)))
+          (expect result1 :to-equal result2)))
+
+      (it "is idempotent for lists"
+        (let* ((system '("System message" "user"))
+               (result1 (macher--system-ensure-placeholder-or-context-string system))
+               (result2 (macher--system-ensure-placeholder-or-context-string result1)))
+          (expect result1 :to-equal result2)))))
+
+  (describe "macher--system-replace-placeholder"
+    :var (original-placeholder original-marker-start original-marker-end original-context-fn)
+
+    (before-each
+      (setq original-placeholder macher-context-string-placeholder)
+      (setq original-marker-start macher-context-string-marker-start)
+      (setq original-marker-end macher-context-string-marker-end)
+      (setq original-context-fn macher-context-string-function))
+
+    (after-each
+      (setq macher-context-string-placeholder original-placeholder)
+      (setq macher-context-string-marker-start original-marker-start)
+      (setq macher-context-string-marker-end original-marker-end)
+      (setq macher-context-string-function original-context-fn))
+
+    (describe "string input"
+      (it "replaces placeholder with demarcated context string"
+        (let* ((macher-context-string-function (lambda () "WORKSPACE CONTEXT HERE"))
+               (system (concat "You are helpful." macher-context-string-placeholder))
+               (result (macher--system-replace-placeholder system)))
+          (expect result :to-match "You are helpful.")
+          (expect result :to-match (regexp-quote macher-context-string-marker-start))
+          (expect result :to-match "WORKSPACE CONTEXT HERE")
+          (expect result :to-match (regexp-quote macher-context-string-marker-end))
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
+
+      (it "removes placeholder when context function returns nil"
+        (let* ((macher-context-string-function (lambda () nil))
+               (system (concat "You are helpful." macher-context-string-placeholder))
+               (result (macher--system-replace-placeholder system)))
+          (expect result :to-equal "You are helpful.")
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
+
+      (it "removes placeholder when context function is nil"
+        (let* ((macher-context-string-function nil)
+               (system (concat "You are helpful." macher-context-string-placeholder))
+               (result (macher--system-replace-placeholder system)))
+          (expect result :to-equal "You are helpful.")))
+
+      (it "returns string unchanged when placeholder is nil"
+        (let* ((macher-context-string-placeholder nil)
+               (macher-context-string-function (lambda () "context"))
+               (system "You are helpful."))
+          (let ((result (macher--system-replace-placeholder system)))
+            (expect result :to-equal system))))
+
+      (it "returns string unchanged when no placeholder present"
+        (let* ((macher-context-string-function (lambda () "context"))
+               (system "You are helpful."))
+          (let ((result (macher--system-replace-placeholder system)))
+            (expect result :to-equal system))))
+
+      (it "replaces multiple placeholders"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system
+                (concat
+                 "Start"
+                 macher-context-string-placeholder
+                 "Middle"
+                 macher-context-string-placeholder
+                 "End"))
+               (result (macher--system-replace-placeholder system)))
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))
+          ;; Both placeholders should be replaced.
+          (let ((marker-count 0))
+            (with-temp-buffer
+              (insert result)
+              (goto-char (point-min))
+              (while (search-forward macher-context-string-marker-start nil t)
+                (setq marker-count (1+ marker-count))))
+            (expect marker-count :to-equal 2))))
+
+      (it "handles placeholder at beginning of string"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system (concat macher-context-string-placeholder "Rest of message"))
+               (result (macher--system-replace-placeholder system)))
+          ;; Result should contain CTX and "Rest of message" (with possible newlines between).
+          (expect result :to-match "CTX")
+          (expect result :to-match "Rest of message")
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
+
+      (it "handles placeholder at end of string"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system (concat "Message" macher-context-string-placeholder))
+               (result (macher--system-replace-placeholder system)))
+          ;; Result should contain both "Message" and "CTX".
+          (expect result :to-match "Message")
+          (expect result :to-match "CTX")
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
+
+      (it "handles empty string"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system "")
+               (result (macher--system-replace-placeholder system)))
+          (expect result :to-equal "")))
+
+      (it "evaluates context function in correct buffer"
+        (let* ((captured-buffer nil)
+               (macher-context-string-function
+                (lambda ()
+                  (setq captured-buffer (current-buffer))
+                  "CTX"))
+               (system (concat "Message" macher-context-string-placeholder)))
+          (with-temp-buffer
+            (let ((test-buffer (current-buffer)))
+              (macher--system-replace-placeholder system test-buffer)
+              (expect captured-buffer :to-be test-buffer))))))
+
+    (describe "list input"
+      (it "replaces placeholder in first element only"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system
+                (list (concat "System" macher-context-string-placeholder) "user" "assistant"))
+               (result (macher--system-replace-placeholder system)))
+          (expect (car result) :to-match "CTX")
+          (expect (car result) :not :to-match (regexp-quote macher-context-string-placeholder))
+          (expect (nth 1 result) :to-equal "user")
+          (expect (nth 2 result) :to-equal "assistant")))
+
+      (it "does not mutate original list"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (original-first (concat "System" macher-context-string-placeholder))
+               (system (list original-first "user"))
+               (result (macher--system-replace-placeholder system)))
+          (expect (car system) :to-equal original-first)
+          (expect result :not :to-be system)))
+
+      (it "handles single-element list"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system (list (concat "System" macher-context-string-placeholder)))
+               (result (macher--system-replace-placeholder system)))
+          (expect (car result) :to-match "CTX")
+          (expect (cdr result) :to-be nil)))
+
+      (it "returns list unchanged when first element has no placeholder"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system '("System message" "user"))
+               (result (macher--system-replace-placeholder system)))
+          (expect (car result) :to-equal "System message")
+          (expect (cdr result) :to-equal '("user")))))
+
+    (describe "function input"
+      (it "evaluates function and processes result"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (fn (lambda () (concat "Dynamic" macher-context-string-placeholder)))
+               (result nil))
+          (spy-on 'gptel--parse-directive
+                  :and-return-value (concat "Dynamic" macher-context-string-placeholder))
+          (setq result (macher--system-replace-placeholder fn))
+          (expect result :to-match "Dynamic")
+          (expect result :to-match "CTX")
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
+
+      (it "handles function returning list"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (fn (lambda () (list (concat "System" macher-context-string-placeholder) "user"))))
+          (spy-on
+           'gptel--parse-directive
+           :and-return-value (list (concat "System" macher-context-string-placeholder) "user"))
+          (let ((result (macher--system-replace-placeholder fn)))
+            (expect (listp result) :to-be-truthy)
+            (expect (car result) :to-match "CTX")
+            (expect (nth 1 result) :to-equal "user"))))
+
+      (it "passes raw flag to gptel--parse-directive"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (fn (lambda () "test")))
+          (spy-on 'gptel--parse-directive :and-return-value "test")
+          (macher--system-replace-placeholder fn)
+          (expect 'gptel--parse-directive :to-have-been-called-with fn 'raw))))
+
+    (describe "idempotency and double-injection prevention"
+      (it "calling twice produces same result as calling once"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system (concat "Message" macher-context-string-placeholder))
+               (result1 (macher--system-replace-placeholder system))
+               (result2 (macher--system-replace-placeholder result1)))
+          ;; Second call should return unchanged since no placeholder.
+          (expect result1 :to-equal result2)))
+
+      (it "does not inject into already-injected content"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (already-injected
+                (concat
+                 "Message"
+                 macher-context-string-marker-start
+                 "OLD CTX"
+                 macher-context-string-marker-end))
+               (result (macher--system-replace-placeholder already-injected)))
+          ;; Should be unchanged since no placeholder present.
+          (expect result :to-equal already-injected)))
+
+      (it "handles mixed placeholder and already-injected content"
+        (let* ((macher-context-string-function (lambda () "NEW CTX"))
+               (system
+                (concat
+                 "Start"
+                 macher-context-string-marker-start
+                 "OLD"
+                 macher-context-string-marker-end
+                 macher-context-string-placeholder
+                 "End"))
+               (result (macher--system-replace-placeholder system)))
+          ;; Should replace placeholder but preserve existing injection.
+          (expect result :to-match "OLD")
+          (expect result :to-match "NEW CTX")
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
+
+      (it "is safe to call in a loop"
+        (let* ((call-count 0)
+               (macher-context-string-function
+                (lambda ()
+                  (setq call-count (1+ call-count))
+                  (format "CTX-%d" call-count)))
+               (system (concat "Message" macher-context-string-placeholder))
+               (result system))
+          ;; Call multiple times.
+          (dotimes (_ 5)
+            (setq result (macher--system-replace-placeholder result)))
+          ;; Context function is called each time we invoke replace-placeholder.
+          ;; But only the first call actually has a placeholder to replace.
+          ;; Subsequent calls find no placeholder, so the result stays the same.
+          (expect call-count :to-equal 5)
+          ;; Result should contain only CTX-1 (from first replacement).
+          (expect result :to-match "CTX-1")
+          ;; Should NOT contain any later context strings.
+          (expect result :not :to-match "CTX-2")
+          (expect result :not :to-match "CTX-5")))))
+
+  (describe "macher--transform-system-replace-placeholder"
+    :var (original-placeholder original-context-fn)
+
+    (before-each
+      (setq original-placeholder macher-context-string-placeholder)
+      (setq original-context-fn macher-context-string-function))
+
+    (after-each
+      (setq macher-context-string-placeholder original-placeholder)
+      (setq macher-context-string-function original-context-fn))
+
+    (it "replaces placeholder in gptel--system-message"
+      (let* ((macher-context-string-function (lambda () "INJECTED CONTEXT"))
+             (gptel--system-message (concat "You are helpful." macher-context-string-placeholder))
+             (callback-called nil)
+             (callback (lambda () (setq callback-called t)))
+             (fsm (gptel-make-fsm)))
+        (with-temp-buffer
+          (let ((test-buffer (current-buffer)))
+            (setf (gptel-fsm-info fsm) (list :buffer test-buffer))
+            (macher--transform-system-replace-placeholder callback fsm)
+            (expect callback-called :to-be t)
+            (expect gptel--system-message :to-match "INJECTED CONTEXT")
+            (expect gptel--system-message
+                    :not
+                    :to-match (regexp-quote macher-context-string-placeholder))))))
+
+    (it "always calls callback even when no replacement needed"
+      (let* ((macher-context-string-function (lambda () "CTX"))
+             (gptel--system-message "No placeholder here")
+             (callback-called nil)
+             (callback (lambda () (setq callback-called t)))
+             (fsm (gptel-make-fsm)))
+        (with-temp-buffer
+          (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
+          (macher--transform-system-replace-placeholder callback fsm)
+          (expect callback-called :to-be t)
+          (expect gptel--system-message :to-equal "No placeholder here"))))
+
+    (it "handles nil buffer gracefully"
+      (let* ((gptel--system-message "Test message")
+             (callback-called nil)
+             (callback (lambda () (setq callback-called t)))
+             (fsm (gptel-make-fsm)))
+        (setf (gptel-fsm-info fsm) (list :buffer nil))
+        (macher--transform-system-replace-placeholder callback fsm)
+        (expect callback-called :to-be t)))
+
+    (it "handles dead buffer gracefully"
+      (let* ((gptel--system-message "Test message")
+             (callback-called nil)
+             (callback (lambda () (setq callback-called t)))
+             (fsm (gptel-make-fsm))
+             (dead-buffer (generate-new-buffer "test")))
+        (kill-buffer dead-buffer)
+        (setf (gptel-fsm-info fsm) (list :buffer dead-buffer))
+        (macher--transform-system-replace-placeholder callback fsm)
+        (expect callback-called :to-be t)))
+
+    (it "handles nil fsm info gracefully"
+      (let* ((gptel--system-message "Test message")
+             (callback-called nil)
+             (callback (lambda () (setq callback-called t)))
+             (fsm (gptel-make-fsm)))
+        (setf (gptel-fsm-info fsm) nil)
+        (macher--transform-system-replace-placeholder callback fsm)
+        (expect callback-called :to-be t)))
+
+    (it "evaluates context function in request buffer not transform buffer"
+      (let* ((captured-buffer nil)
+             (macher-context-string-function
+              (lambda ()
+                (setq captured-buffer (current-buffer))
+                "CTX"))
+             (gptel--system-message (concat "Message" macher-context-string-placeholder))
+             (callback (lambda ()))
+             (fsm (gptel-make-fsm)))
+        (with-temp-buffer
+          (let ((request-buffer (current-buffer)))
+            (setf (gptel-fsm-info fsm) (list :buffer request-buffer))
+            ;; Call from a different buffer (simulating transform buffer).
+            (with-temp-buffer
+              (macher--transform-system-replace-placeholder callback fsm))
+            (expect captured-buffer :to-be request-buffer)))))
+
+    (it "modifies gptel--system-message in transform buffer"
+      (let* ((macher-context-string-function (lambda () "CTX"))
+             (gptel--system-message (concat "Original" macher-context-string-placeholder))
+             (callback (lambda ()))
+             (fsm (gptel-make-fsm)))
+        (with-temp-buffer
+          (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
+          (macher--transform-system-replace-placeholder callback fsm)
+          ;; gptel--system-message should be modified.
+          (expect gptel--system-message :to-match "CTX"))))
+
+    (describe "called multiple times"
+      (it "is safe to call multiple times"
+        (let* ((call-count 0)
+               (macher-context-string-function
+                (lambda ()
+                  (setq call-count (1+ call-count))
+                  "CTX"))
+               (gptel--system-message (concat "Message" macher-context-string-placeholder))
+               (callback (lambda ()))
+               (fsm (gptel-make-fsm)))
+          (with-temp-buffer
+            (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
+            ;; Call multiple times.
+            (dotimes (_ 3)
+              (macher--transform-system-replace-placeholder callback fsm))
+            (expect call-count :to-be 3)
+            ;; Context function called once per transform call, but replacement only happens
+            ;; when placeholder is present.
+            (expect gptel--system-message :to-match "CTX")
+            (expect gptel--system-message
+                    :not
+                    :to-match (regexp-quote macher-context-string-placeholder)))))
+
+      (it "does not accumulate context strings when called multiple times"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (gptel--system-message (concat "Message" macher-context-string-placeholder))
+               (callback (lambda ()))
+               (fsm (gptel-make-fsm)))
+          (with-temp-buffer
+            (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
+            ;; Call multiple times.
+            (macher--transform-system-replace-placeholder callback fsm)
+            (let ((first-result gptel--system-message))
+              (macher--transform-system-replace-placeholder callback fsm)
+              (let ((second-result gptel--system-message))
+                ;; Results should be identical.
+                (expect first-result :to-equal second-result)
+                ;; Should only have one context string marker.
+                (let ((marker-count 0))
+                  (with-temp-buffer
+                    (insert second-result)
+                    (goto-char (point-min))
+                    (while (search-forward macher-context-string-marker-start nil t)
+                      (setq marker-count (1+ marker-count))))
+                  (expect marker-count :to-equal 1))))))))))
 
 (provide 'test-unit)
 ;;; test-unit.el ends here
