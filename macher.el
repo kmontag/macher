@@ -3394,7 +3394,13 @@ This might be useful, for example, in custom preset definitions if tools
 have not have been installed globally."
   (let* ((tool-name (plist-get tool :name))
          ;; Look up the tool in the gptel registry using category and name.
-         (registry-tool (gptel-get-tool (list macher-tool-category tool-name))))
+         (registry-tool
+          (condition-case nil
+              (gptel-get-tool (list macher-tool-category tool-name))
+            ;; `gptel-get-tool' throws an error if the tool was not found; we'll just create an
+            ;; anonymous one in this case.
+            (error
+             nil))))
     (or registry-tool
         ;; Tool not found in registry, create an anonymous tool.
         (apply #'macher--make-tool t tool))))
