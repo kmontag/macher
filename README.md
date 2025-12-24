@@ -1,28 +1,26 @@
 # macher
 
-A project-aware LLM implementation toolset for Emacs, built on
-[gptel](https://github.com/karthink/gptel).
+A project-aware LLM editing toolset for Emacs, built on [gptel](https://github.com/karthink/gptel).
 
 https://github.com/user-attachments/assets/82c822fe-35e9-47a2-87db-b4dba2432d1b
 
 ## What is macher?
 
-**macher** provides multi-file, project-aware LLM editing capabilities within Emacs. It allows you
-to send complex implementation requests and receive proposed changes as reviewable patches, which
-can include changes to multiple files. You can then apply the changes and/or send them back to the
-LLM for revision.
-
-The LLM receives contextual information about the current project and file, as well as tools to read
-additional project context and propose changes.
+**macher** allows your LLM to read/search files in the current project, and propose edits in the
+form of patches, potentially involving multiple files. You can apply the patches directly to your
+project, or send them back for revision.
 
 macher is a lightweight Emacs-native take on the editing workflows of more full-featured tools like
 [Aider](https://aider.chat/) or [Plandex](https://plandex.ai/). It works with any gptel backend that
 supports tool use.
 
-macher takes inspiration from gptel's flexibility and visibility. It aims for an unintrusive and
-easily-customizable UI - or you can simply add it to your existing workflow using gptel presets.
+It's great for "pseudo-agentic" workflows, for example when you want your LLM to implement a set of
+changes, maybe call other tools to do research, etc - but you want to review the aggregate changes
+before writing them to disk.
 
-The API is still very much under development and subject to change.
+macher takes inspiration from gptel's flexibility and visibility. It doesn't touch your gptel
+globals - it's just a set of presets and tools that you can use as you like. Or you can use the
+built-in action commands for a quick and easy workflow.
 
 ## Installation and configuration
 
@@ -50,11 +48,18 @@ Example configuration with elpaca + `use-package` integration:
   ;;    (side . right)))
   )
 
-;; Optional - register macher presets for use with any gptel request.
 (use-package gptel
   ;; ...
   :config
-  (macher-install))
+  ;; Recommended - register macher tools and presets with gptel.  This doesn't
+  ;; touch any gptel settings or activate any tools/presets; it just makes them
+  ;; available in the gptel menu.
+  (macher-install)
+  ;; Optional - apply the "@macher-base" preset globally.  You probably want to
+  ;; do this if you're managing macher tools directly from the gptel menu.
+  ;; This is a utility preset that must be applied for macher tools to work -
+  ;; see the docstring for details.
+  (gptel-apply-preset macher-preset-base))
 ```
 
 ## Usage
@@ -188,71 +193,43 @@ You can use standard undo/redo within the patch buffer to move through your revi
 
 ## Customization
 
-### UI
+You can see customizable variables/sub-groups with `M-x customize-group RET macher`.
 
-The entire macher workflow/UI can be customized or replaced.
+### Actions
 
-- **`macher-process-request-function`**: Controls what happens when a macher request completes. By
-  default, this generates and displays a patch buffer, but you could customize it to auto-apply
-  changes, send them to a code review system, etc.
+| Variable                          | Description                                                         |
+| --------------------------------- | ------------------------------------------------------------------- |
+| `macher-actions-alist`            | Defines available actions (implement, revise, discuss, etc.)        |
+| `macher-action-buffer-ui`         | UI style for action buffers: `'default`, `'org`, `'basic`, or `nil` |
+| `macher-action-buffer-setup-hook` | Hook run when creating action buffers                               |
+| `macher-action-dispatch-hook`     | Hook run when invoking an action                                    |
+| `macher-before-action-functions`  | Functions run before sending the request                            |
+| `macher-after-action-functions`   | Functions run after request completes                               |
 
-    If you stick with the default for this function, you can also customize the patch behavior:
-    - **`macher-patch-prepare-functions`**: Generate patch content (e.g. a unified diff, metadata,
-      ...).
+### Workspace
 
-    - **`macher-patch-buffer-ui`**: Controls the baseline patch buffer setup. Currently this can be:
-        - `'diff`: The default, sets up `diff-mode` and adds a buffer-local `macher-patch-ready-hook`
-          to display the buffer.
+| Variable                          | Description                                          |
+| --------------------------------- | ---------------------------------------------------- |
+| `macher-workspace-functions`      | Functions to determine the workspace for a buffer    |
+| `macher-workspace-types-alist`    | Defines workspace types (project, file, etc.)        |
+| `macher-context-string-function`  | Generates workspace context information for requests |
+| `macher-context-string-max-files` | Max files to list in workspace context               |
 
-        - `nil`: No setup. Manual control via the `macher-patch-buffer-setup-hook`.
+### Processing
 
-    - **`macher-patch-buffer-setup-hook`**: Additional functions run when the patch buffer is created.
-
-    - **`macher-patch-ready-hook`**: Controls behavior when the patch buffer is ready to display to
-      the user. You could customize this to add alternate behavior like auto-applying changes or
-      opening ediff.
-
-- **`macher-action-buffer-ui`**: Controls prompt formatting and general UI configuration in action
-  buffers, i.e. when using `macher-implement`, `macher-revise`, etc.
-
-    You can set this to:
-    - `'default`: Reasonably-nicely-formatted prompts/responses using `gptel-mode` with your
-      `gptel-default-mode`.
-
-    - `'org`: Uses `org-mode` and `gptel-org` for structured navigation and
-      nice content folding.
-
-    - `'basic`: Sets up prompt formatting without any particular major mode or other UI tweaks.
-
-    - `nil`: No setup. Use this for full manual control via the `macher-action-buffer-setup-hook`.
-
-    All options except `nil` will add buffer-local behavior to these hooks:
-    - **`macher-before-action-functions`**: Handles displaying the action buffer and inserting a
-      formatted version of the prompt.
-
-    - **`macher-after-action-functions`**: Handles output cleanup after errored/aborted requests.
-      You could customize this to add completion timestamps, request status logs, etc.
-
-- **`macher-action-buffer-setup-hook`**: Runs after the base UI configuration is applied to new
-  action buffers. Use this for additional customization on top of the chosen
-  `macher-action-buffer-ui` configuration.
+| Variable                          | Description                                                           |
+| --------------------------------- | --------------------------------------------------------------------- |
+| `macher-process-request-function` | What to do when a request completes (shows a patch buffer by default) |
+| `macher-patch-prepare-functions`  | Generate patch content (diff, metadata, etc.)                         |
+| `macher-patch-buffer-ui`          | Patch buffer UI: `'diff` or `nil`                                     |
+| `macher-patch-buffer-setup-hook`  | Hook run when creating patch buffers                                  |
+| `macher-patch-ready-hook`         | Hook run when patch is ready to display                               |
 
 ### Tools
 
-You can add custom per-request tools by customizing the `macher-edit-tools-function` and/or
-`macher-read-tools-function`. For example, you could add a tool for providing a commit message, and
-include the result in the patch buffer via a custom entry in the `macher-patch-prepare-functions`.
-See the docstrings for more details.
-
-### Contextual information
-
-The `macher-context-string-function` controls the contextual workspace information that gets added
-to macher requests.
-
-You might also want to customize the gptel system message and/or the
-`gptel-context-string-function`, for example by setting them buffer-locally in the
-`macher-action-buffer-setup-hook`.
-
-### Etc.
-
-Check `M-x customize-group RET macher` for the full list of hooks and customization options.
+| Variable                   | Description                                  |
+| -------------------------- | -------------------------------------------- |
+| `macher-tools`             | Tool definitions for reading/editing files   |
+| `macher-presets-alist`     | Preset definitions (macher, macher-ro, etc.) |
+| `macher-tool-category`     | Category for macher tools in gptel registry  |
+| `macher-match-max-columns` | Max line length for search results           |
