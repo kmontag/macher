@@ -190,6 +190,51 @@
           (expect contents :to-equal `((,temp-file . ("original file content" . "new content"))))))
       (it "sets the dirty-p flag"
         (macher--tool-write-file context temp-file "new content")
+        (expect (macher-context-dirty-p context) :to-be-truthy)))
+
+    (describe "macher--tool-move-file"
+      (it "moves file to new location"
+        (let ((dest-file (concat temp-file "-moved")))
+          (macher--tool-move-file context temp-file dest-file)
+          (let ((contents (macher-context-contents context)))
+            ;; Original file should be deleted (content set to nil).
+            (expect (cdr (assoc temp-file contents)) :to-equal '("original file content" . nil))
+            ;; New file should have the original content.
+            (expect (cdr (assoc dest-file contents)) :to-equal '(nil . "original file content")))))
+      (it "sets the dirty-p flag"
+        (let ((dest-file (concat temp-file "-moved")))
+          (macher--tool-move-file context temp-file dest-file)
+          (expect (macher-context-dirty-p context) :to-be-truthy))))
+
+    (describe "macher--tool-delete-file"
+      (it "deletes file content"
+        (macher--tool-delete-file context temp-file)
+        (let ((contents (macher-context-contents context)))
+          (expect (cdr (assoc temp-file contents)) :to-equal '("original file content" . nil))))
+      (it "sets the dirty-p flag"
+        (macher--tool-delete-file context temp-file)
+        (expect (macher-context-dirty-p context) :to-be-truthy)))
+
+    (describe "macher--tool-edit-file"
+      (it "edits file content with single replacement"
+        (macher--tool-edit-file context temp-file "original" "modified" nil)
+        (let ((contents (macher-context-contents context)))
+          (expect (cdr (assoc temp-file contents))
+                  :to-equal '("original file content" . "modified file content"))))
+      (it "edits file content with replace-all"
+        ;; Create a file with multiple occurrences.
+        (with-temp-buffer
+          (insert "hello world hello universe")
+          (write-region (point-min) (point-max) temp-file))
+        ;; Reload context with new content.
+        (setq context (macher--make-context :workspace `(file . ,temp-file)))
+        (expect (macher-context-dirty-p context) :to-be nil)
+        (macher--tool-edit-file context temp-file "hello" "hi" t)
+        (let ((contents (macher-context-contents context)))
+          (expect (cdr (assoc temp-file contents))
+                  :to-equal '("hello world hello universe" . "hi world hi universe"))))
+      (it "sets the dirty-p flag"
+        (macher--tool-edit-file context temp-file "original" "modified" nil)
         (expect (macher-context-dirty-p context) :to-be-truthy))))
 
   (describe "macher--process-request"
