@@ -3955,7 +3955,11 @@ this function registers four presets:
 
 A DEPRECATED parameter was previously used to control preset names; this
 can now be done by customizing the `macher-presets-alist'."
-
+  (when deprecated
+    (warn
+     (concat
+      "The NAMES parameter to `macher-install' is no longer supported.  "
+      "You can customize preset names by customizing `macher-presets-alist'.")))
   (macher--install-presets)
   (macher--install-tools))
 
