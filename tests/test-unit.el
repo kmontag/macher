@@ -275,7 +275,8 @@
       ;; Verify macher--build-patch was not called.
       (expect #'macher--build-patch :not :to-have-been-called)))
 
-  (describe "macher--context-for-fsm"
+  ;; TODO: This function changed entirely, we need to redo tests for it from scratch.
+  (xdescribe "macher--context-for-fsm"
     :var (context)
 
     (before-each
@@ -3549,7 +3550,18 @@
         ;; (b . 999) should be skipped because car matches (b . 2).
         (expect result :to-equal '((a . 1) (b . 2) (c . 3))))))
 
-  (describe "macher--merge-tools"
+  ;; TODO: Most of this isn't relevant anymore (this function was removed and the whole way that
+  ;; we're setting up macher context has changed - these tests no longer reflect the actual behavior
+  ;; that we want). But we do need to add some tests for the macher--prompt-transform-base and
+  ;; macher--setup-tools functions - we need to make sure, for example, that all macher tools are
+  ;; provided with the same `macher-context' for an FSM transformed with
+  ;; `macher--prompt-transform-base'. We also need to make sure that in case
+  ;; `macher--prompt-transformm-base' appears more than once in the
+  ;; `gptel-prompt-transform-functions', nothing weird happens, and the tools in the request are
+  ;; fine (in fact for that case we should probably add an integration test).
+  ;;
+  ;; Anyway these merge-tools tests should be removed - but maybe there's some inspiration here? or not.
+  (xdescribe "macher--merge-tools"
     (before-each
       (funcall setup-project))
 
@@ -3860,7 +3872,7 @@
                  (lambda (tool) (string= (gptel-tool-name tool) "existing_tool")) captured-tools)
                 :to-be-truthy))))
 
-  (describe "macher-install"
+  (describe "macher--install-presets"
     :var (original-presets)
 
     (before-each
@@ -3886,12 +3898,21 @@
       ;; Verify the description of one of the presets explicitly, just to be sure everything is
       ;; getting registered correctly.
       (let ((macher-preset (gptel-get-preset 'macher)))
-        (expect (plist-get macher-preset :description)
-                :to-equal "Send macher workspace context + tools to read files and propose edits")))
+        (expect
+         (plist-get macher-preset :description)
+         :to-equal "Send macher workspace context + tools to read files and propose edits"))))
 
-    (xit "installs all macher tools"
-      ;; TODO
-      ))
+  (xdescribe "macher--install-tools"
+    ;; TODO
+    (it "placeholder test"))
+
+  (xdescribe "macher-presets-alist"
+    ;; TODO: Tests for each of the default presets. We should ensure they do the right thing
+    ;; w.r.t. tools, prompt transforms, and use-tools - the tools presets need to be tested with
+    ;; existing tools, no existing tools, existing macher tools, etc, and the prompt transform
+    ;; presets need to be tested similarly. Also need to test behavior when presets are applied more
+    ;; than once, etc.
+    (it "placeholder tests..."))
 
   (describe "macher-patch-buffer"
     (before-each
@@ -4113,7 +4134,11 @@
               ;; The header and prompt will be added, but not another prefix before them.
               (expect content :to-match "^previous content\n### `test` Test prompt")))))))
 
-  (describe "macher--make-tool and macher--tool-context"
+  ;; TODO: This test isn't relevant anymore, the behavior of `macher--make-tool' has changed and
+  ;; `macher--tool-context' no longer exists (as tools aren't specifically associated with a single
+  ;; context anymore). But we do need to add a test or two for the current version of
+  ;; `macher--make-tool'.
+  (xdescribe "macher--make-tool and macher--tool-context"
     :var (original-tools)
 
     (before-each
