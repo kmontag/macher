@@ -88,8 +88,8 @@ After calling `(macher-install)`, you can use macher presets in any gptel reques
 - **`@macher-ro`**: Read-only access. Adds workspace context plus tools to read and search files,
   but no editing tools.
 
-- **`@macher-system`**: Context only. Adds workspace context without any tools. Use when you want
-  the LLM to understand your project structure but don't need file access.
+- **`@macher-system`**: Context only. Adds workspace context without any tools. Useful when you
+  want the LLM to understand your project structure but don't need file access.
 
 - **`@macher-base`**: Utility preset that enables macher tool infrastructure. Macher tools will fail
   unless this is applied. This gets applied automatically when using other macher presets, but you
@@ -137,7 +137,7 @@ You can define custom actions in `macher-actions-alist`.
 macher can add information about the current workspace (project name, location, file listings) to
 your system prompt.
 
-If you've called `(macher-enable)` and/or activated `@macher-base` , any instances of the
+If you've called `(macher-enable)` and/or activated `@macher-base`, any instances of the
 `macher-context-string-placeholder` (default: `"[macher_placeholder]"`) in your system prompt will
 be replaced with a description of the request buffer's workspace.
 
