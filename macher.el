@@ -507,266 +507,266 @@ adding tools to this category directly; instead, customize
   :group 'macher)
 
 (defcustom macher-tools
-  '((:name
+  `((:name
      "read_file_in_workspace"
-     :function #'macher--tool-read-file
+     :function macher--tool-read-file
      :description
-     (concat
-      "Read file contents in the workspace.\n"
-      "\n"
-      "USAGE RULES:\n"
-      "1. NEVER re-read files that were already provided in the REQUEST CONTEXT\n"
-      "2. For files NOT in the REQUEST CONTEXT: try reading the ENTIRE file first "
-      "(no offset/limit) to understand its structure\n"
-      "\n"
-      "!!! CRITICAL: You MUST NOT use this tool to read files whose contents were already "
-      "provided to you in the REQUEST CONTEXT, except to resolve confusion or verify edits.\n"
-      "\n"
-      "Returns the file contents as a string.")
+     ,(concat
+       "Read file contents in the workspace.\n"
+       "\n"
+       "USAGE RULES:\n"
+       "1. NEVER re-read files that were already provided in the REQUEST CONTEXT\n"
+       "2. For files NOT in the REQUEST CONTEXT: try reading the ENTIRE file first "
+       "(no offset/limit) to understand its structure\n"
+       "\n"
+       "!!! CRITICAL: You MUST NOT use this tool to read files whose contents were already "
+       "provided to you in the REQUEST CONTEXT, except to resolve confusion or verify edits.\n"
+       "\n"
+       "Returns the file contents as a string.")
      :confirm nil
      :include nil
      :args
-     `((:name "path" :type string :description "Path to the file, relative to workspace root")
-       (:name
-        "offset"
-        :type number
-        :optional t
-        :description
-        ,(concat
-          "Line number to start reading from (1-based). For negative values, starts at that many "
-          "lines before the end of the file. ONLY use for targeted re-reads - read entire file first!"))
-       (:name
-        "limit"
-        :type number
-        :optional t
-        :description
-        ,(concat
-          "Number of lines to read from the start position. For negative values, the actual "
-          "limit is computed as (total_lines + limit). For example, with a 100-line file: "
-          "limit=10 reads 10 lines, limit=-10 reads 90 lines (100 + (-10)). "
-          "ONLY use for targeted re-reads - read entire file first!"))
-       (:name
-        "show_line_numbers"
-        :type boolean
-        :optional t
-        :description
-        ,(concat
-          "Include line numbers in output (cat -n style: each line prefixed with right-aligned "
-          "line number and a tab character)"))))
+     ((:name "path" :type string :description "Path to the file, relative to workspace root")
+      (:name
+       "offset"
+       :type number
+       :optional t
+       :description
+       ,(concat
+         "Line number to start reading from (1-based). For negative values, starts at that many "
+         "lines before the end of the file. ONLY use for targeted re-reads - read entire file first!"))
+      (:name
+       "limit"
+       :type number
+       :optional t
+       :description
+       ,(concat
+         "Number of lines to read from the start position. For negative values, the actual "
+         "limit is computed as (total_lines + limit). For example, with a 100-line file: "
+         "limit=10 reads 10 lines, limit=-10 reads 90 lines (100 + (-10)). "
+         "ONLY use for targeted re-reads - read entire file first!"))
+      (:name
+       "show_line_numbers"
+       :type boolean
+       :optional t
+       :description
+       ,(concat
+         "Include line numbers in output (cat -n style: each line prefixed with right-aligned "
+         "line number and a tab character)"))))
 
     (:name
      "list_directory_in_workspace"
-     :function #'macher--tool-list-directory
+     :function macher--tool-list-directory
      :description
-     (concat
-      "List directory contents in the workspace. "
-      "Shows files and directories with clear prefixes (file: or dir:). "
-      "Can optionally recurse into subdirectories and show file sizes. "
-      "Takes the current workspace state into account, including pending changes.\n\n"
-      "NOTE: The full workspace file listing is usually already provided in the "
-      "WORKSPACE CONTEXT. Only use this tool if you need specific directory "
-      "details or file sizes.")
+     ,(concat
+       "List directory contents in the workspace. "
+       "Shows files and directories with clear prefixes (file: or dir:). "
+       "Can optionally recurse into subdirectories and show file sizes. "
+       "Takes the current workspace state into account, including pending changes.\n\n"
+       "NOTE: The full workspace file listing is usually already provided in the "
+       "WORKSPACE CONTEXT. Only use this tool if you need specific directory "
+       "details or file sizes.")
      :confirm nil
      :include nil
      :args
-     `((:name "path" :type string :description "Path to the directory, relative to workspace root")
-       (:name
-        "recursive"
-        :type boolean
-        :optional t
-        :description "If true, recursively list subdirectories")
-       (:name
-        "sizes"
-        :type boolean
-        :optional t
-        :description "If true, include file sizes in the output")))
+     ((:name "path" :type string :description "Path to the directory, relative to workspace root")
+      (:name
+       "recursive"
+       :type boolean
+       :optional t
+       :description "If true, recursively list subdirectories")
+      (:name
+       "sizes"
+       :type boolean
+       :optional t
+       :description "If true, include file sizes in the output")))
 
     (:name
      "search_in_workspace"
-     :function #'macher--tool-search
+     :function macher--tool-search
      :description
-     (concat
-      "Search for patterns within the workspace using grep or something like it.\n"
-      "\n"
-      "Supports two output modes:\n"
-      "- ='files' (default): Shows file paths with match counts\n"
-      "- ='content': Shows matching lines with optional context\n"
-      "\n"
-      "!!! CRITICAL: You MUST NOT use this tool to search files whose contents were "
-      "already provided to you in the REQUEST CONTEXT. You already have their contents!")
+     ,(concat
+       "Search for patterns within the workspace using grep or something like it.\n"
+       "\n"
+       "Supports two output modes:\n"
+       "- ='files' (default): Shows file paths with match counts\n"
+       "- ='content': Shows matching lines with optional context\n"
+       "\n"
+       "!!! CRITICAL: You MUST NOT use this tool to search files whose contents were "
+       "already provided to you in the REQUEST CONTEXT. You already have their contents!")
      :confirm nil
      :include nil
      :args
-     `((:name
-        "pattern"
-        :type string
-        :description "Regular expression pattern to search for (required)")
-       (:name
-        "path"
-        :type string
-        :optional t
-        :description "Directory or file to search, relative to workspace root (defaults to workspace root)")
-       (:name
-        "file_regexp"
-        :type string
-        :optional t
-        :description
-        ,(concat
-          "Filter files by regular expression matched against file path relative to search path. "
-          "Examples: '\\.py$' for Python files, 'src/.*\\.js$' for JS files in src/, "
-          "'test.*\\.py$' for test files"))
-       (:name
-        "mode"
-        :type string
-        :optional t
-        :description
-        ,(concat
-          "Output mode: ='files' (default, shows paths + counts) or "
-          "='content' (shows grep-style matching lines)"))
-       (:name
-        "case_insensitive"
-        :type boolean
-        :optional t
-        :description "If true, perform case-insensitive search (default: false)")
-       (:name
-        "lines_after"
-        :type number
-        :optional t
-        :description "Number of lines to show after each match (content mode only). Like `grep -A`.")
-       (:name
-        "lines_before"
-        :type number
-        :optional t
-        :description "Number of lines to show before each match (content mode only). Like `grep -B`.")
-       (:name
-        "show_line_numbers"
-        :type boolean
-        :optional t
-        :description "Include line numbers in output (content mode only). Like `grep -n`.")
-       (:name
-        "head_limit"
-        :type number
-        :optional t
-        :description "Limit output to first N lines (equivalent to piping through `head -N`)")))
+     ((:name
+       "pattern"
+       :type string
+       :description "Regular expression pattern to search for (required)")
+      (:name
+       "path"
+       :type string
+       :optional t
+       :description "Directory or file to search, relative to workspace root (defaults to workspace root)")
+      (:name
+       "file_regexp"
+       :type string
+       :optional t
+       :description
+       ,(concat
+         "Filter files by regular expression matched against file path relative to search path. "
+         "Examples: '\\.py$' for Python files, 'src/.*\\.js$' for JS files in src/, "
+         "'test.*\\.py$' for test files"))
+      (:name
+       "mode"
+       :type string
+       :optional t
+       :description
+       ,(concat
+         "Output mode: ='files' (default, shows paths + counts) or "
+         "='content' (shows grep-style matching lines)"))
+      (:name
+       "case_insensitive"
+       :type boolean
+       :optional t
+       :description "If true, perform case-insensitive search (default: false)")
+      (:name
+       "lines_after"
+       :type number
+       :optional t
+       :description "Number of lines to show after each match (content mode only). Like `grep -A`.")
+      (:name
+       "lines_before"
+       :type number
+       :optional t
+       :description "Number of lines to show before each match (content mode only). Like `grep -B`.")
+      (:name
+       "show_line_numbers"
+       :type boolean
+       :optional t
+       :description "Include line numbers in output (content mode only). Like `grep -n`.")
+      (:name
+       "head_limit"
+       :type number
+       :optional t
+       :description "Limit output to first N lines (equivalent to piping through `head -N`)")))
 
     (:name
      "edit_file_in_workspace"
-     :function #'macher--tool-edit-file
+     :function macher--tool-edit-file
      :description
-     (concat
-      "Make exact string replacements in a text file. "
-      "The old_text must match exactly including all whitespace, newlines, and indentation. "
-      "Do NOT include line numbers in old_text or new_text - use only the actual file content. "
-      "If replace_all is false and multiple matches exist, the operation fails - "
-      "provide more specific context in old_text to make the match unique. "
-      "Returns null on success.")
+     ,(concat
+       "Make exact string replacements in a text file. "
+       "The old_text must match exactly including all whitespace, newlines, and indentation. "
+       "Do NOT include line numbers in old_text or new_text - use only the actual file content. "
+       "If replace_all is false and multiple matches exist, the operation fails - "
+       "provide more specific context in old_text to make the match unique. "
+       "Returns null on success.")
      :confirm nil
      :include nil
      :args
-     `((:name "path" :type string :description "Path to the file, relative to workspace root")
-       (:name
-        "old_text"
-        :type string
-        :description
-        ,(concat
-          "Exact text to find and replace. Must match precisely including whitespace and "
-          "newlines. Do NOT include line numbers."))
-       (:name "new_text" :type string :description "Text to replace the old_text with")
-       (:name
-        "replace_all"
-        :type boolean
-        :optional t
-        :description "If true, replace all occurrences. If false (default), error if multiple matches exist")))
+     ((:name "path" :type string :description "Path to the file, relative to workspace root")
+      (:name
+       "old_text"
+       :type string
+       :description
+       ,(concat
+         "Exact text to find and replace. Must match precisely including whitespace and "
+         "newlines. Do NOT include line numbers."))
+      (:name "new_text" :type string :description "Text to replace the old_text with")
+      (:name
+       "replace_all"
+       :type boolean
+       :optional t
+       :description "If true, replace all occurrences. If false (default), error if multiple matches exist")))
 
     (:name
      "multi_edit_file_in_workspace"
-     :function #'macher--tool-multi-edit-file
+     :function macher--tool-multi-edit-file
      :description
-     (concat
-      "Make multiple exact string replacements in a single file. "
-      "Edits are applied sequentially in array order to the same file. "
-      "Each edit requires exact whitespace matching. Do NOT include line numbers in old_text or new_text. "
-      "If any edit fails, no changes are made. Returns null on success.")
+     ,(concat
+       "Make multiple exact string replacements in a single file. "
+       "Edits are applied sequentially in array order to the same file. "
+       "Each edit requires exact whitespace matching. Do NOT include line numbers in old_text or new_text. "
+       "If any edit fails, no changes are made. Returns null on success.")
      :confirm nil
      :include nil
      :args
-     `((:name "path" :type string :description "Path to the file, relative to workspace root")
-       (:name
-        "edits"
-        :type array
-        :description "Array of edit operations to apply in sequence"
-        :items
-        (:type
-         object
-         :properties
-         (:old_text
-          (:type
-           string
-           :description
-           ,(concat
-             "Exact text to find and replace. Must match precisely including whitespace "
-             "and newlines. Do NOT include line numbers."))
-          :new_text (:type string :description "Text to replace the old_text with")
-          :replace_all
-          (:type
-           boolean
-           :description "If true, replace all occurrences. If false (default), error if multiple matches exist"))
-         :required ["old_text" "new_text"]))))
+     ((:name "path" :type string :description "Path to the file, relative to workspace root")
+      (:name
+       "edits"
+       :type array
+       :description "Array of edit operations to apply in sequence"
+       :items
+       (:type
+        object
+        :properties
+        (:old_text
+         (:type
+          string
+          :description
+          ,(concat
+            "Exact text to find and replace. Must match precisely including whitespace "
+            "and newlines. Do NOT include line numbers."))
+         :new_text (:type string :description "Text to replace the old_text with")
+         :replace_all
+         (:type
+          boolean
+          :description "If true, replace all occurrences. If false (default), error if multiple matches exist"))
+        :required ["old_text" "new_text"]))))
 
     (:name
      "write_file_in_workspace"
-     :function #'macher--tool-write-file
+     :function macher--tool-write-file
      :description
-     (concat
-      "Create a new file or completely overwrite an existing file. "
-      "WARNING: This replaces ALL existing content without warning. "
-      "Use edit_file_in_workspace for partial changes. "
-      "Returns null on success.")
+     ,(concat
+       "Create a new file or completely overwrite an existing file. "
+       "WARNING: This replaces ALL existing content without warning. "
+       "Use edit_file_in_workspace for partial changes. "
+       "Returns null on success.")
      :confirm nil
      :include nil
      :args
-     '((:name "path" :type string :description "Path to the file, relative to workspace root")
-       (:name
-        "content"
-        :type string
-        :description "Complete new content that will replace the entire file")))
+     ((:name "path" :type string :description "Path to the file, relative to workspace root")
+      (:name
+       "content"
+       :type string
+       :description "Complete new content that will replace the entire file")))
 
     (:name
      "move_file_in_workspace"
-     :function #'macher--tool-move-file
+     :function macher--tool-move-file
      :description
-     (concat
-      "Move or rename files within the workspace. "
-      "Can move files between directories and rename them in a single operation. "
-      "Fails if the destination already exists. "
-      "Returns null on success.")
+     ,(concat
+       "Move or rename files within the workspace. "
+       "Can move files between directories and rename them in a single operation. "
+       "Fails if the destination already exists. "
+       "Returns null on success.")
      :confirm nil
      :include nil
      :args
-     '((:name
-        "source_path"
-        :type string
-        :description "Current path of the file to move, relative to workspace root")
-       (:name
-        "destination_path"
-        :type string
-        :description "New path for the file, relative to workspace root")))
+     ((:name
+       "source_path"
+       :type string
+       :description "Current path of the file to move, relative to workspace root")
+      (:name
+       "destination_path"
+       :type string
+       :description "New path for the file, relative to workspace root")))
 
     (:name
      "delete_file_in_workspace"
-     :function #'macher--tool-delete-file
+     :function macher--tool-delete-file
      :description
-     (concat
-      "Delete a file from the workspace. "
-      "Fails if the file does not exist. "
-      "Returns null on success.")
+     ,(concat
+       "Delete a file from the workspace. "
+       "Fails if the file does not exist. "
+       "Returns null on success.")
      :confirm nil
      :include nil
      :args
-     '((:name
-        "path"
-        :type string
-        :description "Path to the file to delete, relative to workspace root"))))
+     ((:name
+       "path"
+       :type string
+       :description "Path to the file to delete, relative to workspace root"))))
   "List of macher tool definitions.
 
 Entries are plists of keyword arguments for `gptel-make-tool', except
@@ -3331,18 +3331,19 @@ Any matching tools already present in the variable
 `gptel-tools' (according to their name/category) will be skipped."
   (when (plist-get keys :tools)
     (error "Cannot include :tools in a preset spec for `macher--tools-preset'"))
-  (when (plist-get keys :tools)
-    (error "Cannot include tools in a preset spec for `macher--tools-preset'"))
+  (when (plist-get keys :use-tools)
+    (error "Cannot include :use-tools in a preset spec for `macher--tools-preset'"))
   (let* ((parents (append (ensure-list (plist-get keys :parents)) (list macher-preset-base))))
     (plist-put
      (plist-put
-      keys
-
-      ;; Make sure tools are enabled, but preserve the existing value of `gptel-use-tools' if
-      ;; already non-nil (e.g. \\='force.
-      :use-tools '(:function (lambda (use-tools) (or use-tools t))))
-     ;; Add tools from `macher-tools' matching the predicate.
-     :tools `(:function ,(apply-partially #'macher--preset-function-add-tools pred)))))
+      (plist-put
+       keys
+       ;; Make sure tools are enabled, but preserve the existing value of `gptel-use-tools' if
+       ;; already non-nil (e.g. \\='force.
+       :use-tools '(:function (lambda (use-tools) (or use-tools t))))
+      ;; Add tools from `macher-tools' matching the predicate.
+      :tools `(:function ,(apply-partially #'macher--preset-function-add-tools pred)))
+     :parents parents)))
 
 (defun macher--preset-use-tools-function (use-tools)
   "Preset function for `gptel-use-tools' which ensures tools are available.
@@ -3360,8 +3361,7 @@ otherwise."
        ;; Include all macher tools.
        (lambda (_) t)
        :description "Send macher workspace context + tools to read files and propose edits"
-       :parents (list macher-preset-context)
-       :use-tools '(:function macher--preset-use-tools-function)))
+       :parents (list macher-preset-context)))
     ;; Enable read-only macher tools, and disable other macher tools.
     (macher-ro
      .
@@ -3370,8 +3370,7 @@ otherwise."
        (lambda (tool-def) (string= (plist-get tool-def :category) "read"))
        :description "Send macher workspace context + tools to read files"
        ;; Clear other macher tools before applying - force read-only.
-       :parents (list macher-preset-context macher--preset-clear-tools)
-       :use-tools '(:function macher--preset-use-tools-function)))
+       :parents (list macher-preset-context macher--preset-clear-tools)))
     ;; Add contextual info about the current workspace.
     (macher-context . ,macher-preset-context)
     ;; Inject context into macher tools.
@@ -3455,47 +3454,78 @@ or using it as a parent in your own presets.
 
 CALLBACK and FSM are as described in the
 `gptel-prompt-transform-functions' documentation."
-  (when-let* ((info (gptel-fsm-info fsm))
-              (tools (plist-get info :tools))
-              (request-macher-tools
-               (cl-remove-if-not
-                (lambda (tool) (string= (gptel-tool-category tool) macher-tool-category)) tools)))
-    ;; Create a new macher-context for this request.
-    (when-let ((workspace (macher-workspace)))
-      (let* ((context (macher--make-context :workspace workspace))
-             ;; Wrap each macher tool to inject the context.
-             (wrapped-tools
-              (mapcar
-               (lambda (tool)
-                 (let* ((original-fn (gptel-tool-function tool))
-                        (tool-args (gptel-tool-args tool))
-                        (args-count (length tool-args))
-                        ;; Create wrapped function that injects context as the last parameter.
-                        (wrapped-fn
-                         (lambda (&rest args)
-                           ;; Sanity check: verify arg count matches expected.
-                           (let ((provided-count args-count))
-                             (unless (eq provided-count (length tool-args))
-                               (error
-                                "Tool %s called with %d args but %d were specified"
-                                (gptel-tool-name tool)
-                                provided-count
-                                required-args-count)))
-                           ;; Call original function with args plus the context.
-                           (apply original-fn (append args (list context))))))
-                   ;; Create a copy of the tool with the wrapped function.
-                   (let ((tool-copy (copy-gptel-tool tool)))
-                     (setf (gptel-tool-function tool-copy) wrapped-fn)
-                     tool-copy)))
-               request-macher-tools))
-             ;; Remove original macher tools from the tools list.
-             (other-tools
-              (cl-remove-if
-               (lambda (tool) (string= (gptel-tool-cateogry tool) macher-tool-category))))
-             ;; Combine other tools with wrapped tools.
-             (updated-tools (append other-tools wrapped-tools)))
-        ;; Update the FSM's tools list.
-        (setf (gptel-fsm-info fsm) (plist-put info :tools updated-tools)))))
+  (let ((transition-handler-did-run nil))
+    ;; We don't have access to the request tools at this point, so we need to inject a transition
+    ;; handler that will fire when the request state changes (i.e. when it's sent), and inject
+    ;; context into the tools at that point.
+    (macher--add-transition-handler
+     fsm
+     (lambda (fsm)
+       "Initialize macher tools in the FSM with request-specific context.
+
+This function is a no-op after the first time it's called, i.e. it will
+run only once (on the request's first state transition)."
+       (unless transition-handler-did-run
+         ;; Don't run again.
+         (setq transition-handler-did-run t)
+         (let* ((info (gptel-fsm-info fsm))
+                (tools (plist-get info :tools))
+                (buffer (plist-get info :buffer)))
+           (when-let ((request-macher-tools
+                       (cl-remove-if-not
+                        (lambda (tool)
+                          (string= (gptel-tool-category tool) macher-tool-category))
+                        tools)))
+             (if (not buffer)
+                 ;; This case should presumably never come up...
+                 (warn "gptel request buffer could not be determined, skipping macher setup")
+               ;; Create a new macher-context for this request.
+               (let*
+                   ((workspace (macher-workspace buffer))
+                    (context (and workspace (macher--make-context :workspace workspace)))
+                    ;; Wrap each macher tool to inject the context.
+                    (wrapped-tools
+                     (mapcar
+                      (lambda (tool)
+                        (let*
+                            ((orig-fn (gptel-tool-function tool))
+                             (tool-name (gptel-tool-name tool))
+                             (tool-args (gptel-tool-args tool))
+                             (args-count (length tool-args))
+                             ;; Create wrapped function that injects context as the last parameter.
+                             (wrapped-fn
+                              `(lambda (&rest args)
+                                 ,(format "Request-specific wrapper for macher tool \"%s\"."
+                                          tool-name)
+                                 (unless ,context
+                                   (warn
+                                    (concat
+                                     (format
+                                      "macher tool \"%s\" called, but the request buffer \"%s\" "
+                                      ,tool-name ,buffer)
+                                     "is not in a macher workspace."))
+                                   (error "The tool \"%s\" is not available" ,tool-name))
+                                 ;; Call original function with args plus the context.
+                                 (apply ,orig-fn ,context args)))
+                             (tool-copy (gptel--copy-tool tool)))
+                          ;; Create a copy of the tool with the wrapped function.
+                          (setf (gptel-tool-function tool-copy) wrapped-fn)
+                          ;; Replace the category so we don't try to modify this tool again if this
+                          ;; transform somehow gets run more than once.
+                          (setf (gptel-tool-category tool-copy)
+                                (format "%s_processed" macher-tool-category))
+                          tool-copy))
+                      request-macher-tools))
+                    ;; Remove original macher tools from the tools list.
+                    (other-tools
+                     (cl-remove-if
+                      (lambda (tool)
+                        (string= (gptel-tool-category tool) macher-tool-category))
+                      tools))
+                    ;; Combine other tools with wrapped tools.
+                    (updated-tools (append other-tools wrapped-tools)))
+                 ;; Update the FSM's tools list.
+                 (setf (gptel-fsm-info fsm) (plist-put info :tools updated-tools))))))))))
   (funcall callback))
 
 (defun macher--add-termination-handler (fsm handler)
@@ -3679,23 +3709,26 @@ If ANON is non-nil, don't register the tool with the gptel registry."
   ;; Extract the original function from slots.
   (let* ((name (plist-get slots :name))
          (orig-fn (plist-get slots :function))
-         ;; The wrapped function will receive the context as an optional final argument
-         ;; (injected by macher--prompt-transform-inject-tools).
+         ;; Wrap the provided tool function with a sanity check to ensure that the macher context
+         ;; has been provided as the first argument.  This happens via the
+         ;; `macher--prompt-transform-setup-tools' transform, which injects the appropriate context
+         ;; into tool functions for outgiong gptel requests.
          (wrapped-fn
-          (lambda (&rest args)
-            ;; The context should be the last argument if provided.
-            ;; If not provided, this will gracefully fail with an error.
-            (let ((context (car (last args)))
-                  (tool-args (butlast args)))
-              (unless (macher-context-p context)
-                (warn
-                 (concat
-                  (format "macher tool \"%s\" called without context.  " name)
-                  "If you're using macher tools without macher presets, "
-                  "make sure you at least apply the \"@macher-base\" preset first."))
-                (error "The tool \"%s\" is not available" name))
-              ;; Call original function with context first, then the tool args.
-              (apply orig-fn context tool-args))))
+          (apply-partially `(lambda (orig-fn &rest args)
+                              ,(format "Wrapper for macher tool \"%s\"." name)
+                              ;; The context should be the last argument if provided.
+                              ;; If not provided, this will gracefully fail with an error.
+                              (let ((context (car args)))
+                                (unless (macher-context-p context)
+                                  (warn
+                                   (concat
+                                    (format "macher tool \"%s\" called without context.  " ,name)
+                                    "If you're managing macher tools manually, make sure you "
+                                    "apply the \"@macher-base\" preset before using them."))
+                                  (error "The tool \"%s\" is not available" ,name))
+                                ;; Call original function with context first, then the tool args.
+                                (apply orig-fn args)))
+                           orig-fn))
          (slots (plist-put (copy-sequence slots) :category macher-tool-category))
          (slots (plist-put slots :function wrapped-fn)))
     (apply (if anon
