@@ -101,7 +101,7 @@
 (defconst macher-preset-base
   `(:description
     "Utility preset, must be applied to use macher tools and system prompts"
-    :parents (,macher--preset-setup-tools ,macher--preset-system-transform))
+    :parents (,macher--preset-system-transform ,macher--preset-setup-tools))
   "Preset spec to set up macher behavior for outgoing gptel requests.
 
 You can apply this preset globally by calling `macher-enable'.
