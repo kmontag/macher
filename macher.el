@@ -3,7 +3,7 @@
 ;; Copyright (C) 2025 Kevin Montag
 
 ;; Author: Kevin Montag
-;; Version: 0.4.0
+;; Version: 0.5.0
 ;; Package-Requires: ((emacs "30.1") (gptel "0.9.8.5"))
 ;; Keywords: convenience, gptel, llm
 ;; URL: https://github.com/kmontag/macher
