@@ -612,7 +612,7 @@ run."
   :type 'hook
   :group 'macher-processing)
 
-;;;; Tools and tool settings
+;;;; Tools, Presets, and Tool Settings
 
 (defcustom macher-tool-category "macher"
   "The category to use when installing macher tools.
@@ -932,8 +932,6 @@ Set to nil to disable the limit entirely."
   :type '(choice (natnum :tag "Maximum number of characters") (const :tag "No limit" nil))
   :group 'macher-tools)
 
-;; ;;;; Presets
-
 (defcustom macher-presets-alist
   `(
     ;; Enable all macher tools.
@@ -959,17 +957,18 @@ Set to nil to disable the limit entirely."
     (macher-base . ,macher-preset-base))
   "Alist of definitions for macher presets.
 
-Entries have the form (NAME . KEYS).  NAME is the name to use (by
-default) when installing presets globally with `macher-install'.  KEYS
-are the keys to pass to `gptel-make-preset'.
+Entries have the form (NAME . KEYS).  NAME is the name to use when
+installing presets globally with `macher-install'.  KEYS are the keys to
+pass to `gptel-make-preset'.
 
-This list will be used to install presets globally, and also to create
-ephemeral presets when using workspace actions.  These ephemeral presets
-allow us to reuse gptel's preset functionality when making requests
-programmatically, without relying on certain names or config existing in
-the global state."
-  ;; TODO: Add type info.
-  )
+This list will also be used to resolve preset symbols when using
+`macher-action', in case a symbol isn't found in the global gptel
+registry.
+
+Otherwise there's nothing special about this list - you can also use
+macher tools in your custom presets, etc."
+  :type '(alist :key-type symbol :value-type plist)
+  :group 'macher-tools)
 
 ;;;; Workspace selection and configuration
 
