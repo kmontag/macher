@@ -2988,37 +2988,29 @@
 
       (it "generates context string for project workspace"
         (let* ((macher--workspace (cons 'project temp-dir))
-               (contexts `((,file1) (,file2)))
-               (result (macher--context-string contexts)))
+               (result (macher--context-string)))
           (expect (stringp result) :to-be-truthy)
           ;; Should contain workspace information.
-          (expect result :to-match "WORKSPACE CONTEXT")
+          (expect result :to-match "The user is currently working on a project named:")
           ;; Should contain our test files with full relative paths.
           (expect result :to-match "file1.txt")
           (expect result :to-match "file2.el")
           (expect result :to-match "subdir/file3.md")
-          ;; Should distinguish between files in context and files available for editing.
-          ;; Files in context should be in "already provided" section with proper structure.
+          ;; Should list files in the workspace.
           (expect result
-                  :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    file1\\.txt")
-          (expect result
-                  :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    file2\\.el")
-          ;; Files not in context should be in "available for editing" section.
-          (expect
-           result
-           :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    subdir/file3\\.md")
-          ;; Should contain workspace description.
-          (expect result :to-match "In-memory editing environment")))
+                  :to-match (format "Files in the %s workspace:" (file-name-nondirectory temp-dir)))
+          ;; Should contain project location.
+          (expect result :to-match "The project is located at:")))
 
       (it "generates context string for single-file workspace"
         (let* ((macher--workspace (cons 'file file1))
-               (contexts `((,file1)))
-               (result (macher--context-string contexts)))
+               (result (macher--context-string)))
           (expect (stringp result) :to-be-truthy)
           ;; Should contain workspace information.
-          (expect result :to-match "WORKSPACE CONTEXT")
+          (expect result :to-match "The user is currently working on a project named: `file1.txt`")
+          (message "reus %s" result)
           ;; Should contain only the single file.
-          (expect result :to-match "file1.txt")
+          (expect result :to-match "Files in the file1.txt workspace:\n[ ]+file1.txt")
           ;; Should not contain other files.
           (expect result :not :to-match "file2.el")
           (expect result :not :to-match "file3.md")))
@@ -3026,7 +3018,6 @@
       (it "properly categorizes files with same name in different directories"
         (let* ((workspace '(project . "/test/project/"))
                (workspace-files '("/test/project/test.txt" "/test/project/subdir/test.txt"))
-               (contexts '(("/test/project/test.txt")))
                result)
           ;; Mock workspace functions.
           (spy-on 'macher--workspace-root :and-return-value "/test/project/")
@@ -3036,25 +3027,20 @@
           ;; Set the test workspace.
           (with-temp-buffer
             (setq-local macher--workspace workspace)
-            (setq result (macher--context-string contexts)))
+            (setq result (macher--context-string)))
 
           ;; Verify the result structure.
           (expect (stringp result) :to-be-truthy)
-          (expect result :to-match "WORKSPACE CONTEXT")
+          (expect result :to-match "The user is currently working on a project named:")
 
-          ;; test.txt should be in the "already provided" section since it's in contexts
-          (expect result
-                  :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    test\\.txt")
+          ;; Both files should be listed.
+          (expect result :to-match "    test\\.txt")
+          (expect result :to-match "    subdir/test\\.txt")
 
-          ;; subdir/test.txt should be in "available for editing" since it's not in contexts
-          (expect
-           result
-           :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    subdir/test\\.txt")
+          ;; Should contain workspace file listing.
+          (expect result :to-match "Files in the test-project workspace:"))))
 
-          ;; Should contain workspace description
-          (expect result :to-match "In-memory editing environment"))))
-
-    (describe "macher--context-string with max-files limit"
+    (describe "with max-files limit"
       :var (temp-dir workspace all-files original-max-files)
 
       (before-each
@@ -3091,18 +3077,18 @@
 
       (it "lists all files when max-files is nil (no limit)"
         (setq macher-context-string-max-files nil)
-        (let ((result (macher--context-string '())))
+        (let ((result (macher--context-string)))
           (expect result :to-match "file1.txt")
           (expect result :to-match "file2.txt")
           (expect result :to-match "file3.txt")
           (expect result :to-match "file4.txt")
           (expect result :to-match "file5.txt")
-          (expect result :not :to-match "truncated")))
+          (expect result :not :to-match "more files")))
 
-      (it "respects max-files limit for non-context files"
+      (it "respects max-files limit"
         (setq macher-context-string-max-files 3)
-        (let ((result (macher--context-string '())))
-          ;; Should show only first 3 files in workspace order
+        (let ((result (macher--context-string)))
+          ;; Should show only first 3 files in workspace order.
           (expect result :to-match "file1.txt")
           (expect result :to-match "file2.txt")
           (expect result :to-match "file3.txt")
@@ -3110,91 +3096,28 @@
           (expect result :not :to-match "file5.txt")
           (expect result :to-match "2 more files")))
 
-      (it "always lists gptel context files first, even if they exceed the limit"
-        (setq macher-context-string-max-files 2)
-        ;; Create context with 3 files (more than the limit)
-        (let* ((file1 (nth 0 all-files))
-               (file3 (nth 2 all-files))
-               (file5 (nth 4 all-files))
-               (contexts `((,file1) (,file3) (,file5)))
-               (result (macher--context-string contexts)))
-
-          ;; All 3 context files should be listed in the "already provided" section
-          (expect result :to-match "Files already provided above")
-          (expect result :to-match "file1.txt")
-          (expect result :to-match "file3.txt")
-          (expect result :to-match "file5.txt")
-
-          ;; No additional files should be listed since context files exceed the limit
-          (expect result :not :to-match "Other files available")
-          (expect result :not :to-match "file2.txt")
-          (expect result :not :to-match "file4.txt")))
-
-      (it "lists remaining files up to limit after context files"
+      (it "lists files up to limit"
         (setq macher-context-string-max-files 4)
-        ;; Create context with 2 files, leaving room for 2 more
-        (let* ((file1 (nth 0 all-files))
-               (file3 (nth 2 all-files))
-               (contexts `((,file1) (,file3)))
-               (result (macher--context-string contexts)))
-          ;; Context files should be in "already provided" section
-          (expect result :to-match "Files already provided above")
+        (let ((result (macher--context-string)))
+          ;; Should show first 4 files.
           (expect result :to-match "file1.txt")
-          (expect result :to-match "file3.txt")
-
-          ;; Should list 2 more files (file2.txt and file4.txt in workspace order)
-          (expect result :to-match "Other files available")
           (expect result :to-match "file2.txt")
+          (expect result :to-match "file3.txt")
           (expect result :to-match "file4.txt")
-
-          ;; file5.txt should be truncated
+          ;; file5.txt should be truncated.
           (expect result :not :to-match "file5.txt")
           (expect result :to-match "1 more files")))
 
-      (it "shows correct truncation count when context files are included"
-        (setq macher-context-string-max-files 3)
-        ;; Context has 1 file, limit allows 2 more, but 4 files remain
-        (let* ((file1 (nth 0 all-files))
-               (contexts `((,file1)))
-               (result (macher--context-string contexts)))
-
-          ;; Should show file1 in context, file2 and file3 in available, truncate file4 and file5
-          (expect result :to-match "file1.txt")
-          (expect result :to-match "file2.txt")
-          (expect result :to-match "file3.txt")
-          (expect result :not :to-match "file4.txt")
-          (expect result :not :to-match "file5.txt")
-          (expect result :to-match "2 more files")))
-
-      (it "handles case where all files are in context"
-        (setq macher-context-string-max-files 3)
-        ;; All files are in context
-        (let* ((contexts (mapcar #'list all-files))
-               (result (macher--context-string contexts)))
-
-          ;; All files should be listed in "already provided" section
-          (expect result :to-match "Files already provided above")
+      (it "lists all files when all are within limit"
+        (setq macher-context-string-max-files 10)
+        (let ((result (macher--context-string)))
+          ;; All files should be listed.
           (expect result :to-match "file1.txt")
           (expect result :to-match "file2.txt")
           (expect result :to-match "file3.txt")
           (expect result :to-match "file4.txt")
           (expect result :to-match "file5.txt")
-
-          ;; No "other files" section
-          (expect result :not :to-match "Other files available")
-          (expect result :not :to-match "more files")))
-
-      (it "shows no truncation message when limit is nil"
-        (setq macher-context-string-max-files nil)
-        (let* ((file1 (nth 0 all-files))
-               (contexts `((,file1)))
-               (result (macher--context-string contexts)))
-
-          (expect result :to-match "file1.txt")
-          (expect result :to-match "file2.txt")
-          (expect result :to-match "file3.txt")
-          (expect result :to-match "file4.txt")
-          (expect result :to-match "file5.txt")
+          ;; No truncation message.
           (expect result :not :to-match "more files")))))
 
   (describe "Workspace detection functions"
@@ -3686,14 +3609,15 @@
              ;; Set up the existing transforms list.
              (gptel-prompt-transform-functions (list existing-transform)))
         (macher--with-preset
-         'macher-prompt
+         'macher-system
          (lambda ()
            ;; Capture the transforms list inside the preset context.
            (setq captured-transforms gptel-prompt-transform-functions)
            ;; Verify that the existing transform is preserved.
            (expect (member existing-transform gptel-prompt-transform-functions) :to-be-truthy)
            ;; Verify that macher transform is also present.
-           (expect (member #'macher--prompt-transform-add-context gptel-prompt-transform-functions)
+           (expect (member
+                    #'macher--transform-system-replace-placeholder gptel-prompt-transform-functions)
                    :to-be-truthy)))
         ;; Verify that the global transforms list is restored after the preset.
         (expect gptel-prompt-transform-functions :to-equal (list existing-transform))
@@ -3750,7 +3674,8 @@
       ;; Verify that gptel--known-presets now contains the expected presets.
       (expect gptel--known-presets :not :to-be nil)
       ;; Check that all three macher presets are installed.
-      (dolist (preset-name '(macher macher-ro macher-prompt macher-base))
+      (dolist (preset-name
+               '(macher macher-ro macher-system macher-system-commit macher-tools macher-base))
         (expect (assq preset-name gptel--known-presets) :to-be-truthy)
         (let ((preset (gptel-get-preset preset-name)))
           (expect preset :to-be-truthy)
@@ -3758,9 +3683,14 @@
       ;; Verify the description of one of the presets explicitly, just to be sure everything is
       ;; getting registered correctly.
       (let ((macher-preset (gptel-get-preset 'macher)))
-        (expect
-         (plist-get macher-preset :description)
-         :to-equal "Send macher workspace context + tools to read files and propose edits"))))
+        (expect (plist-get macher-preset :description)
+                :to-equal "Send macher workspace context + tools to read files and propose edits")))
+
+    (it "installs custom presets"
+      (let ((macher-presets-alist '((test-preset . (:description "Test preset")))))
+        (macher--install-presets)
+        (expect (gptel-get-preset 'test-preset) :to-be-truthy)
+        (expect (gptel-get-preset 'macher) :not :to-be-truthy))))
 
   (describe "macher--install-tools"
     :var (original-tools)
@@ -3874,7 +3804,7 @@
           (let ((gptel-use-tools nil))
             (macher--with-preset 'macher (lambda () (expect gptel-use-tools :to-be-truthy))))))
 
-      (it "adds macher--prompt-transform-add-context to transforms"
+      (it "adds system context injector to transforms"
         (with-temp-buffer
           (find-file project-file)
           (let ((gptel-prompt-transform-functions nil))
@@ -3882,17 +3812,18 @@
              'macher
              (lambda ()
                (expect (member
-                        #'macher--prompt-transform-add-context gptel-prompt-transform-functions)
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
                        :to-be-truthy))))))
 
-      (it "adds macher--prompt-transform-base to transforms"
+      (it "adds macher--transform-setup-tools to transforms"
         (with-temp-buffer
           (find-file project-file)
           (let ((gptel-prompt-transform-functions nil))
             (macher--with-preset
              'macher
              (lambda ()
-               (expect (member #'macher--prompt-transform-base gptel-prompt-transform-functions)
+               (expect (member #'macher--transform-setup-tools gptel-prompt-transform-functions)
                        :to-be-truthy)))))))
 
     (describe "macher-ro preset"
@@ -3954,26 +3885,27 @@
                         gptel-tools)
                        :to-be-truthy)))))))
 
-    (describe "macher-prompt preset"
+    (describe "macher-system preset"
       (it "does not add any tools"
         (with-temp-buffer
           (find-file project-file)
           (let ((gptel-tools nil))
-            (macher--with-preset 'macher-prompt (lambda () (expect gptel-tools :to-be nil))))))
+            (macher--with-preset 'macher-system (lambda () (expect gptel-tools :to-be nil))))))
 
       (it "adds context transform"
         (with-temp-buffer
           (find-file project-file)
           (let ((gptel-prompt-transform-functions nil))
             (macher--with-preset
-             'macher-prompt
+             'macher-system
              (lambda ()
                (expect (member
-                        #'macher--prompt-transform-add-context gptel-prompt-transform-functions)
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
                        :to-be-truthy)))))))
 
     (describe "macher-base preset"
-      (it "adds base transform but no tools"
+      (it "adds base transforms but no tools"
         (with-temp-buffer
           (find-file project-file)
           (let ((gptel-tools nil)
@@ -3983,8 +3915,12 @@
              (lambda ()
                ;; Should not add tools.
                (expect gptel-tools :to-be nil)
-               ;; Should add base transform.
-               (expect (member #'macher--prompt-transform-base gptel-prompt-transform-functions)
+               ;; Should add base transforms.
+               (expect (member #'macher--transform-setup-tools gptel-prompt-transform-functions)
+                       :to-be-truthy)
+               (expect (member
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
                        :to-be-truthy))))))
 
       (it "replaces existing base transform and re-appends it at the end"
@@ -3993,16 +3929,16 @@
           (let* ((other-transform (lambda (callback _fsm) (funcall callback)))
                  ;; Start with base transform in the middle of the list.
                  (gptel-prompt-transform-functions
-                  (list other-transform #'macher--prompt-transform-base other-transform)))
+                  (list other-transform #'macher--transform-setup-tools other-transform)))
             (macher--with-preset
              'macher-base
              (lambda ()
                ;; Base transform should appear exactly once.
-               (expect (cl-count #'macher--prompt-transform-base gptel-prompt-transform-functions)
+               (expect (cl-count #'macher--transform-setup-tools gptel-prompt-transform-functions)
                        :to-equal 1)
                ;; Base transform should be at the end.
                (expect (car (last gptel-prompt-transform-functions))
-                       :to-be #'macher--prompt-transform-base)
+                       :to-be #'macher--transform-setup-tools)
                ;; Other transforms should still be present.
                (expect (cl-count other-transform gptel-prompt-transform-functions) :to-equal 2))))))
 
