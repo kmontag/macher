@@ -1616,7 +1616,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           (set-visited-file-name project-file)
 
           (macher-test--send
-           'macher-notools "Test prompt with no context"
+           'macher-prompt "Test prompt with no context"
            (macher-test--make-once-only-callback
             (lambda (exit-code fsm)
               (setq callback-called t)
@@ -1699,7 +1699,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                   (gptel-add))
 
                 (macher-test--send
-                 'macher-notools "Test prompt with mixed context"
+                 'macher-prompt "Test prompt with mixed context"
                  (macher-test--make-once-only-callback
                   (lambda (exit-code fsm)
                     (setq callback-called t)
@@ -1854,7 +1854,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                 ;; Now open another project file.
                 (set-visited-file-name project-file)
                 (macher-test--send
-                 'macher-notools "Test prompt with buffer context"
+                 'macher-prompt "Test prompt with buffer context"
                  (macher-test--make-once-only-callback
                   (lambda (error context)
                     (setq callback-called t)
