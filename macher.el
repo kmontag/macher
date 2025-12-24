@@ -3219,16 +3219,17 @@ CALLBACK must be called when preparation is complete."
 
 ;;; Preset Definitions
 
-(defun macher--append-if-missing (items pred orig)
-  "Get a copy of the ORIG list with ITEMS appended, unless already present.
+(defun macher--append-if-missing (list new-items &optional testfn)
+  "Get a copy of the LIST with NEW-ITEMS appended, unless already present.
 
-Presence is determined by PRED, as defined in e.g. `seq-find'."
-  (let ((result (copy-sequence orig)))
-    (dolist (item items result)
-      (unless (seq-find pred result)
+Presence is determined by TESTFN, as defined in e.g. `seq-contains',
+defaulting to `equal'."
+  (let ((result (copy-sequence list)))
+    (dolist (item new-items)
+      (unless (seq-contains result item testfn)
         (setq result (append result (list item)))))))
 
-(defun macher--pred-compare-tools (first second)
+(defun macher--test-fn-tools (first second)
   "Return t if the FIRST gptel tool matches the SECOND.
 
 Compares the tool names and categories."
@@ -3240,58 +3241,38 @@ Compares the tool names and categories."
 
 Use `apply-partially' to transform this into a suitable value for a
 :function spec in a gptel preset's :tools value."
-  (let* ((tool-defs (seq-filter macher-tools pred)))
-    (macher--append-if-missing tool-defs #'macher--pred-compare-tools tools)))
+  (let* ((tool-defs (seq-filter pred macher-tools))
+         (new-tools (mapcar #'macher-resolve-tool tool-defs)))
+    (macher--append-if-missing tools new-tools #'macher--test-fn-tools)))
 
-(defun macher-tools-preset (pred &rest keys)
-  "Get a gptel preset spec which enables a selection of macher tools.
+(defun macher-resolve-tool (tool)
+  "Resolve a macher TOOL definition to a `gptel-tool'.
 
-KEYS is a baseline spec plist, as would be passed to
-`gptel-make-preset'.  It cannot include TOOLS - though it can have
-PARENTS which specify tools.
+TOOL is a plist of the same form as elements of `macher-tools'.
 
-The baseline spec will be augmented to include an appropriate :tools
-entry (which appends all matching tools to variable `gptel-tools',
-unless they already appear there) and the `macher-preset-base' as a
-parent.
+First looks for an existing tool in the global gptel registry, under the
+`macher-tool-category', with the same name as the provided TOOL
+definition.  If found, returns it.
 
-When the preset is applied, the PRED receives each element of
-`macher-tools', and should return non-nil for tools that should be
-enabled.
+Otherwise, creates an anonymous tool based on the provided definition.
 
-For matching tools, the preset first tries to find a tool with that name
-in the global gptel registry under the `macher-tool-category'.  If none
-is found (e.g. if `macher-install' was never called), creates an
-anonymous tool instance and adds it directly to the tools list.
-
-Any matching tools already present in the variable
-`gptel-tools' (according to their name/category) will be skipped.
-
-The returned preset is intentionally sparse, and won't modify any
-prompts or change any settings.  It will just add tools and the
-transform function needed to use them.  `gptel-use-tools' won't be
-modified.  If you want to include contextual workspace information with
-your requests, you may want to combine this with the
-`macher-preset-context'.
-
-Note that if you install macher tools globally, you can also use
-\"normal\" gptel presets to activate them. Just make sure you also
-include the `macher-preset-base' as a parent."
-  (when (plist-get keys :tools)
-    (user-error "Cannot include tools in a preset spec for `macher-tools-preset'"))
-  (let* ((parents (append (ensure-list (plist-get keys :parents)) (list macher-preset-base))))
-    (plist-put
-     keys
-     :tools `(:function ,(apply-partially #'macher--preset-function-add-tools pred)))))
+This might be useful, for example, in custom preset definitions if tools
+have not have been installed globally."
+  (let* ((tool-name (plist-get tool :name))
+         ;; Look up the tool in the gptel registry using category and name.
+         (registry-tool (gptel-get-tool (list macher-tool-category tool-name))))
+    (or registry-tool
+        ;; Tool not found in registry, create an anonymous tool.
+        (apply #'macher--make-tool t tool))))
 
 (defconst macher-preset-context
   `(:description
     "Add info about the current macher workspace to the request context"
     :prompt-transform-functions
     (:function
-     ,(apply-partially #'macher--append-if-missing
-                       (list #'macher--prompt-transform-add-context)
-                       #'eq)))
+     (lambda (prompt-transform-functions)
+       (macher--append-if-missing
+        prompt-transform-functions (list #'macher--prompt-transform-add-context)))))
   "Preset spec to add contextual info about the macher workspace.
 
 This preset will modify the prompt.")
@@ -3301,9 +3282,9 @@ This preset will modify the prompt.")
     "Utility preset, must be applied to use macher tools"
     :prompt-transform-functions
     (:function
-     ,(apply-partially #'macher--append-if-missing
-                       (list #'macher--prompt-transform-setup-tools)
-                       #'eq)))
+     (lambda (prompt-transform-functions)
+       (macher--append-if-missing
+        prompt-transform-functions (list #'macher--prompt-transform-setup-tools)))))
   "Preset spec to inject request context into macher tools.
 
 Macher tools can't be used (they'll throw errors) if this preset is not
@@ -3311,8 +3292,8 @@ applied (or more precisely, if `macher--prompt-transform-setup-tools'
 isn't in the `gptel-prompt-transform-functions').
 
 All the built-in macher presets include this as a parent.  If you're
-making your own presets involving macher tools, make sure to include
-this as a parent.
+making your own presets involving macher tools, the easiest way to make
+them work robustly is to add this preset as a parent.
 
 This preset is safe to apply globally and/or repeatedly - it won't
 change anything about your outgoing requests, except that any macher
@@ -3326,6 +3307,42 @@ tools included in them will be properly set up.")
      (lambda (tools)
        (seq-filter (lambda (tool) (string= (gptel-tool-category tool) macher-tool-category)))))))
 
+(defun macher--tools-preset (pred &rest keys)
+  "Get a gptel preset spec which enables a selection of macher tools.
+
+KEYS is a baseline spec plist, as would be passed to
+`gptel-make-preset'.  It cannot include :tools or :use-tools.
+
+The baseline spec will be augmented with:
+
+- an appropriate :tools entry (which appends all matching tools to
+  variable `gptel-tools', unless they already appear there).
+
+- a :use-tools entry to ensure `gptel-use-tools' is non-nil.
+
+- `macher-preset-base' as a parent.
+
+When the preset is applied, the PRED receives each element of
+`macher-tools', and should return non-nil for tools that should be
+enabled.  Tools are then normalized using `macher-resolve-tool'.
+
+Any matching tools already present in the variable
+`gptel-tools' (according to their name/category) will be skipped."
+  (when (plist-get keys :tools)
+    (error "Cannot include :tools in a preset spec for `macher--tools-preset'"))
+  (when (plist-get keys :tools)
+    (error "Cannot include tools in a preset spec for `macher--tools-preset'"))
+  (let* ((parents (append (ensure-list (plist-get keys :parents)) (list macher-preset-base))))
+    (plist-put
+     (plist-put
+      keys
+
+      ;; Make sure tools are enabled, but preserve the existing value of `gptel-use-tools' if
+      ;; already non-nil (e.g. \\='force.
+      :use-tools '(:function (lambda (use-tools) (or use-tools t))))
+     ;; Add tools from `macher-tools' matching the predicate.
+     :tools `(:function ,(apply-partially #'macher--preset-function-add-tools pred)))))
+
 (defun macher--preset-use-tools-function (use-tools)
   "Preset function for `gptel-use-tools' which ensures tools are available.
 
@@ -3334,24 +3351,30 @@ otherwise."
   (or use-tools t))
 
 (defvar macher--presets-alist
-  `((macher
+  `(
+    ;; Enable all macher tools.
+    (macher
      .
-     ,(macher-tools-preset
+     ,(macher--tools-preset
        ;; Include all macher tools.
        (lambda (_) t)
        :description "Send macher workspace context + tools to read files and propose edits"
-       :parents (list macher-preset-base macher-preset-context)
+       :parents (list macher-preset-context)
        :use-tools '(:function macher--preset-use-tools-function)))
+    ;; Enable read-only macher tools, and disable other macher tools.
     (macher-ro
      .
-     ,(macher-tools-preset
+     ,(macher--tools-preset
        ;; Only include macher tools categorized as read tools.
        (lambda (tool-def) (string= (plist-get tool-def :category) "read"))
        :description "Send macher workspace context + tools to read files"
        ;; Clear other macher tools before applying - force read-only.
-       :parents (list macher-preset-base macher-preset-context macher-preset--clear-tools)
+       :parents (list macher-preset-context macher--preset-clear-tools)
        :use-tools '(:function macher--preset-use-tools-function)))
-    (macher-context . ,macher-preset-context) (macher-base . ,macher-preset-base))
+    ;; Add contextual info about the current workspace.
+    (macher-context . ,macher-preset-context)
+    ;; Inject context into macher tools.
+    (macher-base . ,macher-preset-base))
   "Alist of definitions for macher presets.
 
 Entries have the form (NAME . KEYS).  NAME is the name to use (by
@@ -3426,11 +3449,8 @@ This transform MUST be present in `gptel-prompt-transform-functions' in
 order to use macher tools.  All of the built-in macher presets pull it
 in automatically, but if you want to use macher tools in other
 ways (e.g. directly from the gptel menu), you'll need to make sure this
-transform is present.  You can do this by applying the ='macher-base'
-gptel preset, or using it as a parent in your own presets.
-
-Since this is a no-op unless macher tools are present, it should also be
-safe to apply ='macher-base' globally.
+transform is present.  You can do this by applying `macher-preset-base',
+or using it as a parent in your own presets.
 
 CALLBACK and FSM are as described in the
 `gptel-prompt-transform-functions' documentation."
