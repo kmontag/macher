@@ -4086,7 +4086,11 @@ the following for outgoing gptel requests:
 
 - Replace instances of the `macher-context-string-placeholder' in the
   system prompt with the current result of the
-  `macher-context-string-function'.
+  `macher-context-string-function'.  This won't modify your system
+  prompt in any other way; if the outgoing prompt doesn't already
+  contain the `macher-context-string-placeholder', it won't be modified.
+  You can also disable this transform entirely by setting
+  `macher-context-string-placeholder' to nil.
 
 These transforms will run on every gptel request, though they should
 effectively be no-ops for requests that don't use macher tools or the
