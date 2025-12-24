@@ -3904,6 +3904,16 @@
                         gptel-prompt-transform-functions)
                        :to-be-truthy)))))))
 
+    (describe "macher-system-commit preset"
+      ;; TODO: test macher-system-commit preset
+      )
+
+    (describe "macher-tools preset"
+      ;; TODO: test macher-tools preset
+      )
+
+    ;; TODO: We need to add more tests, around the for the system-replace-placeholder being present
+    ;; (and not moved if already there).
     (describe "macher-base preset"
       (it "adds base transforms but no tools"
         (with-temp-buffer
