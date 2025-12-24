@@ -3549,6 +3549,9 @@ SYSTEM can be a string, a function, or a list:
      ;; contains the context string. As-is, this will overwrite functional user directives with a
      ;; lambda - this is functionally fine, but may look weird in gptel's directives UI.
      (lambda ()
+       ;; By definition this lambda is being called in whatever buffer functional system prompts are
+       ;; supposed to be run.  So it should be fine not to worry about changing buffers or anything
+       ;; before calling `gptel--parse-directive'.
        (macher--system-ensure-placeholder-or-context-string (gptel--parse-directive system))))
     (list
      (let ((first-elem (car system)))
@@ -3590,8 +3593,8 @@ SYSTEM can be a string, a function, or a list:
   example exchanges to guide the LLM's behavior.
 
 This function should be called in the prompt transform buffer for a
-gptel request. That's where dynamic directives are evaluated in built-in
-contexts like `gptel-context--wrap-in-buffer' (though note
+gptel request.  That's where dynamic directives are evaluated in
+built-in contexts like `gptel-context--wrap-in-buffer' (though note
 `macher-request' seems to evaluate them in the request buffer)."
   (cl-etypecase system
     (string
@@ -3614,6 +3617,12 @@ contexts like `gptel-context--wrap-in-buffer' (though note
                                      t)
          system)))
     (function
+     ;; Should hopefully be ok to call this in the current buffer i.e. prompt buffer. Note though
+     ;; that the `gptel--transform-add-context' ultimately calls `gptel--parse-directive' in the
+     ;; :data buffer from the FSM's info struct - but it seems like that's the same as the prompt
+     ;; buffer?
+     ;;
+     ;; This resolves functional directives to strings or lists.
      (let ((parsed (gptel--parse-directive system 'raw)))
        (macher--system-replace-placeholder parsed buffer)))
     (list (cons (macher--system-replace-placeholder (car system) buffer) (cdr system)))))
