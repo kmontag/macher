@@ -3142,6 +3142,210 @@ Sets `test-patch-content' to the generated patch content for additional assertio
               (expect patch :not :to-match "@@")
               (expect patch :not :to-match "^[+-]")))))))
 
+  (describe "macher context sharing"
+    (it "shares single context when multiple tools are invoked together"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "file1.txt" :content "content1")))
+                   (:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "file2.txt" :content "content2")))])
+                 "Created both files"))
+      (funcall setup-project "context-sharing-multi-tool")
+      (let ((callback-called nil)
+            (exit-code nil)
+            (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Create two files"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          ;; Both files should be in the same context.
+          (let ((context (macher--context-for-fsm fsm)))
+            (expect context :to-be-truthy)
+            (expect (macher-context-dirty-p context) :to-be-truthy)
+            ;; Both file edits should be tracked in the same context.
+            (let ((contents (macher-context-contents context)))
+              (expect (length contents) :to-be 2))))))
+
+    (it "does not create context when no macher tools are invoked"
+      (funcall setup-backend '("Simple response with no tools"))
+      (funcall setup-project "no-tools-no-context")
+      (let ((callback-called nil)
+            (exit-code nil)
+            (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-prompt "Just chat with me"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          ;; Context should NOT have been created (lazy initialization).
+          (expect (macher--context-for-fsm fsm) :to-be nil))))
+
+    (it "does not create context when tools are present but not invoked"
+      ;; Backend responds without using any tools.
+      (funcall setup-backend '("I could use tools but chose not to"))
+      (funcall setup-project "tools-not-used")
+      (let ((callback-called nil)
+            (exit-code nil)
+            (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          ;; Use macher preset which includes tools.
+          (macher-test--send
+           'macher "Do something"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          ;; Context should NOT have been created since tools weren't invoked.
+          (expect (macher--context-for-fsm fsm) :to-be nil))))
+
+    (it "shares context between read and write tools for correct file state"
+      ;; First tool writes a file, second tool reads it back.  The read should see the written
+      ;; content, proving they share context.
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "shared-test.txt" :content "written by tool")))])
+                 (:tool-calls
+                  [(:function
+                    (:name "read_file_in_workspace" :arguments (:path "shared-test.txt")))])
+                 "Read the file I just wrote"))
+      (funcall setup-project "context-sharing-read-write")
+      (let ((callback-called nil)
+            (exit-code nil)
+            (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Write then read a file"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          ;; The key test: read tool should return the content written by write tool.  This proves
+          ;; they share the same macher-context.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; Should have 3 requests: initial, after write, after read.
+            (expect (length requests) :to-be 3)
+            ;; First request has no tool response.
+            (expect (nth 0 tool-messages) :to-be nil)
+            ;; Second request has write tool response (nil for success).
+            (expect (nth 1 tool-messages) :to-equal '("nil"))
+            ;; Third request contains read tool response with the written content.  This is the
+            ;; critical assertion - read saw what write created.  The response might also include
+            ;; the previous write response, so check membership.
+            (expect (member "written by tool" (nth 2 tool-messages)) :to-be-truthy)))))
+
+    (it "shares context for sequential edits to same file"
+      ;; Two sequential edits to the same file should both apply.
+      ;; Second edit references text created by first edit - proves sharing.
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "edit_file_in_workspace"
+                     :arguments
+                     (:path "edit-test.txt" :old_text "original" :new_text "first-edit")))])
+                 (:tool-calls
+                  [(:function
+                    (:name
+                     "edit_file_in_workspace"
+                     :arguments
+                     (:path "edit-test.txt" :old_text "first-edit" :new_text "second-edit")))])
+                 "Both edits complete"))
+      (funcall setup-project "context-sharing-edits" '(("edit-test.txt" . "original content")))
+      (let ((callback-called nil)
+            (exit-code nil)
+            (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Make two edits"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          ;; Both edits should have been applied to the same context.  The second edit only succeeds
+          ;; if it can find "first-edit" (created by first edit).
+          (let ((context (macher--context-for-fsm fsm)))
+            (expect context :to-be-truthy)
+            (let* ((file-path (expand-file-name "edit-test.txt" project-dir))
+                   (contents (macher-context--contents-for-file file-path context)))
+              ;; Original content.
+              (expect (car contents) :to-equal "original content")
+              ;; Final content after both edits - proves both applied to shared context.
+              (expect (cdr contents) :to-equal "second-edit content")))))))
+
   (describe "macher-process-request"
     :var
     (callback-called
