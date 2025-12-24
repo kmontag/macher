@@ -3905,15 +3905,114 @@
                        :to-be-truthy)))))))
 
     (describe "macher-system-commit preset"
-      ;; TODO: test macher-system-commit preset
-      )
+      (it "does not add any tools"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-tools nil))
+            (macher--with-preset
+             'macher-system-commit (lambda () (expect gptel-tools :to-be nil))))))
+
+      (it "does not add transforms"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-system-commit
+             (lambda () (expect gptel-prompt-transform-functions :to-be nil))))))
+
+      (it "replaces placeholder in system prompt with current context string"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((macher-context-string-function (lambda () "foobar"))
+                (gptel--system-message (concat "System prompt" macher-context-string-placeholder)))
+            (macher--with-preset
+             'macher-system-commit
+             (lambda ()
+               ;; Should have replaced placeholder with actual context.
+               (expect (string-match-p
+                        (regexp-quote macher-context-string-placeholder) gptel--system-message)
+                       :to-be nil)
+               ;; Should contain the marker start (indicating context was injected).
+               (expect (string-match-p
+                        (regexp-quote
+                         (concat
+                          macher-context-string-marker-start
+                          "foobar"
+                          macher-context-string-marker-end))
+                        gptel--system-message)
+                       :to-be-truthy))))))
+
+      (it "is a no-op when system prompt has no placeholder"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel--system-message "System prompt without placeholder"))
+            (macher--with-preset
+             'macher-system-commit
+             (lambda ()
+               ;; System message should be unchanged.
+               (expect gptel--system-message :to-equal "System prompt without placeholder")))))))
 
     (describe "macher-tools preset"
-      ;; TODO: test macher-tools preset
-      )
+      (it "adds all macher tools to gptel-tools"
+        (with-temp-buffer
+          (find-file project-file)
+          ;; Install tools first so we can reference them.
+          (macher--install-tools)
+          (let ((gptel-tools nil))
+            (macher--with-preset
+             'macher-tools
+             (lambda ()
+               ;; Should have all macher tools.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "edit_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "write_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy))))))
 
-    ;; TODO: We need to add more tests, around the for the system-replace-placeholder being present
-    ;; (and not moved if already there).
+      (it "does not add system prompt modifications"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel--system-message "Original system prompt"))
+            (macher--with-preset
+             'macher-tools
+             (lambda ()
+               ;; System prompt should be unchanged (no placeholder added).
+               (expect gptel--system-message :to-equal "Original system prompt"))))))
+
+      (it "adds macher--transform-setup-tools transform"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-tools
+             (lambda ()
+               ;; Should add the setup transform.
+               (expect (member #'macher--transform-setup-tools gptel-prompt-transform-functions)
+                       :to-be-truthy))))))
+
+      (it "does not add system-replace-placeholder transform"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-tools
+             (lambda ()
+               ;; Should NOT add the system prompt transform.
+               (expect (member
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
+                       :to-be nil)))))))
+
     (describe "macher-base preset"
       (it "adds base transforms but no tools"
         (with-temp-buffer
@@ -3962,7 +4061,60 @@
                ;; Should NOT add context transform (that's macher-prompt's job).
                (expect (member
                         #'macher--prompt-transform-add-context gptel-prompt-transform-functions)
-                       :to-be nil)))))))
+                       :to-be nil))))))
+
+      (it "adds system-replace-placeholder transform"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               ;; Should add system-replace-placeholder transform.
+               (expect (member
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
+                       :to-be-truthy))))))
+
+      (it "does not move system-replace-placeholder transform if already present"
+        (with-temp-buffer
+          (find-file project-file)
+          (let* ((other-transform (lambda (callback _fsm) (funcall callback)))
+                 ;; Start with system-replace-placeholder transform already in the list.
+                 (gptel-prompt-transform-functions
+                  (list #'macher--transform-system-replace-placeholder other-transform)))
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               ;; System-replace-placeholder transform should appear exactly once.
+               (expect (cl-count
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
+                       :to-equal 1)
+               ;; It should still be at the front (not moved).
+               (expect (car gptel-prompt-transform-functions)
+                       :to-be #'macher--transform-system-replace-placeholder)
+               ;; Other transform should still be present.
+               (expect (member other-transform gptel-prompt-transform-functions) :to-be-truthy)
+               ;; Setup-tools transform should be at the end.
+               (expect (car (last gptel-prompt-transform-functions))
+                       :to-be #'macher--transform-setup-tools))))))
+
+      (it "preserves system-replace-placeholder position when applying preset multiple times"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            ;; Apply preset once.
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               (let ((first-transforms (copy-sequence gptel-prompt-transform-functions)))
+                 ;; Apply preset again.
+                 (macher--with-preset
+                  'macher-base
+                  (lambda ()
+                    ;; Transforms should be in the same order.
+                    (expect gptel-prompt-transform-functions :to-equal first-transforms))))))))))
 
     (describe "preset idempotency"
       (it "does not duplicate tools when preset applied twice"
