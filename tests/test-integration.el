@@ -612,58 +612,157 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
         (when (file-exists-p temp-file)
           (delete-file temp-file)))))
 
-  ;; TODO: The context is now being prepared at the time the tool is first invoked, not at the time
-  ;; the request is sent... but maybe we'll change that. Just leave this as a skipped test for now.
-  (xit "prepares context files for workspace operations"
-    (funcall setup-backend '("Test response"))
-    (funcall setup-project
-             "context"
-             '(("src/main.el" . "main content") ("src/context.el" . "context content")))
-    (let ((callback-called nil)
-          (response-received nil)
-          (context-file (expand-file-name "src/context.el" project-dir)))
-      (with-temp-buffer
-        (set-visited-file-name project-file)
-        ;; Add the context file to gptel context (but not the main file).
-        (gptel-add-file context-file)
+  (describe "context file content timing"
+    ;; These tests verify that context file contents are captured at request time, ensuring that:
+    ;;
+    ;; - Files in the gptel context have their contents frozen when the request is sent.
+    ;;
+    ;; - Modifications to context files after sending don't affect the macher context.
+    ;;
+    ;; - Non-context files are still read with their current contents when tools access them.
+    (it "captures context file contents at request time"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name "read_file_in_workspace" :arguments (:path "src/context.el")))])
+                 "I read the context file"))
+      (funcall setup-project
+               "context-timing"
+               '(("src/main.el" . "main content") ("src/context.el" . "original context content")))
+      (let ((callback-called nil)
+            (exit-code nil)
+            (context-file (expand-file-name "src/context.el" project-dir))
+            (captured-fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          ;; Add the context file to gptel context.
+          (gptel-add-file context-file)
 
-        ;; Mock the context contents creation to verify it's called.
-        (spy-on #'macher--load-gptel-context-files :and-call-through)
+          (macher-test--send
+           'macher "Test prompt"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq captured-fsm cb-fsm))))
 
-        (macher-test--send
-         'macher-ro "Test prompt"
-         (macher-test--make-once-only-callback
-          (lambda (exit-code fsm)
-            (setq callback-called t)
-            (setq response-received (not exit-code)))))
+          ;; Immediately after sending, modify the context file on disk.  This simulates a change
+          ;; happening between request send and tool invocation.
+          (with-temp-file context-file
+            (insert "MODIFIED context content"))
 
-        ;; Wait for the async response.
-        (let ((timeout 0))
-          (while (and (not callback-called) (< timeout 100))
-            (sleep-for 0.1)
-            (setq timeout (1+ timeout))))
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
 
-        (expect callback-called :to-be-truthy)
-        (expect response-received :to-be-truthy)
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
 
-        ;; Verify that implementation contents were created for the context file.
-        (expect #'macher--load-gptel-context-files :to-have-been-called-times 1)
-        (let ((args (spy-calls-args-for #'macher--load-gptel-context-files 0)))
-          (expect (length args) :to-be 2)
-          (let ((contexts (car args))
-                (macher-context (elt args 1)))
-            ;; Verify that the gptel context was passed it, like with the standard
-            ;; 'gptel-context-string-function'.
-            (expect contexts :to-equal `((,context-file)))
-            ;; Verify that the gptel context file was loaded into the macher context.
-            (let ((contents (macher-context-contents macher-context)))
-              (expect (length contents) :to-be 1)
-              (let* ((entry (car contents))
-                     (stored-path (car entry))
-                     (content-pair (cdr entry)))
-                (expect (expand-file-name stored-path) :to-equal (expand-file-name context-file))
-                (expect (car content-pair) :to-equal "context content")
-                (expect (cdr content-pair) :to-equal "context content"))))))))
+          ;; Get the macher context from the FSM.
+          (let* ((macher-context (macher--context-for-fsm captured-fsm))
+                 (contents (macher-context-contents macher-context))
+                 (entry (assoc context-file contents)))
+            ;; The context file should have been loaded with the ORIGINAL content, not the modified
+            ;; content, because contents were captured at request time.
+            (expect entry :to-be-truthy)
+            (expect (car (cdr entry)) :to-equal "original context content")))))
+
+    (it "sees current contents for non-context files when tools access them"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name "read_file_in_workspace" :arguments (:path "src/non-context.el")))])
+                 "I read the non-context file"))
+      (funcall setup-project
+               "non-context-timing"
+               '(("src/main.el" . "main content")
+                 ("src/context.el" . "context content")
+                 ("src/non-context.el" . "original non-context content")))
+      (let ((callback-called nil)
+            (context-file (expand-file-name "src/context.el" project-dir))
+            (non-context-file (expand-file-name "src/non-context.el" project-dir))
+            (captured-fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          ;; Only add the context file to gptel context, NOT the non-context file.
+          (gptel-add-file context-file)
+
+          (macher-test--send
+           'macher "Test prompt"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq captured-fsm cb-fsm))))
+
+          ;; Immediately after sending, modify the non-context file on disk.
+          (with-temp-file non-context-file
+            (insert "MODIFIED non-context content"))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Check the tool response - the read_file tool should have read the MODIFIED content
+          ;; because this file was not in the gptel context.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; The second request should have the tool response.
+            (expect (length tool-messages) :to-be 2)
+            ;; Second request's tool message should contain the modified content.
+            (let ((tool-response (car (cadr tool-messages))))
+              (expect tool-response :to-match "MODIFIED non-context content"))))))
+
+    (it "loads context files into macher context with correct contents"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "edit_file_in_workspace"
+                     :arguments
+                     (:path "src/context.el" :old_text "original" :new_text "replaced")))])
+                 "I edited the context file"))
+      (funcall setup-project
+               "context-load"
+               '(("src/main.el" . "main content") ("src/context.el" . "original context content")))
+      (let ((callback-called nil)
+            (context-file (expand-file-name "src/context.el" project-dir))
+            (captured-fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          ;; Add the context file to gptel context.
+          (gptel-add-file context-file)
+
+          (macher-test--send
+           'macher "Test prompt"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq captured-fsm cb-fsm))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          ;; Get the macher context from the FSM.
+          (let* ((macher-context (macher--context-for-fsm captured-fsm))
+                 (contents (macher-context-contents macher-context))
+                 (entry (assoc context-file contents)))
+            ;; The context file should be in the contents.
+            (expect entry :to-be-truthy)
+            ;; Original content should be what was captured at request time.
+            (expect (car (cdr entry)) :to-equal "original context content")
+            ;; New content should reflect the edit.
+            (expect (cdr (cdr entry)) :to-equal "replaced context content"))))))
 
   (describe "read_file_in_workspace"
     (before-each

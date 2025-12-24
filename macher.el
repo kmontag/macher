@@ -1727,31 +1727,61 @@ Ensures paths are consistently handled throughout the codebase."
       (expand-file-name path)
     (error "PATH must be an absolute file path")))
 
-(defun macher--load-gptel-context-files (contexts macher-context)
-  "Prepare editing buffers for any workspace files that are in the gptel context.
+(defun macher--collect-context-file-contents (contexts)
+  "Collect file contents for gptel context files.
 
-CONTEXTS is the list of gptel contexts as passed to the context string
-function.  MACHER-CONTEXT is a `macher-context' struct.  This function
-creates implementation buffers for any files that are within both the
-gptel context and the current workspace.  This ensures that those
-workspace file contents are frozen at request time, even if the files
-are modified on disk before editing operations occur - that is, it
-ensures that the LLM can trust that file contents provided to it in the
-context won't change before it can edit them."
-  (when-let* ((workspace (macher-context-workspace macher-context))
+CONTEXTS is the list of gptel contexts as returned by
+`gptel-context--collect'.  This function reads the current contents of
+any files in the context and returns them as an alist.
+
+Returns an alist of (normalized-path . content-string) pairs for files
+that exist.  Non-existent files and buffer contexts are skipped.
+
+This function is intended to be called at request time to capture the
+current state of context files, ensuring that edits made after the
+request is sent don't affect the macher context's view of those files."
+  (let ((result nil))
+    (dolist (context-entry contexts)
+      (let ((source (car context-entry)))
+        ;; Only process file paths (strings), not buffers.
+        (when (and (stringp source) (file-exists-p source))
+          (let* ((full-path (expand-file-name source))
+                 (normalized-path (macher--normalize-path full-path))
+                 (file-content
+                  (with-temp-buffer
+                    (insert-file-contents full-path)
+                    (buffer-substring-no-properties (point-min) (point-max)))))
+            (push (cons normalized-path file-content) result)))))
+    (nreverse result)))
+
+(defun macher--load-context-file-contents (context collected-contents)
+  "Load pre-collected file contents into a macher CONTEXT.
+
+CONTEXT is a `macher-context' struct.  COLLECTED-CONTENTS is an alist of
+\\='(path . content)' pairs as returned by
+`macher--collect-context-file-contents'.
+
+Only files that are within the context's workspace will be loaded.  Each
+matching file will have its contents initialized with both the original
+and new content set to the collected content string."
+  (when-let* ((workspace (macher-context-workspace context))
               (workspace-files (macher--workspace-files workspace)))
     ;; Pre-compute truenames for workspace files for efficient comparison.
     (let ((workspace-files-truenames (mapcar #'file-truename workspace-files)))
-      (dolist (context-entry contexts)
-        (let ((source (car context-entry)))
-          ;; Only process file paths (strings), not buffers.
-          (when (stringp source)
-            (let* ((full-path (expand-file-name source))
-                   (full-path-truename (file-truename full-path))
-                   (in-workspace-p (member full-path-truename workspace-files-truenames)))
-              ;; If this context file is in the workspace, load implementation contents for it.
-              (when in-workspace-p
-                (macher-context--contents-for-file full-path macher-context)))))))))
+      (dolist (content-entry collected-contents)
+        (let* ((normalized-path (car content-entry))
+               (content (cdr content-entry))
+               (path-truename (file-truename normalized-path))
+               (in-workspace-p (member path-truename workspace-files-truenames)))
+          ;; If this file is in the workspace, add it to the context contents.
+          (when in-workspace-p
+            (let* ((existing-contents (macher-context-contents context))
+                   ;; Both original and new content start as the same.
+                   (content-pair (cons content content)))
+              ;; Only add if not already present.
+              (unless (assoc normalized-path existing-contents)
+                (push (cons normalized-path content-pair) existing-contents)
+                (setf (macher-context-contents context) existing-contents)))))))))
 
 (defun macher--resolve-workspace-path (workspace rel-path)
   "Get the full path for REL-PATH within the WORKSPACE.
@@ -3560,7 +3590,18 @@ CALLBACK and FSM are as described in the
          ;; Capture information that needs to be included in the macher context if it gets created.
          (prompt (buffer-string))
          (process-request-function macher-process-request-function)
-         (collected-gptel-context (gptel-context--collect))
+         ;; Collect the gptel context and capture file contents now, i.e. at request time.  This
+         ;; ensures that any modifications to context files after the request is sent won't affect
+         ;; the macher context's view of those files.
+         ;;
+         ;; Note: this loads all context file contents from the filesystem, which gptel is already
+         ;; doing when it renders the context string.  It would be better if we could somehow
+         ;; piggyback off the file loads that are already happening, to avoid hitting the filesystem
+         ;; more than necessary - but this doesn't appear to be possible without weird
+         ;; advice/assumptions about the gptel config.  Might be that this isn't actually worth the
+         ;; trouble, but leaving it in for now to avoid changing existing behavior.
+         (collected-context-contents
+          (macher--collect-context-file-contents (gptel-context--collect)))
          ;; Shared context object for this request, with a lazy initializer.  The context will only
          ;; be initialized if macher tools are invoked during the request.  We use t as a flag that
          ;; we tried to load the context, but there was no macher workspace (that way we can use nil
@@ -3576,33 +3617,32 @@ CALLBACK and FSM are as described in the
                 ;; We always expect the request buffer to be non-nil.
                 (unless buffer
                   (error "Trying to set up macher tools, but coudn't determine request buffer"))
-                (setq
-                 context-or-t
-                 (if (buffer-live-p buffer)
-                     (if-let ((workspace (macher-workspace buffer)))
-                       ;; If we found a workspace, perform context initialization.
-                       (let ((context
-                              (macher--make-context
-                               :workspace workspace
-                               :prompt prompt
-                               :process-request-function process-request-function)))
-                         ;; Store the context on the FSM, so we can look it up e.g. for
-                         ;; processing later.
-                         (setq info (plist-put info :macher--context context))
-                         (setf (gptel-fsm-info fsm) info)
-                         ;; Mark this FSM as the most recent macher request.
-                         (with-current-buffer buffer
-                           (setq macher--fsm-latest fsm))
-                         ;; Preload files from the gptel context into macher.
-                         ;;
-                         ;; TODO: This should really happen at the moment the request is sent, in
-                         ;; case files are edited in the meantime.
-                         (macher--load-gptel-context-files collected-gptel-context context)
-                         context)
-                       ;; Request buffer live but no workspace found.
-                       t)
-                   ;; Request buffer not live - no workspace can be found.
-                   t))))
+                (setq context-or-t
+                      (if (buffer-live-p buffer)
+                          (if-let ((workspace (macher-workspace buffer)))
+                            ;; If we found a workspace, perform context initialization.
+                            (let ((context
+                                   (macher--make-context
+                                    :workspace workspace
+                                    :prompt prompt
+                                    :process-request-function process-request-function)))
+                              ;; Store the context on the FSM, so we can look it up e.g. for
+                              ;; processing later.
+                              (setq info (plist-put info :macher--context context))
+                              (setf (gptel-fsm-info fsm) info)
+                              ;; Mark this FSM as the most recent macher request.
+                              (with-current-buffer buffer
+                                (setq macher--fsm-latest fsm))
+                              ;; Load the pre-collected file contents into the context.  These were
+                              ;; captured at request time, so they reflect the state of the files at
+                              ;; that point, not when tools are first called.
+                              (macher--load-context-file-contents
+                               context collected-context-contents)
+                              context)
+                            ;; Request buffer live but no workspace found.
+                            t)
+                        ;; Request buffer not live - no workspace can be found.
+                        t))))
             ;; Now return the cached context.
             (if (eq context-or-t t)
                 ;; t actually means "no workspace found".

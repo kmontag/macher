@@ -3508,6 +3508,109 @@
         ;; (b . 999) should be skipped because car matches (b . 2).
         (expect result :to-equal '((a . 1) (b . 2) (c . 3))))))
 
+  (describe "macher--collect-context-file-contents"
+    :var (temp-file1 temp-file2)
+
+    (before-each
+      (setq temp-file1 (make-temp-file "macher-test"))
+      (setq temp-file2 (make-temp-file "macher-test"))
+      (with-temp-buffer
+        (insert "content of file 1")
+        (write-region (point-min) (point-max) temp-file1))
+      (with-temp-buffer
+        (insert "content of file 2")
+        (write-region (point-min) (point-max) temp-file2)))
+
+    (after-each
+      (when (file-exists-p temp-file1)
+        (delete-file temp-file1))
+      (when (file-exists-p temp-file2)
+        (delete-file temp-file2)))
+
+    (it "collects contents for file contexts"
+      (let* ((contexts `((,temp-file1) (,temp-file2)))
+             (result (macher--collect-context-file-contents contexts)))
+        (expect (length result) :to-equal 2)
+        ;; Check first file.
+        (let ((entry1 (assoc (expand-file-name temp-file1) result)))
+          (expect entry1 :to-be-truthy)
+          (expect (cdr entry1) :to-equal "content of file 1"))
+        ;; Check second file.
+        (let ((entry2 (assoc (expand-file-name temp-file2) result)))
+          (expect entry2 :to-be-truthy)
+          (expect (cdr entry2) :to-equal "content of file 2"))))
+
+    (it "skips non-existent files"
+      (let* ((nonexistent "/tmp/macher-nonexistent-file-xyz")
+             (contexts `((,temp-file1) (,nonexistent)))
+             (result (macher--collect-context-file-contents contexts)))
+        (expect (length result) :to-equal 1)
+        (expect (assoc (expand-file-name temp-file1) result) :to-be-truthy)
+        (expect (assoc nonexistent result) :to-be nil)))
+
+    (it "skips buffer contexts"
+      (with-temp-buffer
+        (let* ((buf (current-buffer))
+               (contexts `((,buf) (,temp-file1)))
+               (result (macher--collect-context-file-contents contexts)))
+          ;; Only the file should be in the result.
+          (expect (length result) :to-equal 1)
+          (expect (assoc (expand-file-name temp-file1) result) :to-be-truthy))))
+
+    (it "returns empty list for empty contexts"
+      (let ((result (macher--collect-context-file-contents '())))
+        (expect result :to-equal nil)))
+
+    (it "preserves order of contexts"
+      (let* ((contexts `((,temp-file1) (,temp-file2)))
+             (result (macher--collect-context-file-contents contexts)))
+        ;; First entry should be temp-file1.
+        (expect (car (car result)) :to-equal (expand-file-name temp-file1))
+        ;; Second entry should be temp-file2.
+        (expect (car (cadr result)) :to-equal (expand-file-name temp-file2)))))
+
+  (describe "macher--load-context-file-contents"
+    :var (workspace-file context)
+
+    (before-each
+      (funcall setup-project)
+      ;; Use file1.txt which is created by setup-project.
+      (setq workspace-file (expand-file-name "file1.txt" project-dir))
+      (setq context (macher--make-context :workspace `(project . ,project-dir))))
+
+    (it "loads collected contents into context for workspace files"
+      (let ((collected-contents `((,workspace-file . "collected content"))))
+        (macher--load-context-file-contents context collected-contents)
+        (let* ((contents (macher-context-contents context))
+               (entry (assoc workspace-file contents)))
+          (expect entry :to-be-truthy)
+          ;; Both original and new should be the collected content.
+          (expect (car (cdr entry)) :to-equal "collected content")
+          (expect (cdr (cdr entry)) :to-equal "collected content"))))
+
+    (it "skips files not in workspace"
+      (let* ((outside-file "/tmp/outside-workspace.txt")
+             (collected-contents `((,outside-file . "outside content"))))
+        (macher--load-context-file-contents context collected-contents)
+        (let ((contents (macher-context-contents context)))
+          ;; Should not have added the outside file.
+          (expect (assoc outside-file contents) :to-be nil))))
+
+    (it "does not overwrite existing contents"
+      ;; First, manually add some contents.
+      (setf (macher-context-contents context) `((,workspace-file . ("original" . "modified"))))
+      (let ((collected-contents `((,workspace-file . "collected content"))))
+        (macher--load-context-file-contents context collected-contents)
+        (let* ((contents (macher-context-contents context))
+               (entry (assoc workspace-file contents)))
+          ;; Should still have the original contents, not the collected ones.
+          (expect (car (cdr entry)) :to-equal "original")
+          (expect (cdr (cdr entry)) :to-equal "modified"))))
+
+    (it "handles empty collected contents"
+      (macher--load-context-file-contents context '())
+      (expect (macher-context-contents context) :to-be nil)))
+
   (describe "macher--with-preset"
     :var (original-presets)
 
