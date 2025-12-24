@@ -217,6 +217,26 @@ Any matching tools already present in the variable
   :group 'convenience
   :prefix "macher-")
 
+(defgroup macher-actions nil
+  "Customization for macher actions and action buffers."
+  :group 'macher
+  :prefix "macher-")
+
+(defgroup macher-workspace nil
+  "Customization for workspace detection and context generation."
+  :group 'macher
+  :prefix "macher-")
+
+(defgroup macher-processing nil
+  "Customization for processing completed requests and generating patches."
+  :group 'macher
+  :prefix "macher-")
+
+(defgroup macher-tools nil
+  "Customization for macher tools and presets."
+  :group 'macher
+  :prefix "macher-")
+
 ;;;; Actions
 
 (defcustom macher-actions-alist
@@ -280,7 +300,7 @@ actions."
     :key-type symbol
     ;; TODO: Make this more specific.
     :value-type (plist :key-type keyword :value-type (choice string symbol function)))
-  :group 'macher)
+  :group 'macher-actions)
 
 (defcustom macher-action-buffer-ui 'default
   "Specifies a base UI configuration to use for action buffers.
@@ -324,7 +344,7 @@ change."
     (const :tag "Default UI with gptel-mode and formatting" default)
     (const :tag "Org-mode UI with gptel-org" org)
     (const :tag "No setup - full manual control" nil))
-  :group 'macher)
+  :group 'macher-actions)
 
 (defcustom macher-action-buffer-setup-hook nil
   "Hook run when creating new macher action buffers.
@@ -345,7 +365,7 @@ customize (globally or buffer-locally) the
 `macher-before-action-functions' to make sure the buffer actually gets
 displayed."
   :type 'hook
-  :group 'macher)
+  :group 'macher-actions)
 
 (defcustom macher-action-dispatch-hook nil
   "Hook run when invoking a macher action.
@@ -358,7 +378,7 @@ the selected region, or add the current file to the gptel context.
 This runs prior to the `macher-before-action-functions', and potentially
 prior to the creation of the action buffer."
   :type 'hook
-  :group 'macher)
+  :group 'macher-actions)
 
 (defcustom macher-before-action-functions nil
   "Abnormal hook run before sending the request for a macher action.
@@ -382,7 +402,7 @@ the action buffer when you make a request.  If you set
 `macher-action-buffer-ui' to nil, you'll probably also want to add
 something to this hook which at least displays the action buffer."
   :type 'hook
-  :group 'macher)
+  :group 'macher-actions)
 
 (defcustom macher-after-action-functions nil
   "Abnormal hook run after a macher action's request completes.
@@ -400,7 +420,7 @@ case.
 
 This hook runs after the callback provided to `macher-action' (if any)."
   :type 'hook
-  :group 'macher)
+  :group 'macher-actions)
 
 ;;;; Context
 
@@ -423,7 +443,7 @@ The default function adds information about the current workspace (e.g.
 the project being edited) including file listings and context
 indicators."
   :type '(function :tag "Workspace string function")
-  :group 'macher)
+  :group 'macher-workspace)
 
 (defcustom macher-context-string-max-files 50
   "Maximum number of files to include in the workspace context string.
@@ -445,7 +465,7 @@ Note: This value is used within the default `macher--context-string'
 function.  If you customize `macher-context-string-function' to use a
 different function, this value will have no effect."
   :type '(choice (natnum :tag "Maximum number of files") (const :tag "No limit" nil))
-  :group 'macher)
+  :group 'macher-workspace)
 
 ;;;; Result processing
 
@@ -485,7 +505,7 @@ The value of this variable will be stored at request-time and used
 throughout a particular request.  This enables custom handling on a
 per-request basis."
   :type 'function
-  :group 'macher)
+  :group 'macher-processing)
 
 (defcustom macher-patch-prepare-functions
   '(macher--patch-prepare-diff macher--patch-prepare-metadata)
@@ -518,7 +538,7 @@ This hook is run within the default `macher-process-request-function'.
 If you modify that function for a particular request, this hook won't be
 run."
   :type 'hook
-  :group 'macher)
+  :group 'macher-processing)
 
 (defcustom macher-patch-buffer-ui 'diff
   "Specifies a base UI configuration to use for patch buffers.
@@ -546,7 +566,7 @@ The choices are:
   '(choice
     (const :tag "Default diff UI with diff-mode" diff)
     (const :tag "No setup - full manual control" nil))
-  :group 'macher)
+  :group 'macher-processing)
 
 (defcustom macher-patch-buffer-setup-hook nil
   "Hook run when creating new macher patch buffers.
@@ -564,7 +584,7 @@ If you want full control over the patch buffer UI, set
 `macher-patch-buffer-ui' to nil and use this hook to perform all
 setup from scratch."
   :type 'hook
-  :group 'macher)
+  :group 'macher-processing)
 
 (defcustom macher-patch-ready-hook nil
   "Hook called after the patch buffer has been prepared.
@@ -590,7 +610,7 @@ This hook is run within the default `macher-process-request-function'.
 If you modify that function for a particular request, this hook won't be
 run."
   :type 'hook
-  :group 'macher)
+  :group 'macher-processing)
 
 ;;;; Tools and tool settings
 
@@ -602,7 +622,7 @@ interact with the current request's `macher-context'.  You should avoid
 adding tools to this category directly; instead, customize
 `macher-tools' as needed."
   :type 'string
-  :group 'macher)
+  :group 'macher-tools)
 
 (defcustom macher-tools
   `((:name
@@ -910,7 +930,7 @@ length will be replaced with an omission message, similar to ripgrep's
 
 Set to nil to disable the limit entirely."
   :type '(choice (natnum :tag "Maximum number of characters") (const :tag "No limit" nil))
-  :group 'macher)
+  :group 'macher-tools)
 
 ;; ;;;; Presets
 
@@ -979,7 +999,7 @@ Custom functions should return a cons cell (TYPE . ID) where:
   but for custom workspace types, it can be any string as long as you
   can use it to resolve a real root path)"
   :type 'hook
-  :group 'macher)
+  :group 'macher-workspace)
 
 (defcustom macher-workspace-types-alist
   '((project
@@ -1009,7 +1029,7 @@ cdr of a workspace cons cell whose type matches the associated alist key.
 To add a new workspace type, add an entry to this alist and update
 `macher-workspace-functions' to detect it."
   :type '(alist :key-type symbol :value-type (plist :key-type keyword :value-type function))
-  :group 'macher)
+  :group 'macher-workspace)
 
 ;;; Constants
 
