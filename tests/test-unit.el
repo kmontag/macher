@@ -3441,6 +3441,77 @@
             ;; Clean up
             (when (file-exists-p temp-dir)
               (delete-directory temp-dir t)))))))
+  (describe "macher--append-if-missing"
+    (it "appends new items to empty list"
+      (let ((result (macher--append-if-missing '() '(1 2 3))))
+        (expect result :to-equal '(1 2 3))))
+
+    (it "appends new items to non-empty list"
+      (let ((result (macher--append-if-missing '(1 2) '(3 4))))
+        (expect result :to-equal '(1 2 3 4))))
+
+    (it "skips items already present in list"
+      (let ((result (macher--append-if-missing '(1 2 4) '(2 3 4))))
+        (expect result :to-equal '(1 2 4 3))))
+
+    (it "returns copy when all items already present"
+      (let* ((original '(1 2 3))
+             (result (macher--append-if-missing original '(1 2 3))))
+        (expect result :to-equal '(1 2 3))
+        ;; Should be a copy, not the same list.
+        (expect result :not :to-be original)))
+
+    (it "returns copy of original list"
+      (let* ((original '(1 2 3))
+             (result (macher--append-if-missing original '())))
+        (expect result :to-equal original)
+        ;; Should be a copy, not the same list.
+        (expect result :not :to-be original)))
+
+    (it "handles empty new-items list"
+      (let ((result (macher--append-if-missing '(1 2 3) '())))
+        (expect result :to-equal '(1 2 3))))
+
+    (it "uses custom test function when provided"
+      (let* ((testfn (lambda (a b) (= (mod a 10) (mod b 10))))
+             (result (macher--append-if-missing '(1 2 3) '(11 14) testfn)))
+        ;; 11 matches 1, so shouldn't be added.
+        ;; 14 matches 4 (not present), so should be added.
+        (expect result :to-equal '(1 2 3 14))))
+
+    (it "uses equal as default test function"
+      (let ((result (macher--append-if-missing '("a" "b") '("b" "c"))))
+        (expect result :to-equal '("a" "b" "c"))))
+
+    (it "preserves order of original list"
+      (let ((result (macher--append-if-missing '(3 1 2) '(4 5))))
+        (expect result :to-equal '(3 1 2 4 5))))
+
+    (it "appends items in order from new-items"
+      (let ((result (macher--append-if-missing '(1) '(5 4 3 2))))
+        (expect result :to-equal '(1 5 4 3 2))))
+
+    (it "handles lists with nil values"
+      (let ((result (macher--append-if-missing '(1 nil 2) '(nil 3))))
+        ;; nil already exists in the original list, so it won't be added again.
+        (expect result :to-equal '(1 nil 2 3))))
+
+    (it "appends nil when not already present"
+      (let ((result (macher--append-if-missing '(1 2) '(nil 3))))
+        (expect result :to-equal '(1 2 nil 3))))
+
+    (it "handles complex data structures"
+      (let* ((obj1 '(a . 1))
+             (obj2 '(b . 2))
+             (obj3 '(c . 3))
+             (result (macher--append-if-missing (list obj1 obj2) (list obj2 obj3))))
+        (expect result :to-equal (list obj1 obj2 obj3))))
+
+    (it "uses custom testfn for complex structures"
+      (let* ((testfn (lambda (a b) (equal (car a) (car b))))
+             (result (macher--append-if-missing '((a . 1) (b . 2)) '((b . 999) (c . 3)) testfn)))
+        ;; (b . 999) should be skipped because car matches (b . 2).
+        (expect result :to-equal '((a . 1) (b . 2) (c . 3))))))
 
   (describe "macher--merge-tools"
     (before-each

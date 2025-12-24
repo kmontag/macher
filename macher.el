@@ -3222,12 +3222,13 @@ CALLBACK must be called when preparation is complete."
 (defun macher--append-if-missing (list new-items &optional testfn)
   "Get a copy of the LIST with NEW-ITEMS appended, unless already present.
 
-Presence is determined by TESTFN, as defined in e.g. `seq-contains',
+Presence is determined by TESTFN, as defined in e.g. `seq-contains-p',
 defaulting to `equal'."
   (let ((result (copy-sequence list)))
     (dolist (item new-items)
-      (unless (seq-contains result item testfn)
-        (setq result (append result (list item)))))))
+      (unless (seq-contains-p result item testfn)
+        (setq result (append result (list item)))))
+    result))
 
 (defun macher--test-fn-tools (first second)
   "Return t if the FIRST gptel tool matches the SECOND.
