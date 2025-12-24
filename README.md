@@ -19,8 +19,8 @@ changes, maybe call other tools to do research, etc - but you want to review the
 before writing them to disk.
 
 macher takes inspiration from gptel's flexibility and visibility. It doesn't touch your gptel
-globals - it's just a set of presets and tools that you can use as you like. Or you can use the
-built-in action commands for a quick and easy workflow.
+globals (unless you tell it to) - it's just a set of presets and tools that you can use as you like.
+Or you can use the built-in action commands for a quick and easy workflow.
 
 ## Installation and configuration
 
@@ -31,10 +31,29 @@ Example configuration with elpaca + `use-package` integration:
   :ensure (:host github :repo "kmontag/macher")
 
   :custom
+
   ;; The org UI has structured navigation and nice content folding.
   (macher-action-buffer-ui 'org)
 
   :config
+
+  ;; Recommended - register macher tools and presets with gptel.  This doesn't
+  ;; touch any gptel settings or activate any tools/presets; it just makes them
+  ;; available in the gptel menu.
+  (macher-install)
+
+  ;; Recommended - apply the "@macher-base" preset globally.  This ensures that
+  ;; macher tools and system prompts will work in any gptel buffer, including
+  ;; in places like restored gptel sessions.
+  ;;
+  ;; This modifies `gptel-prompt-transform-functions', but won't affect your
+  ;; non-macher requests in any meaningful way - see the docstring for more
+  ;; details.
+  ;;
+  ;; This isn't necessary for using the actions workflow, or for using built-in
+  ;; presets directly.
+  (macher-enable)
+
   ;; Adjust buffer positioning to taste.
   ;; (add-to-list
   ;;  'display-buffer-alist
@@ -51,15 +70,10 @@ Example configuration with elpaca + `use-package` integration:
 (use-package gptel
   ;; ...
   :config
-  ;; Recommended - register macher tools and presets with gptel.  This doesn't
-  ;; touch any gptel settings or activate any tools/presets; it just makes them
-  ;; available in the gptel menu.
-  (macher-install)
-  ;; Optional - apply the "@macher-base" preset globally.  You probably want to
-  ;; do this if you're managing macher tools directly from the gptel menu.
-  ;; This is a utility preset that must be applied for macher tools to work -
-  ;; see the docstring for details.
-  (gptel-apply-preset macher-preset-base))
+  ;; Optional - set up macher as soon as gptel is loaded.
+  (require 'macher)
+  ;; ...
+  )
 ```
 
 ## Usage
