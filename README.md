@@ -82,20 +82,18 @@ Example configuration with elpaca + `use-package` integration:
 
 After calling `(macher-install)`, you can use macher presets in any gptel request or buffer:
 
-- **`@macher`**: Full editing capabilities. Adds workspace context (file listings, project info)
-  plus tools to read, search, and edit files. Changes are captured in memory and displayed as a
-  patch.
+- **`@macher`**: Full editing capabilities. Adds workspace context plus tools to read, search, and
+  edit files. Changes are captured in memory and displayed as a patch.
 
 - **`@macher-ro`**: Read-only access. Adds workspace context plus tools to read and search files,
   but no editing tools.
 
-- **`@macher-prompt`**: Context only. Adds workspace context without any tools. Use when you want
+- **`@macher-system`**: Context only. Adds workspace context without any tools. Use when you want
   the LLM to understand your project structure but don't need file access.
 
 - **`@macher-base`**: Utility preset that enables macher tool infrastructure. Macher tools will fail
   unless this is applied. This gets applied automatically when using other macher presets, but you
-  may want to apply it globally, so that you can use macher tools without explicitly applying
-  presets (e.g. from the gptel menu or when restoring a gptel session).
+  may want to apply it globally via `macher-enable`.
 
 https://github.com/user-attachments/assets/9b3e0734-5907-4e01-a356-6f9066d7b844
 
@@ -133,6 +131,26 @@ The actions buffer UI can be customized with `macher-action-buffer-ui` (see
 [Customization](#customization)).
 
 You can define custom actions in `macher-actions-alist`.
+
+### Workspace context
+
+macher can add information about the current workspace (project name, location, file listings) to
+your system prompt.
+
+If you've called `(macher-enable)` and/or activated `@macher-base` , any instances of the
+`macher-context-string-placeholder` (default: `"[macher_placeholder]"`) in your system prompt will
+be replaced with a description of the request buffer's workspace.
+
+The `@macher`, `@macher-ro`, and `@macher-system` presets will append the placeholder automatically
+to your system prompt (unless it's already there).
+
+You can also use the `macher-context-string-placeholder` in your own directives to control placement
+or add info about the current project to any gptel request.
+
+Use `@macher-system-commit` in a buffer if you want to "freeze" the current context string into the
+system prompt, for example to avoid cache churn.
+
+The workspace description can be customized by setting the `macher-context-string-function`.
 
 ## Advanced usage
 
@@ -185,6 +203,10 @@ Available tools:
 When `macher-install` is called, these tools are registered with gptel but not activated. The
 `@macher` and `@macher-ro` presets activate the appropriate subsets.
 
+You can also enable/disable them directly from the gptel menu, load them in restored gptel sessions,
+etc. Just make sure you call `(macher-enable)` or activate `@macher-base` - this adds a prompt
+transform that provides tools with a shared `macher-context` for outgoing requests.
+
 To customize the available tools and presets, modify `macher-tools` or `macher-presets-alist`.
 
 ## Customization
@@ -204,12 +226,15 @@ You can see customizable variables/sub-groups with `M-x customize-group RET mach
 
 ### Workspace
 
-| Variable                          | Description                                          |
-| --------------------------------- | ---------------------------------------------------- |
-| `macher-workspace-functions`      | Functions to determine the workspace for a buffer    |
-| `macher-workspace-types-alist`    | Defines workspace types (project, file, etc.)        |
-| `macher-context-string-function`  | Generates workspace context information for requests |
-| `macher-context-string-max-files` | Max files to list in workspace context               |
+| Variable                             | Description                                                    |
+| ------------------------------------ | -------------------------------------------------------------- |
+| `macher-workspace-functions`         | Functions to determine the workspace for a buffer              |
+| `macher-workspace-types-alist`       | Defines workspace types (project, file, etc.)                  |
+| `macher-context-string-function`     | Generates workspace context information for requests           |
+| `macher-context-string-placeholder`  | System prompt placeholder string for dynamic context injection |
+| `macher-context-string-marker-start` | Start marker for context in system prompt                      |
+| `macher-context-string-marker-end`   | End marker for context in system prompt                        |
+| `macher-context-string-max-files`    | Max files to list in workspace context                         |
 
 ### Processing
 
