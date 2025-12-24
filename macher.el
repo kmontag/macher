@@ -72,6 +72,63 @@
 
 ;;; Preliminary definitions needed for defcustom defaults
 
+(defconst macher-preset-base
+  `(:description
+    "Utility preset, must be applied to use macher tools"
+    :prompt-transform-functions
+    (:function
+     ;; Remove any existing instances of the base transform, and then append it at the end. This
+     ;; explicit at-the-end ordering ensures that if we append this preset to the end of, for
+     ;; example, a list of other @presets in a request, we'll capture the prompt text as it appears
+     ;; _after_ any other prompt transforms.
+     (lambda (prompt-transform-functions)
+       (let ((transform #'macher--prompt-transform-base))
+         (append
+          (seq-remove (lambda (el) (equal el transform)) prompt-transform-functions)
+          (list transform))))))
+  "Preset spec to set up macher behavior for outgoing gptel requests.
+
+You can apply this preset with:
+
+  \\='(gptel-apply-preset macher-preset-base)'
+
+Or, if you've run `macher-install' with default settings, you can apply
+the \"@macher-base\" preset from the gptel menu.
+
+To use macher tools, you MUST apply this preset (or more precisely, you
+must ensure `macher--prompt-transform-base' is in the
+`gptel-prompt-transform-functions').
+
+All the built-in macher presets include this as a parent.  If you're
+making your own presets involving macher tools, the easiest way to make
+them work robustly is to add this preset as a parent.
+
+This preset is safe to apply globally and/or repeatedly - it won't
+change anything about the content of your outgoing requests, except that
+any macher tools included in them will be properly set up.")
+
+(defconst macher-preset-prompt
+  `(:description
+    "Add info about the current macher workspace to the prompt"
+    :prompt-transform-functions
+    (:function
+     (lambda (prompt-transform-functions)
+       (macher--append-if-missing
+        prompt-transform-functions (list #'macher--prompt-transform-add-context)))))
+  "Preset spec to add contextual info about the macher workspace.
+
+This preset will modify the prompt.")
+
+(defconst macher--preset-clear-tools
+  '(:description
+    "Remove all macher tools"
+    :tools
+    (:function
+     (lambda (tools)
+       (seq-remove
+        (lambda (tool) (equal (gptel-tool-category tool) macher-tool-category)) tools)))))
+
+;; TODO: Convert this to a private method (macher--) and add a deprecation defalias.
 (defun macher-action-from-region-or-input (input-prompt transform preset &optional input)
   "Get a macher action plist from user input or the selected region.
 
@@ -116,6 +173,43 @@ custom actions with the same workflow."
          (transformed-prompt (funcall transform user-input is-selected)))
     `(:prompt ,transformed-prompt :preset ,preset :summary ,user-input)))
 
+(defun macher--tools-preset (pred &rest keys)
+  "Get a gptel preset spec which enables a selection of macher tools.
+
+KEYS is a baseline spec plist, as would be passed to
+`gptel-make-preset'.  It cannot include :tools or :use-tools.
+
+The baseline spec will be augmented with:
+
+- an appropriate :tools entry (which appends all matching tools to
+  variable `gptel-tools', unless they already appear there).
+
+- a :use-tools entry to ensure `gptel-use-tools' is non-nil.
+
+- `macher-preset-base' as a parent.
+
+When the preset is applied, the PRED receives each element of
+`macher-tools', and should return non-nil for tools that should be
+enabled.  Tools are then normalized using `macher-resolve-tool'.
+
+Any matching tools already present in the variable
+`gptel-tools' (according to their name/category) will be skipped."
+  (when (plist-get keys :tools)
+    (error "Cannot include :tools in a preset spec for `macher--tools-preset'"))
+  (when (plist-get keys :use-tools)
+    (error "Cannot include :use-tools in a preset spec for `macher--tools-preset'"))
+  (let* ((parents (append (ensure-list (plist-get keys :parents)) (list macher-preset-base))))
+    (plist-put
+     (plist-put
+      (plist-put
+       keys
+       ;; Make sure tools are enabled, but preserve the existing value of `gptel-use-tools' if
+       ;; already non-nil (e.g. \\='force.
+       :use-tools '(:function (lambda (use-tools) (or use-tools t))))
+      ;; Add tools from `macher-tools' matching the predicate.
+      :tools `(:function ,(apply-partially #'macher--preset-function-add-tools pred)))
+     :parents parents)))
+
 ;;; Customization
 
 (defgroup macher nil
@@ -159,8 +253,11 @@ returns) a plist containing the following keys:
 - :prompt - the full prompt string to send to the LLM.
 
 - :preset - gptel preset to use for the request (optional, defaults to
-  ='macher').  This can be a symbol (one of the keys from
-  `macher--presets-alist') or a raw gptel preset plist.
+  ='macher').  This can be a symbol or a plain preset spec plist (like
+  the keys from `gptel-make-preset').  If it's a symbol, it will be
+  resolved first by checking the global gptel registry for a preset of
+  that name, or if not found, by checking for an entry with that name in
+  the `macher-presets-alist'.
 
 - :summary - a summarized version of the prompt (optional).  This won't
   affect the actual request content, but it will be included with the
@@ -176,11 +273,12 @@ where the action was initiated, so it can access buffer content,
 region-selection status, etc.  The function must be callable with no
 arguments, although additional (i.e. &rest) arguments passed to
 `macher-action' will be forwarded to it if provided - this allows, for
-example, input strings to be passed programmatically to actions based on
-`macher-action-from-region-or-input'."
+example, input strings to be passed programmatically to the default
+actions."
   :type
   '(alist
     :key-type symbol
+    ;; TODO: Make this more specific.
     :value-type (plist :key-type keyword :value-type (choice string symbol function)))
   :group 'macher)
 
@@ -816,8 +914,42 @@ Set to nil to disable the limit entirely."
 
 ;; ;;;; Presets
 
-;; (defcustom macher-presets nil
-;;   "Preset definitions
+(defcustom macher-presets-alist
+  `(
+    ;; Enable all macher tools.
+    (macher
+     .
+     ,(macher--tools-preset
+       ;; Include all macher tools.
+       (lambda (_) t)
+       :description "Send macher workspace context + tools to read files and propose edits"
+       :parents (list macher-preset-prompt)))
+    ;; Enable read-only macher tools, and disable other macher tools.
+    (macher-ro
+     .
+     ,(macher--tools-preset
+       ;; Only include macher tools categorized as read tools.
+       (lambda (tool-def) (equal (plist-get tool-def :category) "read"))
+       :description "Send macher workspace context + tools to read files"
+       ;; Clear other macher tools before applying - force read-only.
+       :parents (list macher-preset-prompt macher--preset-clear-tools)))
+    ;; Add contextual info about the current workspace to the prompt.
+    (macher-prompt . ,macher-preset-prompt)
+    ;; Inject context into macher tools.
+    (macher-base . ,macher-preset-base))
+  "Alist of definitions for macher presets.
+
+Entries have the form (NAME . KEYS).  NAME is the name to use (by
+default) when installing presets globally with `macher-install'.  KEYS
+are the keys to pass to `gptel-make-preset'.
+
+This list will be used to install presets globally, and also to create
+ephemeral presets when using workspace actions.  These ephemeral presets
+allow us to reuse gptel's preset functionality when making requests
+programmatically, without relying on certain names or config existing in
+the global state."
+  ;; TODO: Add type info.
+  )
 
 ;;;; Workspace selection and configuration
 
@@ -3267,157 +3399,54 @@ have not have been installed globally."
         ;; Tool not found in registry, create an anonymous tool.
         (apply #'macher--make-tool t tool))))
 
-(defconst macher-preset-prompt
-  `(:description
-    "Add info about the current macher workspace to the prompt"
-    :prompt-transform-functions
-    (:function
-     (lambda (prompt-transform-functions)
-       (macher--append-if-missing
-        prompt-transform-functions (list #'macher--prompt-transform-add-context)))))
-  "Preset spec to add contextual info about the macher workspace.
-
-This preset will modify the prompt.")
-
-(defconst macher-preset-base
-  `(:description
-    "Utility preset, must be applied to use macher tools"
-    :prompt-transform-functions
-    (:function
-     (lambda (prompt-transform-functions)
-       (macher--append-if-missing
-        prompt-transform-functions (list #'macher--prompt-transform-base)))))
-  "Preset spec to set up macher behavior for outgoing gptel requests.
-
-You can apply this preset with:
-
-  \\='(gptel-apply-preset macher-preset-base)'
-
-Or, if you've run `macher-install' with default settings, you can apply
-the \"@macher-base\" preset from the gptel menu.
-
-To use macher tools, you MUST apply this preset (or more precisely, you
-must ensure `macher--prompt-transform-base' is in the
-`gptel-prompt-transform-functions').
-
-All the built-in macher presets include this as a parent.  If you're
-making your own presets involving macher tools, the easiest way to make
-them work robustly is to add this preset as a parent.
-
-This preset is safe to apply globally and/or repeatedly - it won't
-change anything about the content of your outgoing requests, except that
-any macher tools included in them will be properly set up.")
-
-(defconst macher--preset-clear-tools
-  '(:description
-    "Remove all macher tools"
-    :tools
-    (:function
-     (lambda (tools)
-       (seq-remove
-        (lambda (tool) (equal (gptel-tool-category tool) macher-tool-category)) tools)))))
-
-(defun macher--tools-preset (pred &rest keys)
-  "Get a gptel preset spec which enables a selection of macher tools.
-
-KEYS is a baseline spec plist, as would be passed to
-`gptel-make-preset'.  It cannot include :tools or :use-tools.
-
-The baseline spec will be augmented with:
-
-- an appropriate :tools entry (which appends all matching tools to
-  variable `gptel-tools', unless they already appear there).
-
-- a :use-tools entry to ensure `gptel-use-tools' is non-nil.
-
-- `macher-preset-base' as a parent.
-
-When the preset is applied, the PRED receives each element of
-`macher-tools', and should return non-nil for tools that should be
-enabled.  Tools are then normalized using `macher-resolve-tool'.
-
-Any matching tools already present in the variable
-`gptel-tools' (according to their name/category) will be skipped."
-  (when (plist-get keys :tools)
-    (error "Cannot include :tools in a preset spec for `macher--tools-preset'"))
-  (when (plist-get keys :use-tools)
-    (error "Cannot include :use-tools in a preset spec for `macher--tools-preset'"))
-  (let* ((parents (append (ensure-list (plist-get keys :parents)) (list macher-preset-base))))
-    (plist-put
-     (plist-put
-      (plist-put
-       keys
-       ;; Make sure tools are enabled, but preserve the existing value of `gptel-use-tools' if
-       ;; already non-nil (e.g. \\='force.
-       :use-tools '(:function (lambda (use-tools) (or use-tools t))))
-      ;; Add tools from `macher-tools' matching the predicate.
-      :tools `(:function ,(apply-partially #'macher--preset-function-add-tools pred)))
-     :parents parents)))
-
-(defun macher--preset-use-tools-function (use-tools)
-  "Preset function for `gptel-use-tools' which ensures tools are available.
-
-Uses the existing value of USE-TOOLS if non-nil (e.g. ='force'), or t
-otherwise."
-  (or use-tools t))
-
-(defvar macher--presets-alist
-  `(
-    ;; Enable all macher tools.
-    (macher
-     .
-     ,(macher--tools-preset
-       ;; Include all macher tools.
-       (lambda (_) t)
-       :description "Send macher workspace context + tools to read files and propose edits"
-       :parents (list macher-preset-prompt)))
-    ;; Enable read-only macher tools, and disable other macher tools.
-    (macher-ro
-     .
-     ,(macher--tools-preset
-       ;; Only include macher tools categorized as read tools.
-       (lambda (tool-def) (equal (plist-get tool-def :category) "read"))
-       :description "Send macher workspace context + tools to read files"
-       ;; Clear other macher tools before applying - force read-only.
-       :parents (list macher-preset-prompt macher--preset-clear-tools)))
-    ;; Add contextual info about the current workspace to the prompt.
-    (macher-prompt . ,macher-preset-prompt)
-    ;; Inject context into macher tools.
-    (macher-base . ,macher-preset-base))
-  "Alist of definitions for macher presets.
-
-Entries have the form (NAME . KEYS).  NAME is the name to use (by
-default) when installing presets globally with `macher-install'.  KEYS
-are the keys to pass to `gptel-make-preset'.
-
-This list will be used to install presets globally, and also to create
-ephemeral presets when using workspace actions.  These ephemeral presets
-allow us to reuse gptel's preset functionality when making requests
-programmatically, without relying on certain names or config existing in
-the global state.")
-
 (defun macher--with-preset (preset callback)
   "Run the CALLBACK with the macher PRESET applied.
 
-PRESET is a key from the `macher--presets-alist', or a raw preset spec
-like \\='(:use-tools t).  Note that this function does not accept a name
-from the global gptel registry - it's for cases where you want to use a
-well-defined preset independent of how gptel is currently configured.
+PRESET is a symbol or a raw preset spec plist as would be passed to
+`gptel-make-preset', like \\='(:use-tools t).  If preset is a symbol, it
+will be looked up from the global gptel registry, or if not found
+there (e.g. if `macher-install' was never called), from the
+`macher-presets-alist'.
 
 CALLBACK takes no arguments."
-  (let ((spec
-         (if (symbolp preset)
-             (cdr (assq preset macher--presets-alist))
-           preset)))
-    ;; Adapted from `gptel-with-preset'.  Currently that macro sets all symbol values to nil before
-    ;; applying the preset (since it doesn't expect dynamic values), but we want to pull in
-    ;; existing values, so we can extend rather than overwrite things like 'gptel-tools'.
-    (let* ((preset-syms (gptel--preset-syms spec))
-           ;; Get the current values of all variables affected by the preset.
-           (preset-sym-values (mapcar #'symbol-value preset-syms)))
-      (cl-progv preset-syms preset-sym-values
-        (gptel--apply-preset spec)
-        (funcall callback)))))
+  (let
+      ((preset-for-gptel
+        (if (symbolp preset)
+            ;; For symbols, if found in the global registry, just pass the symbol directly. This leads to
+            ;; clearer warnings/debugging from gptel if something goes wrong, compared to a raw preset
+            ;; spec.
+            ;;
+            ;; NOTE: Disabled for now due to the gptel :parents issue - see hack below. We can add
+            ;; this back when the issue is fixed upstream.
+            ;;
+            ;; (if (gptel-get-preset preset)
+            ;;     preset
+            (or
+             (gptel-get-preset preset)
+             ;; If the symbol wasn't found in the global registry, try to get it from the macher list.
+             (cdr (assq preset macher-presets-alist)))
+          ;; If not a symbol, just pass the value directly - presumably it's a plist spec, or else we'll
+          ;; delegate error handling to gptel.
+          preset)))
+
+    (unless preset-for-gptel
+      (user-error
+       "Macher preset \"%s\": Cannot find preset in gptel registry or macher presets list"
+       preset))
+
+    ;; Hack around a current issue in gptel that prevents anonymous presets from being used as
+    ;; parents in `gptel-with-preset'.
+    (if-let ((parents (plist-get preset-for-gptel :parents)))
+      ;; If the current preset has any parents, apply them and call this function recursively with
+      ;; one parent popped from the front of the list.
+      (let* ((first-parent (car parents))
+             (remaining-parents (cdr parents)))
+        (macher--with-preset
+         first-parent
+         (lambda ()
+           (macher--with-preset
+            (plist-put (copy-sequence preset-for-gptel) :parents remaining-parents) callback))))
+      (gptel-with-preset preset-for-gptel (funcall callback)))))
 
 (defun macher--prompt-transform-add-context (callback fsm)
   "A gptel prompt transformer to add context from the current workspace.
@@ -3814,50 +3843,55 @@ activated (i.e. not added to the variable `gptel-tools')."
     ;; Create and register the tool.
     (apply #'macher--make-tool nil tool-def)))
 
+(defun macher--install-presets ()
+  "Install all presets specified in `macher-presets-alist'.
+
+Presets will be available in the global gptel registry, with the keys of
+the alist used as preset names."
+  (dolist (preset-entry macher-presets-alist)
+    (apply #'gptel-make-preset preset-entry)))
+
 ;;; Core Functions
 
 ;;;###autoload
-(defun macher-install (&optional names)
-  "Register macher presets with gptel.
+(defun macher-install (&optional deprecated)
+  "Register macher presets and tools with gptel.
+
+Uses `macher-presets-alist' and `macher-tools' to determine the
+presets/tools to install.
 
 Once presets are registered, you can use macher functionality in any
 gptel request using the \"@preset\" syntax, for example:
 
   @macher Add an eslint config to this project.
 
-This function registers three presets:
+You can also enable/disable macher tools directly from the gptel tools
+menu - just make sure you apply the \"@macher-base\" preset as described
+below.
+
+By default (if you haven't customized the `macher-presets-alist'),
+this function registers four presets:
 
 - @macher: Send contextual information about the workspace + tools to
-  read files and propose edits.  At the end of the request, update the
-  patch buffer.
+  read files and propose edits.  At the end of the request, update and
+  display the patch buffer if edits were made.
 
 - @macher-ro: Send contextual information about the workspace + tools to
   read files.
 
-- @macher-notools: Send contextual information about the workspace, but
+- @macher-prompt: Send contextual information about the workspace, but
   no tools.
 
-NAMES is an optional alist of name overrides, whose entries are
-like (PRESET . NAME).  PRESET is the preset's standard name symbol (e.g.
-='macher-notools') and NAME is the symbol to actually register
-with gptel.  You can also pass a nil NAME to disable registering a preset
-globally.  For example:
+- @macher-base: A utility preset that must be applied in order to use
+  macher tools.  The \"@macher\" and \"@macher-ro\" presets already
+  include this as a parent, but you might also want to use it as a
+  parent in custom presets, or apply it globally.
 
-\\='((macher . m) (macher-ro . mr) (macher-notools . nil))"
+A DEPRECATED parameter was previously used to control preset names; this
+can now be done by customizing the `macher-presets-alist'."
 
-  (macher--install-tools)
-  (dolist (preset-entry macher--presets-alist)
-    (let* ((preset-name (car preset-entry))
-           (preset-config (cdr preset-entry))
-           ;; Check if there's a name override in the NAMES alist.
-           (override-entry (assq preset-name names))
-           (actual-name
-            (if override-entry
-                (cdr override-entry)
-              preset-name)))
-      ;; Only register the preset if actual-name is not nil.
-      (when actual-name
-        (apply #'gptel-make-preset actual-name preset-config)))))
+  (macher--install-presets)
+  (macher--install-tools))
 
 ;;;###autoload
 (defun macher-action (action &optional callback &rest action-args)
@@ -3895,8 +3929,8 @@ simply ignored if the action is defined as a plain plist.
 When called interactively, prompts the user to select an ACTION from
 those available in the `macher-actions-alist'.
 
-Note that macher presets can be used with any gptel request, and you
-don't need to use this function to use macher.  This function simply
+Note that macher tools/presets can be used with any gptel request, and
+you don't need to use this function to use macher.  This function simply
 implements one possible workflow."
   (interactive (let* ((actions (mapcar #'car macher-actions-alist))
                       (action-names (mapcar #'symbol-name actions))
