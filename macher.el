@@ -513,7 +513,7 @@ As long as `macher-preset-base' is applied, any instances of the
 `macher-context-string-placeholder' in the system prompt will be
 replaced with the result of this function.
 
-Set this to nil to disable workspace context injection.
+Set this to nil to disable workspace context injection."
   :type '(function :tag "Workspace string function")
   :group 'macher-workspace)
 
