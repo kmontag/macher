@@ -480,7 +480,7 @@ even when \"@macher-base\" is applied."
   :type '(choice (string :tag "Placeholder string") (const :tag "Disabled" nil))
   :group 'macher-workspace)
 
-(defcustom macher-context-string-marker-start "\n=== BEGIN WORKSPACE CONTEXT ===\n"
+(defcustom macher-context-string-marker-start "\n<workspace-context>\n"
   "A marker for the start of the macher context string in the system prompt.
 
 You should avoid using this exact string elsewhere in your system
@@ -489,7 +489,7 @@ macher requests."
   :type 'string
   :group 'macher-workspace)
 
-(defcustom macher-context-string-marker-end "\n=== END WORKSPACE CONTEXT ===\n"
+(defcustom macher-context-string-marker-end "\n</workspace-context>\n"
   "A marker for the end of the macher context string in the system prompt.
 
 For now this is purely cosmetic, but you should avoid using this exact
