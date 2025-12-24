@@ -509,6 +509,7 @@ adding tools to this category directly; instead, customize
 (defcustom macher-tools
   `((:name
      "read_file_in_workspace"
+     :category "read"
      :function macher--tool-read-file
      :description
      ,(concat
@@ -556,6 +557,7 @@ adding tools to this category directly; instead, customize
 
     (:name
      "list_directory_in_workspace"
+     :category "read"
      :function macher--tool-list-directory
      :description
      ,(concat
@@ -583,6 +585,7 @@ adding tools to this category directly; instead, customize
 
     (:name
      "search_in_workspace"
+     :category "read"
      :function macher--tool-search
      :description
      ,(concat
@@ -776,9 +779,9 @@ that:
   argument, the `macher-context' that the tool is interacting with.
 
 - CATEGORY is ignored when creating the tool (all tools will live in the
-  `macher-tool-category'), but used by the \"@macher\" and
-  \"@macher-ro\" presets to filter tools.  The values \"read\" and
-  \"write\" are currently recognized.
+  `macher-tool-category'), but can be used for internal organization -
+  currently, the \"@macher-ro\" preset uses the value \"read\" to select
+  tools, though the exact behavior here is subject to change.
 
 These tools will be installed to gptel's global tool registry (but not
 to the global variable `gptel-tools') when calling `macher-install'.
@@ -3291,7 +3294,7 @@ You can apply this preset with:
   \\='(gptel-apply-preset macher-preset-base)'
 
 Or, if you've run `macher-install' with default settings, you can apply
-the \"macher-base\" preset from the gptel menu.
+the \"@macher-base\" preset from the gptel menu.
 
 To use macher tools, you MUST apply this preset (or more precisely, you
 must ensure `macher--prompt-transform-base' is in the
@@ -3311,7 +3314,8 @@ any macher tools included in them will be properly set up.")
     :tools
     (:function
      (lambda (tools)
-       (seq-filter (lambda (tool) (string= (gptel-tool-category tool) macher-tool-category)))))))
+       (seq-remove
+        (lambda (tool) (equal (gptel-tool-category tool) macher-tool-category)) tools)))))
 
 (defun macher--tools-preset (pred &rest keys)
   "Get a gptel preset spec which enables a selection of macher tools.
@@ -3372,7 +3376,7 @@ otherwise."
      .
      ,(macher--tools-preset
        ;; Only include macher tools categorized as read tools.
-       (lambda (tool-def) (string= (plist-get tool-def :category) "read"))
+       (lambda (tool-def) (equal (plist-get tool-def :category) "read"))
        :description "Send macher workspace context + tools to read files"
        ;; Clear other macher tools before applying - force read-only.
        :parents (list macher-preset-prompt macher--preset-clear-tools)))
