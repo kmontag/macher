@@ -166,40 +166,31 @@
           (expect (cddr entry) :to-equal "new file content")))))
 
   (describe "edit tools"
-    :var (temp-file)
+    :var (temp-file context)
 
     (before-each
       (setq temp-file (make-temp-file "macher-test"))
       ;; Write some test content to the file.
       (with-temp-buffer
         (insert "original file content")
-        (write-region (point-min) (point-max) temp-file)))
+        (write-region (point-min) (point-max) temp-file))
+      (setq context (macher--make-context :workspace `(file . ,temp-file)))
+
+      ;; Shared sanity-check expectation.
+      (expect (macher-context-dirty-p context) :to-be nil))
 
     (after-each
       (when (file-exists-p temp-file)
         (delete-file temp-file)))
 
-    (it "sets the dirty-p flag"
-      ;; Test that edit tools set the dirty-p flag via the wrapper.
-      (let* ((workspace (cons 'file temp-file))
-             (context (macher--make-context :workspace workspace))
-             (make-tool-function (apply-partially #'macher--make-tool context))
-             (edit-tools (macher--edit-tools context make-tool-function)))
-        ;; Initially, dirty-p should be nil.
-        (expect (macher-context-dirty-p context) :to-be nil)
-        ;; Find the write_file_in_workspace tool.
-        (let ((write-tool
-               (cl-find-if
-                (lambda (tool)
-                  (string= (gptel-tool-name tool) "write_file_in_workspace"))
-                edit-tools)))
-          (expect write-tool :to-be-truthy)
-          ;; Call the tool function.
-          (funcall (gptel-tool-function write-tool)
-                   (file-name-nondirectory temp-file)
-                   "test content")
-          ;; dirty-p should now be t.
-          (expect (macher-context-dirty-p context) :to-be t)))))
+    (describe "macher--tool-write-file"
+      (it "replaces file contents"
+        (macher--tool-write-file context temp-file "new content")
+        (let ((contents (macher-context-contents context)))
+          (expect contents :to-equal `((,temp-file . ("original file content" . "new content"))))))
+      (it "sets the dirty-p flag"
+        (macher--tool-write-file context temp-file "new content")
+        (expect (macher-context-dirty-p context) :to-be-truthy))))
 
   (describe "macher--process-request"
     :var (context fsm temp-file build-patch-called)
