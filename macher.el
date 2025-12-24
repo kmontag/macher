@@ -166,6 +166,44 @@ It probably only makes sense to apply this at the buffer-local level.")
        (seq-remove
         (lambda (tool) (equal (gptel-tool-category tool) macher-tool-category)) tools)))))
 
+(defun macher--tools-preset (pred &rest keys)
+  "Get a gptel preset spec which enables a selection of macher tools.
+
+KEYS is a baseline spec plist, as would be passed to
+`gptel-make-preset'.  It cannot include :tools or :use-tools.
+
+The baseline spec will be augmented with:
+
+- an appropriate :tools entry (which appends all matching tools to
+  variable `gptel-tools', unless they already appear there).
+
+- a :use-tools entry to ensure `gptel-use-tools' is non-nil.
+
+- `macher-preset-base' as a parent.
+
+When the preset is applied, the PRED receives each element of
+`macher-tools', and should return non-nil for tools that should be
+enabled.  Tools are then normalized using `macher-resolve-tool'.
+
+Any matching tools already present in the variable
+`gptel-tools' (according to their name/category) will be skipped."
+  (when (plist-get keys :tools)
+    (error "Cannot include :tools in a preset spec for `macher--tools-preset'"))
+  (when (plist-get keys :use-tools)
+    (error "Cannot include :use-tools in a preset spec for `macher--tools-preset'"))
+  (let* ((parents
+          (append (ensure-list (plist-get keys :parents)) (list macher--preset-setup-tools))))
+    (plist-put
+     (plist-put
+      (plist-put
+       keys
+       ;; Make sure tools are enabled, but preserve the existing value of `gptel-use-tools' if
+       ;; already non-nil (e.g. \\='force.
+       :use-tools '(:function (lambda (use-tools) (or use-tools t))))
+      ;; Add tools from `macher-tools' matching the predicate.
+      :tools `(:function ,(apply-partially #'macher--preset-function-add-tools pred)))
+     :parents parents)))
+
 ;; TODO: Convert this to a private method (macher--) and add a deprecation defalias.
 (defun macher-action-from-region-or-input (input-prompt transform preset &optional input)
   "Get a macher action plist from user input or the selected region.
@@ -211,43 +249,6 @@ custom actions with the same workflow."
          (transformed-prompt (funcall transform user-input is-selected)))
     `(:prompt ,transformed-prompt :preset ,preset :summary ,user-input)))
 
-(defun macher--tools-preset (pred &rest keys)
-  "Get a gptel preset spec which enables a selection of macher tools.
-
-KEYS is a baseline spec plist, as would be passed to
-`gptel-make-preset'.  It cannot include :tools or :use-tools.
-
-The baseline spec will be augmented with:
-
-- an appropriate :tools entry (which appends all matching tools to
-  variable `gptel-tools', unless they already appear there).
-
-- a :use-tools entry to ensure `gptel-use-tools' is non-nil.
-
-- `macher-preset-base' as a parent.
-
-When the preset is applied, the PRED receives each element of
-`macher-tools', and should return non-nil for tools that should be
-enabled.  Tools are then normalized using `macher-resolve-tool'.
-
-Any matching tools already present in the variable
-`gptel-tools' (according to their name/category) will be skipped."
-  (when (plist-get keys :tools)
-    (error "Cannot include :tools in a preset spec for `macher--tools-preset'"))
-  (when (plist-get keys :use-tools)
-    (error "Cannot include :use-tools in a preset spec for `macher--tools-preset'"))
-  (let* ((parents
-          (append (ensure-list (plist-get keys :parents)) (list macher--preset-setup-tools))))
-    (plist-put
-     (plist-put
-      (plist-put
-       keys
-       ;; Make sure tools are enabled, but preserve the existing value of `gptel-use-tools' if
-       ;; already non-nil (e.g. \\='force.
-       :use-tools '(:function (lambda (use-tools) (or use-tools t))))
-      ;; Add tools from `macher-tools' matching the predicate.
-      :tools `(:function ,(apply-partially #'macher--preset-function-add-tools pred)))
-     :parents parents)))
 
 ;;; Customization
 
