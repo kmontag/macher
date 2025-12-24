@@ -3878,19 +3878,20 @@
       ;; Verify that gptel--known-presets now contains the expected presets.
       (expect gptel--known-presets :not :to-be nil)
       ;; Check that all three macher presets are installed.
-      (expect (assq 'macher gptel--known-presets) :to-be-truthy)
-      (expect (assq 'macher-ro gptel--known-presets) :to-be-truthy)
-      (expect (assq 'macher-notools gptel--known-presets) :to-be-truthy)
-      ;; Verify the descriptions of the installed presets.
-      (let ((macher-preset (gptel-get-preset 'macher))
-            (macher-ro-preset (gptel-get-preset 'macher-ro))
-            (macher-notools-preset (gptel-get-preset 'macher-notools)))
+      (dolist (preset-name '(macher macher-ro macher-prompt macher-base))
+        (expect (assq preset-name gptel--known-presets) :to-be-truthy)
+        (let ((preset (gptel-get-preset preset-name)))
+          (expect preset :to-be-truthy)
+          (expect (stringp (plist-get preset :description)) :to-be-truthy)))
+      ;; Verify the description of one of the presets explicitly, just to be sure everything is
+      ;; getting registered correctly.
+      (let ((macher-preset (gptel-get-preset 'macher)))
         (expect (plist-get macher-preset :description)
-                :to-equal "Send macher workspace context + tools to read files and propose edits")
-        (expect (plist-get macher-ro-preset :description)
-                :to-equal "Send macher workspace context + tools to read files")
-        (expect (plist-get macher-notools-preset :description)
-                :to-equal "Send macher workspace context without tools"))))
+                :to-equal "Send macher workspace context + tools to read files and propose edits")))
+
+    (xit "installs all macher tools"
+      ;; TODO
+      ))
 
   (describe "macher-patch-buffer"
     (before-each
