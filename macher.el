@@ -249,6 +249,25 @@ custom actions with the same workflow."
          (transformed-prompt (funcall transform user-input is-selected)))
     `(:prompt ,transformed-prompt :preset ,preset :summary ,user-input)))
 
+(defconst macher--workspace-postfix
+  (concat
+   "\n\n"
+   "WORKSPACE DEFINITION:\n"
+   "The \"workspace\" is a purely in-memory editing environment containing a snapshot of files from "
+   "the user's current project. When you use these tools:\n"
+   "- You are reading from and modifying this in-memory snapshot, NOT the actual files on disk\n"
+   "- Changes you make will NOT be saved directly to the filesystem\n"
+   "- Instead, all changes are tracked and will be presented to the user as a patch for review\n"
+   "- The user can then decide whether to apply your proposed changes to their actual files\n"
+   "- Any CLI commands or file-reading operations you suggest to the user will NOT see your workspace changes\n"
+   "- The contents of \"files\" in the workspace will be captured the first time you access them, so subsequent "
+   "filesystem changes by other processes will NOT be reflected in the workspace\n"
+   "- The workspace is cleared every time the user sends a request")
+  "Description of the workspace concept for tool descriptions.
+
+This text is appended to tool descriptions to clarify that workspace
+tools operate on an in-memory editing environment, not directly on the
+filesystem.")
 
 ;;; Customization
 
@@ -704,17 +723,14 @@ adding tools to this category directly; instead, customize
      :function macher--tool-read-file
      :description
      ,(concat
-       "Read file contents in the workspace.\n"
+       "Read file contents from your workspace.\n"
        "\n"
-       "USAGE RULES:\n"
-       "1. NEVER re-read files that were already provided in the REQUEST CONTEXT\n"
-       "2. For files NOT in the REQUEST CONTEXT: try reading the ENTIRE file first "
-       "(no offset/limit) to understand its structure\n"
+       "Returns the file contents as a string. Supports optional line-based slicing "
+       "(offset/limit) and line numbering.\n"
        "\n"
-       "!!! CRITICAL: You MUST NOT use this tool to read files whose contents were already "
-       "provided to you in the REQUEST CONTEXT, except to resolve confusion or verify edits.\n"
-       "\n"
-       "Returns the file contents as a string.")
+       "Returns file contents on success. Fails if the file is not found in the workspace "
+       "or if the content exceeds the maximum read length."
+       macher--workspace-postfix)
      :confirm nil
      :include nil
      :args
@@ -752,13 +768,13 @@ adding tools to this category directly; instead, customize
      :function macher--tool-list-directory
      :description
      ,(concat
-       "List directory contents in the workspace. "
-       "Shows files and directories with clear prefixes (file: or dir:). "
-       "Can optionally recurse into subdirectories and show file sizes. "
-       "Takes the current workspace state into account, including pending changes.\n\n"
-       "NOTE: The full workspace file listing is usually already provided in the "
-       "WORKSPACE CONTEXT. Only use this tool if you need specific directory "
-       "details or file sizes.")
+       "List directory contents, reflecting current workspace state including your changes. "
+       "Shows files (file:), directories (dir:), and symlinks (link:) with optional file sizes and "
+       "recursive traversal.\n"
+       "\n"
+       "Returns formatted directory listing on success. Fails if the directory is not found in "
+       "the workspace."
+       macher--workspace-postfix)
      :confirm nil
      :include nil
      :args
@@ -780,14 +796,15 @@ adding tools to this category directly; instead, customize
      :function macher--tool-search
      :description
      ,(concat
-       "Search for patterns within the workspace using grep or something like it.\n"
+       "Search for regex patterns across workspace files. Searches reflect your pending changes.\n"
        "\n"
-       "Supports two output modes:\n"
-       "- ='files' (default): Shows file paths with match counts\n"
-       "- ='content': Shows matching lines with optional context\n"
+       "Two modes:\n"
+       "- 'files' (default): file paths + match counts\n"
+       "- 'content': matching lines with optional context (lines_before/after)\n"
        "\n"
-       "!!! CRITICAL: You MUST NOT use this tool to search files whose contents were "
-       "already provided to you in the REQUEST CONTEXT. You already have their contents!")
+       "Returns formatted search results on success. Fails if pattern is empty or if parameters "
+       "are invalid."
+       macher--workspace-postfix)
      :confirm nil
      :include nil
      :args
@@ -848,12 +865,15 @@ adding tools to this category directly; instead, customize
      :function macher--tool-edit-file
      :description
      ,(concat
-       "Make exact string replacements in a text file. "
-       "The old_text must match exactly including all whitespace, newlines, and indentation. "
-       "Do NOT include line numbers in old_text or new_text - use only the actual file content. "
-       "If replace_all is false and multiple matches exist, the operation fails - "
-       "provide more specific context in old_text to make the match unique. "
-       "Returns null on success.")
+       "Replace exact text in a file in your workspace. old_text must match precisely (whitespace, newlines, indentation). "
+       "Use actual file content only - NO line numbers.\n"
+       "\n"
+       "If replace_all=false and multiple matches exist: ERROR. Add more context to old_text to make "
+       "the match unique.\n"
+       "\n"
+       "Returns null on success. Fails if the file is not found, if the text to replace is not found, "
+       "or if multiple matches exist when replace_all is false."
+       macher--workspace-postfix)
      :confirm nil
      :include nil
      :args
@@ -877,10 +897,14 @@ adding tools to this category directly; instead, customize
      :function macher--tool-multi-edit-file
      :description
      ,(concat
-       "Make multiple exact string replacements in a single file. "
-       "Edits are applied sequentially in array order to the same file. "
-       "Each edit requires exact whitespace matching. Do NOT include line numbers in old_text or new_text. "
-       "If any edit fails, no changes are made. Returns null on success.")
+       "Apply multiple replacements to one file in your workspace sequentially. All edits use exact text matching "
+       "(whitespace, newlines, indentation). Use actual content - NO line numbers.\n"
+       "\n"
+       "Edits apply in array order. If ANY edit fails, ALL changes are rolled back.\n"
+       "\n"
+       "Returns null on success. Fails if the file is not found or if any individual edit fails "
+       "(text not found, multiple matches without replace_all, etc.)."
+       macher--workspace-postfix)
      :confirm nil
      :include nil
      :args
@@ -912,10 +936,12 @@ adding tools to this category directly; instead, customize
      :function macher--tool-write-file
      :description
      ,(concat
-       "Create a new file or completely overwrite an existing file. "
-       "WARNING: This replaces ALL existing content without warning. "
-       "Use edit_file_in_workspace for partial changes. "
-       "Returns null on success.")
+       "Create new file or completely replace existing file content in your workspace.\n"
+       "\n"
+       "WARNING: Overwrites ALL existing content. Use edit_file_in_workspace for partial changes.\n"
+       "\n"
+       "Returns null on success. Fails if the path is invalid or outside the workspace."
+       macher--workspace-postfix)
      :confirm nil
      :include nil
      :args
@@ -930,10 +956,12 @@ adding tools to this category directly; instead, customize
      :function macher--tool-move-file
      :description
      ,(concat
-       "Move or rename files within the workspace. "
-       "Can move files between directories and rename them in a single operation. "
-       "Fails if the destination already exists. "
-       "Returns null on success.")
+       "Move or rename a file in your workspace. Can change both location and name in one operation.\n"
+       "\n"
+       "Fails if destination already exists.\n"
+       "\n"
+       "Returns null on success."
+       macher--workspace-postfix)
      :confirm nil
      :include nil
      :args
@@ -951,9 +979,12 @@ adding tools to this category directly; instead, customize
      :function macher--tool-delete-file
      :description
      ,(concat
-       "Delete a file from the workspace. "
-       "Fails if the file does not exist. "
-       "Returns null on success.")
+       "Delete a file in your workspace.\n"
+       "\n"
+       "Fails if file doesn't exist.\n"
+       "\n"
+       "Returns null on success."
+       macher--workspace-postfix)
      :confirm nil
      :include nil
      :args
