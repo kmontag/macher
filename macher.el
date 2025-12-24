@@ -1353,16 +1353,7 @@ Returns a workspace information string to be added to the request."
           (insert
            (format "The project is located at: %s\n"
                    (abbreviate-file-name (macher--workspace-root workspace))))
-          (insert "The workspace is an in-memory editing environment containing files from ")
-          (insert (format "the user's current project, which is named `%s`.\n" workspace-name))
-          (insert "\n")
-          (insert "ONLY YOU, the LLM, have access to the files in the workspace. You DO NOT ")
-          (insert "need to check for external changes.\n")
-          (insert "\n")
-          (insert "Edit freely using workspace tools. ")
-          (insert "No permissions required - this is a safe virtual editing space.\n")
-          (insert "\n")
-          (insert "Files available for editing:\n")
+          (insert (format "Files in the %s workspace:\n" workspace-name))
           (dolist (file-path files-for-listing)
             (let ((rel-path (file-relative-name file-path (macher--workspace-root workspace))))
               (insert (format "    %s\n" rel-path))))
