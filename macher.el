@@ -354,7 +354,7 @@ different function, this value will have no effect."
 (defcustom macher-process-request-function #'macher--process-request
   "Function to take action based on the current state of a macher request.
 
-This function is called when requests involving macher tools are
+This function is called when requests where macher tools were used are
 completed (with success or error), or manually via
 `macher-process-request' and variants.
 
@@ -380,8 +380,8 @@ The function is called with three arguments:
 - FSM: the `gptel-fsm' (state machine) for the request.
 
 This function is only called for requests that actually create a
-`macher-context', i.e. requests with macher tools of some sort.  The
-='macher-notools' preset will not cause the hook to be called.
+`macher-context', i.e. requests where macher tools are present and used.
+The ='macher-prompt' preset will not cause the hook to be called.
 
 The value of this variable will be stored at request-time and used
 throughout a particular request.  This enables custom handling on a
@@ -1444,13 +1444,11 @@ FSM is the `gptel-fsm' (state machine) for the request being processed."
 
 FSM is a `gptel-fsm' (state machine) for a request.
 
-Returns the `macher-context' object if the FSM has macher tools, nil otherwise."
+Returns the request's `macher-context' object if macher tools have been
+invoked during the FSM lifecycle, otherwise returns nil."
   (when fsm
-    (let* ((info (gptel-fsm-info fsm))
-           (tools (plist-get info :tools)))
-      ;; Look through the FSM's tools for one with a macher context.
-      (when tools
-        (cl-some #'macher--tool-context tools)))))
+    (when-let* ((info (gptel-fsm-info fsm)))
+      (plist-get info :macher--context))))
 
 (defun macher--build-patch (context fsm)
   "Run the `macher-patch-prepare-functions' and the `macher-patch-ready-hook'.
@@ -3266,9 +3264,9 @@ have not have been installed globally."
         ;; Tool not found in registry, create an anonymous tool.
         (apply #'macher--make-tool t tool))))
 
-(defconst macher-preset-context
+(defconst macher-preset-prompt
   `(:description
-    "Add info about the current macher workspace to the request context"
+    "Add info about the current macher workspace to the prompt"
     :prompt-transform-functions
     (:function
      (lambda (prompt-transform-functions)
@@ -3285,20 +3283,27 @@ This preset will modify the prompt.")
     (:function
      (lambda (prompt-transform-functions)
        (macher--append-if-missing
-        prompt-transform-functions (list #'macher--prompt-transform-setup-tools)))))
-  "Preset spec to inject request context into macher tools.
+        prompt-transform-functions (list #'macher--prompt-transform-base)))))
+  "Preset spec to set up macher behavior for outgoing gptel requests.
 
-Macher tools can't be used (they'll throw errors) if this preset is not
-applied (or more precisely, if `macher--prompt-transform-setup-tools'
-isn't in the `gptel-prompt-transform-functions').
+You can apply this preset with:
+
+  \\='(gptel-apply-preset macher-preset-base)'
+
+Or, if you've run `macher-install' with default settings, you can apply
+the \"macher-base\" preset from the gptel menu.
+
+To use macher tools, you MUST apply this preset (or more precisely, you
+must ensure `macher--prompt-transform-base' is in the
+`gptel-prompt-transform-functions').
 
 All the built-in macher presets include this as a parent.  If you're
 making your own presets involving macher tools, the easiest way to make
 them work robustly is to add this preset as a parent.
 
 This preset is safe to apply globally and/or repeatedly - it won't
-change anything about your outgoing requests, except that any macher
-tools included in them will be properly set up.")
+change anything about the content of your outgoing requests, except that
+any macher tools included in them will be properly set up.")
 
 (defconst macher--preset-clear-tools
   '(:description
@@ -3361,7 +3366,7 @@ otherwise."
        ;; Include all macher tools.
        (lambda (_) t)
        :description "Send macher workspace context + tools to read files and propose edits"
-       :parents (list macher-preset-context)))
+       :parents (list macher-preset-prompt)))
     ;; Enable read-only macher tools, and disable other macher tools.
     (macher-ro
      .
@@ -3370,9 +3375,9 @@ otherwise."
        (lambda (tool-def) (string= (plist-get tool-def :category) "read"))
        :description "Send macher workspace context + tools to read files"
        ;; Clear other macher tools before applying - force read-only.
-       :parents (list macher-preset-context macher--preset-clear-tools)))
-    ;; Add contextual info about the current workspace.
-    (macher-context . ,macher-preset-context)
+       :parents (list macher-preset-prompt macher--preset-clear-tools)))
+    ;; Add contextual info about the current workspace to the prompt.
+    (macher-prompt . ,macher-preset-prompt)
     ;; Inject context into macher tools.
     (macher-base . ,macher-preset-base))
   "Alist of definitions for macher presets.
@@ -3432,18 +3437,76 @@ in the same place as the default gptel context as specified by
       (gptel-context--wrap-in-buffer workspace-string)))
   (funcall callback))
 
-(defun macher--prompt-transform-setup-tools (callback fsm)
-  "A gptel prompt transformer to inject `macher-context' into macher tools.
+(defun macher--setup-tools (fsm get-context)
+  "Provide a `macher-context' to macher tools in the gptel FSM.
 
-This updates the FSM's tools list by wrapping tools from the
-`macher-tool-category' to inject the correct `macher-context' for the
-current request.
+GET-CONTEXT should be a function that always returns the same
+`macher-context' object - this allows for lazy initialization of the
+object.  GET-CONTEXT may also return nil if no workspace could be
+determined for the request.
+
+This function updates the FSM's tools list by wrapping tools from the
+`macher-tool-category' to inject the result of GET-CONTEXT as the first
+argument.
+
+This function is intended to be used as a transition handler at the
+start of a gptel request, i.e. before any tools are invoked but after
+they're accessible on the FSM."
+  (let* ((info (gptel-fsm-info fsm))
+         (tools (plist-get info :tools))
+         (buffer (plist-get info :buffer))
+         (processed-tools
+          (mapcar
+           (lambda (tool)
+             (if (equal macher-tool-category (gptel-tool-category tool))
+                 ;; If this is a macher tool, inject the current context as the first argument.
+                 (let* ((orig-fn (gptel-tool-function tool))
+                        (tool-name (gptel-tool-name tool))
+                        ;; Wrapped function that injects context.
+                        (wrapped-fn
+                         (apply-partially `(lambda (get-context orig-fn &rest args)
+                                             ,(format
+                                               "Request-specific wrapper for macher tool \"%s\"."
+                                               tool-name)
+                                             (let ((context (funcall get-context)))
+                                               (unless context
+                                                 (warn
+                                                  (concat
+                                                   (format
+                                                    "macher tool \"%s\" called, but no workspace "
+                                                    ,tool-name)
+                                                   (format
+                                                    "could be determined for request buffer \"%s\" "
+                                                    ,buffer)))
+                                                 (error
+                                                  "The tool \"%s\" is not available" ,tool-name))
+                                               ;; Call original function with args plus the context.
+                                               (apply orig-fn context args)))
+                                          get-context orig-fn))
+                        (tool-copy (gptel--copy-tool tool)))
+                   ;; Set the function on the tool copy to the request-specific wrapper.
+                   (setf (gptel-tool-function tool-copy) wrapped-fn)
+                   ;; Replace the category so we don't try to modify this tool again if this
+                   ;; function somehow gets run more than once.
+                   (setf (gptel-tool-category tool-copy)
+                         (format "%s__processed" macher-tool-category))
+                   ;; Return the request-specific tool copy.
+                   tool-copy)
+               ;; For non-macher tools, just pass them through unmodified.
+               tool))
+           tools)))
+    ;; Update the tools list that the FSM will actually use for tool calls.
+    (setf (gptel-fsm-info fsm) (plist-put info :tools processed-tools))))
+
+(defun macher--prompt-transform-base (callback fsm)
+  "A gptel prompt transform to set up macher tools and behavior.
 
 This transform does not affect the actual request content of outgoing
 gptel requests; it's a no-op if there are no macher tools associated
 with a request.  It just interacts with the gptel state machine to
 provide request-specific context (e.g. the current workspace) to macher
-tools.
+tools, and to set up a termination handler so we can call the
+`macher-process-request-function'.
 
 This transform MUST be present in `gptel-prompt-transform-functions' in
 order to use macher tools.  All of the built-in macher presets pull it
@@ -3454,78 +3517,79 @@ or using it as a parent in your own presets.
 
 CALLBACK and FSM are as described in the
 `gptel-prompt-transform-functions' documentation."
-  (let ((transition-handler-did-run nil))
-    ;; We don't have access to the request tools at this point, so we need to inject a transition
-    ;; handler that will fire when the request state changes (i.e. when it's sent), and inject
-    ;; context into the tools at that point.
-    (macher--add-transition-handler
-     fsm
-     (lambda (fsm)
-       "Initialize macher tools in the FSM with request-specific context.
+  (let* (
+         ;; Capture information that needs to be included in the macher context if it gets created.
+         (prompt (buffer-string))
+         (process-request-function macher-process-request-function)
+         (collected-gptel-context (gptel-context--collect))
+         ;; Shared context object for this request, with a lazy initializer.  The context will only
+         ;; be initialized if macher tools are invoked during the request.  We use t as a flag that
+         ;; we tried to load the context, but there was no macher workspace (that way we can use nil
+         ;; to indicate that the context was never accessed).
+         (context-or-t nil)
+         (get-context
+          (lambda ()
+            (unless context-or-t
+              (let* ((info (gptel-fsm-info fsm))
+                     (buffer (plist-get info :buffer)))
+                (when (plist-get info :macher--context)
+                  (error "Macher context already present on FSM during setup"))
+                ;; We always expect the request buffer to be non-nil.
+                (unless buffer
+                  (error "Trying to set up macher tools, but coudn't determine request buffer"))
+                (setq
+                 context-or-t
+                 (if (buffer-live-p buffer)
+                     (if-let ((workspace (macher-workspace buffer)))
+                       ;; If we found a workspace, perform context initialization.
+                       (let ((context
+                              (macher--make-context
+                               :workspace workspace
+                               :prompt prompt
+                               :process-request-function process-request-function)))
+                         ;; Store the context on the FSM, so we can look it up e.g. for
+                         ;; processing later.
+                         (setq info (plist-put info :macher--context context))
+                         (setf (gptel-fsm-info fsm) info)
+                         ;; Mark this FSM as the most recent macher request.
+                         (with-current-buffer buffer
+                           (setq macher--fsm-latest fsm))
+                         ;; Preload files from the gptel context into macher.
+                         ;;
+                         ;; TODO: This should really happen at the moment the request is sent, in
+                         ;; case files are edited in the meantime.
+                         (macher--load-gptel-context-files collected-gptel-context context)
+                         context)
+                       ;; Request buffer live but no workspace found.
+                       t)
+                   ;; Request buffer not live - no workspace can be found.
+                   t))))
+            ;; Now return the cached context.
+            (if (eq context-or-t t)
+                ;; t actually means "no workspace found".
+                nil
+              context-or-t)))
 
-This function is a no-op after the first time it's called, i.e. it will
-run only once (on the request's first state transition)."
-       (unless transition-handler-did-run
-         ;; Don't run again.
-         (setq transition-handler-did-run t)
-         (let* ((info (gptel-fsm-info fsm))
-                (tools (plist-get info :tools))
-                (buffer (plist-get info :buffer)))
-           (when-let ((request-macher-tools
-                       (cl-remove-if-not
-                        (lambda (tool)
-                          (string= (gptel-tool-category tool) macher-tool-category))
-                        tools)))
-             (if (not buffer)
-                 ;; This case should presumably never come up...
-                 (warn "gptel request buffer could not be determined, skipping macher setup")
-               ;; Create a new macher-context for this request.
-               (let*
-                   ((workspace (macher-workspace buffer))
-                    (context (and workspace (macher--make-context :workspace workspace)))
-                    ;; Wrap each macher tool to inject the context.
-                    (wrapped-tools
-                     (mapcar
-                      (lambda (tool)
-                        (let*
-                            ((orig-fn (gptel-tool-function tool))
-                             (tool-name (gptel-tool-name tool))
-                             (tool-args (gptel-tool-args tool))
-                             (args-count (length tool-args))
-                             ;; Create wrapped function that injects context as the last parameter.
-                             (wrapped-fn
-                              `(lambda (&rest args)
-                                 ,(format "Request-specific wrapper for macher tool \"%s\"."
-                                          tool-name)
-                                 (unless ,context
-                                   (warn
-                                    (concat
-                                     (format
-                                      "macher tool \"%s\" called, but the request buffer \"%s\" "
-                                      ,tool-name ,buffer)
-                                     "is not in a macher workspace."))
-                                   (error "The tool \"%s\" is not available" ,tool-name))
-                                 ;; Call original function with args plus the context.
-                                 (apply ,orig-fn ,context args)))
-                             (tool-copy (gptel--copy-tool tool)))
-                          ;; Create a copy of the tool with the wrapped function.
-                          (setf (gptel-tool-function tool-copy) wrapped-fn)
-                          ;; Replace the category so we don't try to modify this tool again if this
-                          ;; transform somehow gets run more than once.
-                          (setf (gptel-tool-category tool-copy)
-                                (format "%s_processed" macher-tool-category))
-                          tool-copy))
-                      request-macher-tools))
-                    ;; Remove original macher tools from the tools list.
-                    (other-tools
-                     (cl-remove-if
-                      (lambda (tool)
-                        (string= (gptel-tool-category tool) macher-tool-category))
-                      tools))
-                    ;; Combine other tools with wrapped tools.
-                    (updated-tools (append other-tools wrapped-tools)))
-                 ;; Update the FSM's tools list.
-                 (setf (gptel-fsm-info fsm) (plist-put info :tools updated-tools))))))))))
+         ;; Handler for the first state machine transition, i.e. as soon as the request is sent.
+         (init-handler-invoked nil)
+         (init-handler
+          (lambda (fsm)
+            "Inject context into macher tools (no-op on repeated calls)."
+            (unless init-handler-invoked
+              (setq init-handler-invoked t)
+              ;; Replace tools with versions that have the current macher context injected. We can't
+              ;; do this directly in the prompt transform because the :tools entry isn't available
+              ;; at that point.
+              (macher--setup-tools fsm get-context))))
+         (termination-handler
+          (lambda (fsm)
+            "Process the `macher-context' (if any) on request termination."
+            ;; When the context was accessed and successfully initialized, i.e. when a tool was
+            ;; successfully called.
+            (when (and context-or-t (funcall get-context))
+              (macher-process-request 'complete fsm)))))
+    (macher--add-transition-handler fsm init-handler)
+    (macher--add-termination-handler fsm termination-handler))
   (funcall callback))
 
 (defun macher--add-termination-handler (fsm handler)
@@ -3711,8 +3775,8 @@ If ANON is non-nil, don't register the tool with the gptel registry."
          (orig-fn (plist-get slots :function))
          ;; Wrap the provided tool function with a sanity check to ensure that the macher context
          ;; has been provided as the first argument.  This happens via the
-         ;; `macher--prompt-transform-setup-tools' transform, which injects the appropriate context
-         ;; into tool functions for outgiong gptel requests.
+         ;; `macher--prompt-transform-base' transform, which injects the appropriate context into
+         ;; tool functions for outgiong gptel requests.
          (wrapped-fn
           (apply-partially `(lambda (orig-fn &rest args)
                               ,(format "Wrapper for macher tool \"%s\"." name)
