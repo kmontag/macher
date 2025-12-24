@@ -3884,6 +3884,25 @@
                (expect (member #'macher--prompt-transform-base gptel-prompt-transform-functions)
                        :to-be-truthy))))))
 
+      (it "replaces existing base transform and re-appends it at the end"
+        (with-temp-buffer
+          (find-file project-file)
+          (let* ((other-transform (lambda (callback _fsm) (funcall callback)))
+                 ;; Start with base transform in the middle of the list.
+                 (gptel-prompt-transform-functions
+                  (list other-transform #'macher--prompt-transform-base other-transform)))
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               ;; Base transform should appear exactly once.
+               (expect (cl-count #'macher--prompt-transform-base gptel-prompt-transform-functions)
+                       :to-equal 1)
+               ;; Base transform should be at the end.
+               (expect (car (last gptel-prompt-transform-functions))
+                       :to-be #'macher--prompt-transform-base)
+               ;; Other transforms should still be present.
+               (expect (cl-count other-transform gptel-prompt-transform-functions) :to-equal 2))))))
+
       (it "does not add context transform"
         (with-temp-buffer
           (find-file project-file)
