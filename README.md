@@ -91,9 +91,16 @@ After calling `(macher-install)`, you can use macher presets in any gptel reques
 - **`@macher-system`**: Context only. Adds workspace context without any tools. Useful when you
   want the LLM to understand your project structure but don't need file access.
 
+- **`@macher-tools`**: Tools only. Enables all macher tools without adding workspace context to the
+  system prompt. Useful if you want to manage context yourself.
+
 - **`@macher-base`**: Utility preset that enables macher tool infrastructure. Macher tools will fail
   unless this is applied. This gets applied automatically when using other macher presets, but you
   may want to apply it globally via `macher-enable`.
+
+- **`@macher-system-commit`**: Commits the current workspace context into the system prompt,
+  replacing the dynamic placeholder with a static snapshot. Useful to avoid cache churn in long
+  conversations.
 
 https://github.com/user-attachments/assets/9b3e0734-5907-4e01-a356-6f9066d7b844
 
@@ -146,9 +153,6 @@ to your system prompt (unless it's already there).
 
 You can also use the `macher-context-string-placeholder` in your own directives to control placement
 or add info about the current project to any gptel request.
-
-Use `@macher-system-commit` in a buffer if you want to "freeze" the current context string into the
-system prompt, for example to avoid cache churn.
 
 The workspace description can be customized by setting the `macher-context-string-function`.
 
