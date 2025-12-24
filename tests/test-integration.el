@@ -1716,7 +1716,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           (set-visited-file-name project-file)
 
           (macher-test--send
-           'macher-prompt "Test prompt with no context"
+           'macher-system "Test prompt with no context"
            (macher-test--make-once-only-callback
             (lambda (exit-code fsm)
               (setq callback-called t)
@@ -3050,7 +3050,7 @@ Sets `test-patch-content' to the generated patch content for additional assertio
         (with-temp-buffer
           (set-visited-file-name project-file)
           (macher-test--send
-           'macher-prompt "Just chat with me"
+           'macher-system "Just chat with me"
            (macher-test--make-once-only-callback
             (lambda (cb-exit-code cb-fsm)
               (setq callback-called t)
