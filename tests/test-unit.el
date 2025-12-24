@@ -275,48 +275,6 @@
       ;; Verify macher--build-patch was not called.
       (expect #'macher--build-patch :not :to-have-been-called)))
 
-  ;; TODO: This function changed entirely, we need to redo tests for it from scratch.
-  (xdescribe "macher--context-for-fsm"
-    :var (context)
-
-    (before-each
-      (funcall setup-project)
-      (setq context (macher--make-context :workspace `(project . ,project-dir))))
-
-    (it "extracts context from FSM with macher tools"
-      ;; Create a macher tool with our context.
-      (let ((tool (macher--make-tool context :name "test_tool" :function (lambda () "test"))))
-        (with-temp-buffer
-          ;; Set up tools in the buffer as gptel would.
-          (setq-local gptel-tools (list tool))
-          ;; Create FSM using gptel-request with dry-run to get proper setup.
-          (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
-            ;; Should find the context.
-            (expect (macher--context-for-fsm fsm) :to-be context)))))
-
-    (it "returns nil when FSM has no macher tools"
-      ;; Create a regular gptel tool without macher context.
-      (let ((regular-tool (gptel-make-tool :name "regular" :function (lambda () "test"))))
-        (with-temp-buffer
-          ;; Set up tools in the buffer as gptel would.
-          (setq-local gptel-tools (list regular-tool))
-          ;; Create FSM using gptel-request with dry-run to get proper setup.
-          (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
-            ;; Should return nil.
-            (expect (macher--context-for-fsm fsm) :to-be nil)))))
-
-    (it "returns nil when FSM is nil"
-      (expect (macher--context-for-fsm nil) :to-be nil))
-
-    (it "returns nil when FSM has no tools"
-      (with-temp-buffer
-        ;; No tools set up.
-        (setq-local gptel-tools nil)
-        ;; Create FSM using gptel-request with dry-run.
-        (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
-          ;; FSM with no tools should return nil.
-          (expect (macher--context-for-fsm fsm) :to-be nil)))))
-
   (describe "macher-process-request"
     :var (context original-process-fn dummy-process-fn fsm workspace)
 
@@ -3550,207 +3508,6 @@
         ;; (b . 999) should be skipped because car matches (b . 2).
         (expect result :to-equal '((a . 1) (b . 2) (c . 3))))))
 
-  ;; TODO: Most of this isn't relevant anymore (this function was removed and the whole way that
-  ;; we're setting up macher context has changed - these tests no longer reflect the actual behavior
-  ;; that we want). But we do need to add some tests for the macher--prompt-transform-base and
-  ;; macher--setup-tools functions - we need to make sure, for example, that all macher tools are
-  ;; provided with the same `macher-context' for an FSM transformed with
-  ;; `macher--prompt-transform-base'. We also need to make sure that in case
-  ;; `macher--prompt-transformm-base' appears more than once in the
-  ;; `gptel-prompt-transform-functions', nothing weird happens, and the tools in the request are
-  ;; fine (in fact for that case we should probably add an integration test).
-  ;;
-  ;; Anyway these merge-tools tests should be removed - but maybe there's some inspiration here? or not.
-  (xdescribe "macher--merge-tools"
-    (before-each
-      (funcall setup-project))
-
-    (it "merges tools into empty preset and creates context"
-      (with-temp-buffer
-        (find-file project-file)
-        (let* ((preset '(:tools nil :prompt-transform-functions nil))
-               (test-tools-function
-                (lambda (context make-tool-function)
-                  (list
-                   (funcall make-tool-function
-                            :name "test_tool"
-                            :function (lambda () "test")
-                            :description "A test tool"))))
-               (result (macher--merge-tools preset test-tools-function)))
-          ;; Should return an updated preset.
-          (expect (plistp result) :to-be-truthy)
-          ;; Should have tools.
-          (let ((tools (plist-get result :tools)))
-            (expect (length tools) :to-equal 1)
-            (expect (gptel-tool-name (car tools)) :to-equal "test_tool")))))
-
-    (it "merges tools with existing regular tools in preset"
-      (with-temp-buffer
-        (find-file project-file)
-        (let* ((regular-tool
-                (gptel-make-tool
-                 :name "regular_tool"
-                 :function (lambda () "regular")
-                 :description "A regular tool"))
-               (preset `(:tools (,regular-tool) :prompt-transform-functions nil))
-               (test-tools-function
-                (lambda (context make-tool-function)
-                  (list
-                   (funcall make-tool-function
-                            :name "macher_tool"
-                            :function (lambda () "macher")
-                            :description "A macher tool"))))
-               (result (macher--merge-tools preset test-tools-function)))
-          ;; Should have both tools.
-          (let ((tools (plist-get result :tools)))
-            (expect (length tools) :to-equal 2)
-            ;; Should contain the regular tool.
-            (expect (cl-find-if
-                     (lambda (tool) (string= (gptel-tool-name tool) "regular_tool")) tools)
-                    :to-be-truthy)
-            ;; Should contain the macher tool.
-            (expect (cl-find-if
-                     (lambda (tool) (string= (gptel-tool-name tool) "macher_tool")) tools)
-                    :to-be-truthy)))))
-
-    (it "reuses existing macher context from same workspace"
-      (with-temp-buffer
-        (find-file project-file)
-        (let* ((existing-context (macher--make-context :workspace (macher-workspace)))
-               (existing-tool
-                (macher--make-tool
-                 existing-context
-                 :name "existing_macher_tool"
-                 :function (lambda () "existing")
-                 :description "An existing macher tool"))
-               (preset `(:tools (,existing-tool) :prompt-transform-functions nil))
-               (context-received nil)
-               (test-tools-function
-                (lambda (context make-tool-function)
-                  (setq context-received context)
-                  ;; Should reuse the existing context.
-                  (expect context :to-be existing-context)
-                  (list
-                   (funcall make-tool-function
-                            :name "new_macher_tool"
-                            :function (lambda () "new")
-                            :description "A new macher tool"))))
-               (result (macher--merge-tools preset test-tools-function)))
-          ;; Should have both tools.
-          (let ((tools (plist-get result :tools)))
-            (expect (length tools) :to-equal 2)
-            ;; Should contain the existing tool.
-            (expect (cl-find-if
-                     (lambda (tool) (string= (gptel-tool-name tool) "existing_macher_tool")) tools)
-                    :to-be-truthy)
-            ;; Should contain the new tool.
-            (expect (cl-find-if
-                     (lambda (tool) (string= (gptel-tool-name tool) "new_macher_tool")) tools)
-                    :to-be-truthy))
-          ;; Verify the context was reused.
-          (expect context-received :to-be existing-context))))
-
-    (it "removes existing tools with same names as new ones"
-      (with-temp-buffer
-        (find-file project-file)
-        (let* ((regular-tool
-                (gptel-make-tool
-                 :name "conflicting_tool"
-                 :function (lambda () "regular")
-                 :description "A regular tool"))
-               (macher-context (macher--make-context :workspace '(project . "/other/workspace")))
-               (macher-tool
-                (macher--make-tool
-                 macher-context
-                 :name "other_tool"
-                 :function (lambda () "other")
-                 :description "Another tool"))
-               (preset `(:tools (,regular-tool ,macher-tool) :prompt-transform-functions nil))
-               (test-tools-function
-                (lambda (context make-tool-function)
-                  (list
-                   (funcall make-tool-function
-                            :name "conflicting_tool"
-                            :function (lambda () "new conflicting")
-                            :description "New conflicting tool")
-                   (funcall make-tool-function
-                            :name "unique_tool"
-                            :function (lambda () "unique")
-                            :description "Unique tool"))))
-               (result (macher--merge-tools preset test-tools-function)))
-          ;; Should have 3 tools: other_tool + 2 new tools.
-          (let ((tools (plist-get result :tools)))
-            (expect (length tools) :to-equal 3)
-            ;; Should not contain the old conflicting tool.
-            (expect (cl-find-if
-                     (lambda (tool)
-                       (and (string= (gptel-tool-name tool) "conflicting_tool")
-                            (not (macher--tool-context tool))))
-                     tools)
-                    :to-be nil)
-            ;; Should contain the new conflicting tool.
-            (expect (cl-find-if
-                     (lambda (tool)
-                       (and (string= (gptel-tool-name tool) "conflicting_tool")
-                            (macher--tool-context tool)))
-                     tools)
-                    :to-be-truthy)
-            ;; Should contain the other tool.
-            (expect (cl-find-if (lambda (tool) (string= (gptel-tool-name tool) "other_tool")) tools)
-                    :to-be-truthy)
-            ;; Should contain the unique tool.
-            (expect (cl-find-if
-                     (lambda (tool) (string= (gptel-tool-name tool) "unique_tool")) tools)
-                    :to-be-truthy)))))
-
-    (it "creates new context when no existing macher tools found"
-      (with-temp-buffer
-        (find-file project-file)
-        (let* ((regular-tool
-                (gptel-make-tool
-                 :name "regular_tool"
-                 :function (lambda () "regular")
-                 :description "A regular tool"))
-               (preset `(:tools (,regular-tool) :prompt-transform-functions nil))
-               (context-received nil)
-               (test-tools-function
-                (lambda (context make-tool-function)
-                  (setq context-received context)
-                  ;; Should get a new context.
-                  (expect (macher-context-p context) :to-be-truthy)
-                  ;; Should have the current workspace.
-                  (expect (macher-context-workspace context) :to-equal (macher-workspace))
-                  (list
-                   (funcall make-tool-function
-                            :name "new_tool"
-                            :function (lambda () "new")
-                            :description "A new tool"))))
-               (result (macher--merge-tools preset test-tools-function)))
-          ;; Should have both tools.
-          (let ((tools (plist-get result :tools)))
-            (expect (length tools) :to-equal 2))
-          ;; Verify a new context was created.
-          (expect (macher-context-p context-received) :to-be-truthy)
-          (expect (macher-context-workspace context-received) :to-equal (macher-workspace)))))
-
-    (it "warns and returns unchanged preset when no workspace found"
-      (with-temp-buffer
-        ;; Don't set up any workspace.
-        (let ((macher-workspace-functions nil)
-              (preset '(:tools nil :prompt-transform-functions nil))
-              (warning-triggered nil))
-          ;; Mock the warn function to capture warnings.
-          (spy-on 'display-warning
-                  :and-call-fake
-                  (lambda (type msg &optional level buffer-name)
-                    (when (string-match "No macher workspace found" msg)
-                      (setq warning-triggered t))))
-          (let ((result (macher--merge-tools preset (lambda (context make-tool-function) nil))))
-            ;; Should return the original preset unchanged.
-            (expect result :to-equal preset)
-            ;; Should have triggered a warning.
-            (expect warning-triggered :to-be-truthy))))))
-
   (describe "macher--with-preset"
     :var (original-presets)
 
@@ -3902,17 +3659,517 @@
          (plist-get macher-preset :description)
          :to-equal "Send macher workspace context + tools to read files and propose edits"))))
 
-  (xdescribe "macher--install-tools"
-    ;; TODO
-    (it "placeholder test"))
+  (describe "macher--install-tools"
+    :var (original-tools)
 
-  (xdescribe "macher-presets-alist"
-    ;; TODO: Tests for each of the default presets. We should ensure they do the right thing
-    ;; w.r.t. tools, prompt transforms, and use-tools - the tools presets need to be tested with
-    ;; existing tools, no existing tools, existing macher tools, etc, and the prompt transform
-    ;; presets need to be tested similarly. Also need to test behavior when presets are applied more
-    ;; than once, etc.
-    (it "placeholder tests..."))
+    (before-each
+      (setq original-tools gptel--known-tools)
+      (setq gptel--known-tools nil))
+
+    (after-each
+      (setq gptel--known-tools original-tools))
+
+    (it "installs all macher tools to the global registry"
+      (expect gptel--known-tools :to-be nil)
+      (macher--install-tools)
+      ;; Tools should be registered.
+      (expect gptel--known-tools :not :to-be nil)
+      ;; Check that each tool from macher-tools is registered.
+      (dolist (tool-def macher-tools)
+        (let* ((tool-name (plist-get tool-def :name))
+               (registry-tool (gptel-get-tool (list macher-tool-category tool-name))))
+          (expect registry-tool :to-be-truthy)
+          (expect (gptel-tool-name registry-tool) :to-equal tool-name)
+          (expect (gptel-tool-category registry-tool) :to-equal macher-tool-category))))
+
+    (it "does not add tools to gptel-tools variable"
+      (let ((original-gptel-tools gptel-tools))
+        (macher--install-tools)
+        ;; gptel-tools should remain unchanged.
+        (expect gptel-tools :to-equal original-gptel-tools)))
+
+    (it "creates tools with wrapped functions that require context"
+      (macher--install-tools)
+      (let* ((tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+             (tool-fn (gptel-tool-function tool)))
+        ;; Calling tool without context should error.
+        (expect (funcall tool-fn "some-path") :to-throw)))
+
+    (it "idempotently reinstalls tools"
+      (macher--install-tools)
+      (let ((first-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace"))))
+        (macher--install-tools)
+        ;; Tool should still be retrievable.
+        (let ((second-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace"))))
+          (expect second-tool :to-be-truthy)
+          (expect (gptel-tool-name second-tool) :to-equal (gptel-tool-name first-tool))))))
+
+  (describe "macher-presets-alist"
+    :var (original-presets original-tools)
+
+    (before-each
+      (funcall setup-project)
+      (setq original-presets gptel--known-presets)
+      (setq original-tools gptel--known-tools)
+      (setq gptel--known-presets nil)
+      (setq gptel--known-tools nil))
+
+    (after-each
+      (setq gptel--known-presets original-presets)
+      (setq gptel--known-tools original-tools))
+
+    (describe "macher preset"
+      (it "adds all macher tools to gptel-tools"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-tools nil))
+            (macher--with-preset
+             'macher
+             (lambda ()
+               ;; Should have macher tools.
+               (expect gptel-tools :not :to-be nil)
+               ;; Check for specific tools.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "edit_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy))))))
+
+      (it "preserves existing non-macher tools"
+        (with-temp-buffer
+          (find-file project-file)
+          (let* ((existing-tool
+                  (gptel-make-tool
+                   :name "existing_tool"
+                   :function (lambda () "test")
+                   :description "An existing tool"
+                   :category "other"))
+                 (gptel-tools (list existing-tool)))
+            (macher--with-preset
+             'macher
+             (lambda ()
+               ;; Should still have existing tool.
+               (expect (cl-find-if
+                        (lambda (tool) (string= (gptel-tool-name tool) "existing_tool"))
+                        gptel-tools)
+                       :to-be-truthy)
+               ;; Should also have macher tools.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy))))))
+
+      (it "enables tool use"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-use-tools nil))
+            (macher--with-preset 'macher (lambda () (expect gptel-use-tools :to-be-truthy))))))
+
+      (it "adds macher--prompt-transform-add-context to transforms"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher
+             (lambda ()
+               (expect (member
+                        #'macher--prompt-transform-add-context gptel-prompt-transform-functions)
+                       :to-be-truthy))))))
+
+      (it "adds macher--prompt-transform-base to transforms"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher
+             (lambda ()
+               (expect (member #'macher--prompt-transform-base gptel-prompt-transform-functions)
+                       :to-be-truthy)))))))
+
+    (describe "macher-ro preset"
+      (it "adds only read tools to gptel-tools"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-tools nil))
+            (macher--with-preset
+             'macher-ro
+             (lambda ()
+               ;; Should have read tools.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "list_directory_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "search_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)
+               ;; Should NOT have write tools.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "edit_file_in_workspace"))
+                        gptel-tools)
+                       :to-be nil)
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "write_file_in_workspace"))
+                        gptel-tools)
+                       :to-be nil))))))
+
+      (it "removes existing macher write tools"
+        (with-temp-buffer
+          (find-file project-file)
+          ;; Install tools first to get the edit tool.
+          (macher--install-tools)
+          (let* ((edit-tool (gptel-get-tool (list macher-tool-category "edit_file_in_workspace")))
+                 (gptel-tools (list edit-tool)))
+            (macher--with-preset
+             'macher-ro
+             (lambda ()
+               ;; Edit tool should be removed.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "edit_file_in_workspace"))
+                        gptel-tools)
+                       :to-be nil)
+               ;; Read tools should be present.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)))))))
+
+    (describe "macher-prompt preset"
+      (it "does not add any tools"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-tools nil))
+            (macher--with-preset 'macher-prompt (lambda () (expect gptel-tools :to-be nil))))))
+
+      (it "adds context transform"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-prompt
+             (lambda ()
+               (expect (member
+                        #'macher--prompt-transform-add-context gptel-prompt-transform-functions)
+                       :to-be-truthy)))))))
+
+    (describe "macher-base preset"
+      (it "adds base transform but no tools"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-tools nil)
+                (gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               ;; Should not add tools.
+               (expect gptel-tools :to-be nil)
+               ;; Should add base transform.
+               (expect (member #'macher--prompt-transform-base gptel-prompt-transform-functions)
+                       :to-be-truthy))))))
+
+      (it "does not add context transform"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               ;; Should NOT add context transform (that's macher-prompt's job).
+               (expect (member
+                        #'macher--prompt-transform-add-context gptel-prompt-transform-functions)
+                       :to-be nil)))))))
+
+    (describe "preset idempotency"
+      (it "does not duplicate tools when preset applied twice"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-tools nil))
+            (macher--with-preset
+             'macher
+             (lambda ()
+               (let ((first-count (length gptel-tools)))
+                 (macher--with-preset
+                  'macher
+                  (lambda ()
+                    ;; Tool count should not change.
+                    (expect (length gptel-tools) :to-equal first-count)))))))))
+
+      (it "does not duplicate transforms when preset applied twice"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher
+             (lambda ()
+               (let ((first-count (length gptel-prompt-transform-functions)))
+                 (macher--with-preset
+                  'macher
+                  (lambda ()
+                    ;; Transform count should not change.
+                    (expect (length gptel-prompt-transform-functions)
+                            :to-equal first-count)))))))))))
+
+  (describe "macher--make-tool"
+    :var (original-tools)
+
+    (before-each
+      (setq original-tools gptel--known-tools)
+      (setq gptel--known-tools nil))
+
+    (after-each
+      (setq gptel--known-tools original-tools))
+
+    (it "creates anonymous tool when anon is non-nil"
+      (let ((tool
+             (macher--make-tool
+              t
+              :name "test_tool"
+              :function (lambda (context arg) arg)
+              :description "A test tool"
+              :args '((:name "arg" :type string)))))
+        ;; Tool should be created.
+        (expect (gptel-tool-p tool) :to-be-truthy)
+        (expect (gptel-tool-name tool) :to-equal "test_tool")
+        ;; Tool should NOT be in registry.
+        (expect gptel--known-tools :to-be nil)))
+
+    (it "registers tool when anon is nil"
+      (let ((tool
+             (macher--make-tool
+              nil
+              :name "registered_tool"
+              :function (lambda (context arg) arg)
+              :description "A registered tool"
+              :args '((:name "arg" :type string)))))
+        ;; Tool should be created.
+        (expect (gptel-tool-p tool) :to-be-truthy)
+        ;; Tool should be in registry.
+        (expect (gptel-get-tool (list macher-tool-category "registered_tool")) :to-be-truthy)))
+
+    (it "uses macher-tool-category regardless of provided category"
+      (let ((tool
+             (macher--make-tool
+              t
+              :name "categorized_tool"
+              :function (lambda (context) nil)
+              :description "A tool"
+              :category "other-category")))
+        ;; Category should be overridden.
+        (expect (gptel-tool-category tool) :to-equal macher-tool-category)))
+
+    (it "wraps function to require context as first argument"
+      (let* ((received-args nil)
+             (tool
+              (macher--make-tool
+               t
+               :name "wrapped_tool"
+               :function
+               (lambda (context arg1 arg2)
+                 (setq received-args (list context arg1 arg2))
+                 "result")
+               :description "A wrapped tool"
+               :args '((:name "arg1" :type string) (:name "arg2" :type number))))
+             (tool-fn (gptel-tool-function tool))
+             (context (macher--make-context)))
+        ;; Calling with context should work.
+        (let ((result (funcall tool-fn context "hello" 42)))
+          (expect result :to-equal "result")
+          (expect received-args :to-equal (list context "hello" 42)))))
+
+    (it "errors when called without context"
+      (let* ((tool
+              (macher--make-tool
+               t
+               :name "context_required_tool"
+               :function (lambda (context) "result")
+               :description "A tool requiring context"))
+             (tool-fn (gptel-tool-function tool)))
+        ;; Calling without context should error.
+        (expect (funcall tool-fn "not-a-context") :to-throw)))
+
+    (it "errors when called with nil context"
+      (let* ((tool
+              (macher--make-tool
+               t
+               :name "nil_context_tool"
+               :function (lambda (context) "result")
+               :description "A tool"))
+             (tool-fn (gptel-tool-function tool)))
+        ;; Calling with nil should error.
+        (expect (funcall tool-fn nil) :to-throw))))
+
+  (describe "macher-resolve-tool"
+    :var (original-tools)
+
+    (before-each
+      (setq original-tools gptel--known-tools)
+      (setq gptel--known-tools nil))
+
+    (after-each
+      (setq gptel--known-tools original-tools))
+
+    (it "returns registered tool if available"
+      ;; Install tools first.
+      (macher--install-tools)
+      (let* ((tool-def (car macher-tools))
+             (tool-name (plist-get tool-def :name))
+             (resolved (macher-resolve-tool tool-def))
+             (registry-tool (gptel-get-tool (list macher-tool-category tool-name))))
+        ;; Should return the same tool from registry.
+        (expect resolved :to-be registry-tool)))
+
+    (it "creates anonymous tool if not in registry"
+      (let* ((tool-def (car macher-tools))
+             (tool-name (plist-get tool-def :name))
+             (resolved (macher-resolve-tool tool-def)))
+        ;; Should create a tool.
+        (expect (gptel-tool-p resolved) :to-be-truthy)
+        (expect (gptel-tool-name resolved) :to-equal tool-name)
+        ;; Registry should still be empty.
+        (expect gptel--known-tools :to-be nil)))
+
+    (it "creates tool with correct category"
+      (let* ((tool-def '(:name "test_tool" :function (lambda (context) nil) :description "Test"))
+             (resolved (macher-resolve-tool tool-def)))
+        (expect (gptel-tool-category resolved) :to-equal macher-tool-category))))
+
+  (describe "macher--setup-tools"
+    :var (original-tools)
+
+    (before-each
+      (funcall setup-project)
+      (setq original-tools gptel--known-tools)
+      (setq gptel--known-tools nil))
+
+    (after-each
+      (setq gptel--known-tools original-tools))
+
+    (it "wraps macher tools to inject context"
+      (macher--install-tools)
+      (let* ((context (macher--make-context :workspace `(project . ,project-dir)))
+             (get-context (lambda () context))
+             (read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+             (fsm (gptel-make-fsm))
+             (info (gptel-fsm-info fsm)))
+        ;; Add macher tool to FSM.
+        (setf (gptel-fsm-info fsm) (plist-put info :tools (list read-tool)))
+        ;; Call setup-tools.
+        (macher--setup-tools fsm get-context)
+        ;; Get the processed tool.
+        (let* ((processed-tools (plist-get (gptel-fsm-info fsm) :tools))
+               (processed-tool (car processed-tools)))
+          ;; Category should be marked as processed.
+          (expect (gptel-tool-category processed-tool)
+                  :to-equal (format "%s__processed" macher-tool-category))
+          ;; Tool name should be unchanged.
+          (expect (gptel-tool-name processed-tool) :to-equal "read_file_in_workspace"))))
+
+    (it "preserves non-macher tools unchanged"
+      (let* ((other-tool
+              (gptel-make-tool
+               :name "other_tool"
+               :function (lambda () "test")
+               :description "Other tool"
+               :category "other"))
+             (context (macher--make-context :workspace `(project . ,project-dir)))
+             (get-context (lambda () context))
+             (fsm (gptel-make-fsm))
+             (info (gptel-fsm-info fsm)))
+        ;; Add other tool to FSM.
+        (setf (gptel-fsm-info fsm) (plist-put info :tools (list other-tool)))
+        ;; Call setup-tools.
+        (macher--setup-tools fsm get-context)
+        ;; Get the processed tools.
+        (let* ((processed-tools (plist-get (gptel-fsm-info fsm) :tools))
+               (processed-tool (car processed-tools)))
+          ;; Tool should be unchanged.
+          (expect processed-tool :to-be other-tool))))
+
+    (it "provides same context to all macher tools"
+      (macher--install-tools)
+      (let* ((context (macher--make-context :workspace `(project . ,project-dir)))
+             (get-context-calls 0)
+             (get-context
+              (lambda ()
+                (setq get-context-calls (1+ get-context-calls))
+                context))
+             (read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+             (list-tool (gptel-get-tool (list macher-tool-category "list_directory_in_workspace")))
+             (fsm (gptel-make-fsm))
+             (info (gptel-fsm-info fsm)))
+        ;; Add multiple macher tools.
+        (setf (gptel-fsm-info fsm) (plist-put info :tools (list read-tool list-tool)))
+        (setf (gptel-fsm-info fsm) (plist-put (gptel-fsm-info fsm) :buffer (current-buffer)))
+        ;; Call setup-tools.
+        (macher--setup-tools fsm get-context)
+        ;; Get processed tools and call both.
+        (let* ((processed-tools (plist-get (gptel-fsm-info fsm) :tools)))
+          (dolist (tool processed-tools)
+            ;; Each tool call should invoke get-context.
+            (ignore-errors
+              (funcall (gptel-tool-function tool) ".")))
+          ;; get-context should have been called once per tool invocation.
+          (expect get-context-calls :to-equal 2))))
+
+    (it "handles nil context from get-context"
+      (macher--install-tools)
+      (let* ((get-context (lambda () nil))
+             (read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+             (fsm (gptel-make-fsm))
+             (info (gptel-fsm-info fsm)))
+        ;; Add tool to FSM.
+        (setf (gptel-fsm-info fsm) (plist-put info :tools (list read-tool)))
+        (setf (gptel-fsm-info fsm) (plist-put (gptel-fsm-info fsm) :buffer (current-buffer)))
+        ;; Call setup-tools.
+        (macher--setup-tools fsm get-context)
+        ;; Get processed tool and try to call it.
+        (let* ((processed-tools (plist-get (gptel-fsm-info fsm) :tools))
+               (processed-tool (car processed-tools)))
+          ;; Calling should error since context is nil.
+          (expect (funcall (gptel-tool-function processed-tool) ".") :to-throw)))))
+
+  (describe "macher--context-for-fsm"
+    (before-each
+      (funcall setup-project))
+
+    (it "returns nil when FSM is nil"
+      (expect (macher--context-for-fsm nil) :to-be nil))
+
+    (it "returns nil when FSM has no macher context"
+      (let ((fsm (gptel-make-fsm)))
+        (expect (macher--context-for-fsm fsm) :to-be nil)))
+
+    (it "returns context stored on FSM info"
+      (let* ((context (macher--make-context :workspace `(project . ,project-dir)))
+             (fsm (gptel-make-fsm))
+             (info (gptel-fsm-info fsm)))
+        ;; Store context on FSM.
+        (setf (gptel-fsm-info fsm) (plist-put info :macher--context context))
+        ;; Should return the context.
+        (expect (macher--context-for-fsm fsm) :to-be context)))
+
+    (it "returns nil when FSM info is nil"
+      (let ((fsm (gptel-make-fsm)))
+        ;; Clear the info.
+        (setf (gptel-fsm-info fsm) nil)
+        (expect (macher--context-for-fsm fsm) :to-be nil))))
 
   (describe "macher-patch-buffer"
     (before-each
@@ -4133,54 +4390,6 @@
             (let ((content (buffer-substring-no-properties (point-min) (point-max))))
               ;; The header and prompt will be added, but not another prefix before them.
               (expect content :to-match "^previous content\n### `test` Test prompt")))))))
-
-  ;; TODO: This test isn't relevant anymore, the behavior of `macher--make-tool' has changed and
-  ;; `macher--tool-context' no longer exists (as tools aren't specifically associated with a single
-  ;; context anymore). But we do need to add a test or two for the current version of
-  ;; `macher--make-tool'.
-  (xdescribe "macher--make-tool and macher--tool-context"
-    :var (original-tools)
-
-    (before-each
-      (setq original-tools gptel--known-tools)
-      (setq gptel--known-tools nil))
-
-    (after-each
-      (setq gptel--known-tools original-tools))
-
-    (it "creates macher tool and retrieves context"
-      ;; Ensure gptel--known-tools is empty at the beginning.
-      (expect gptel--known-tools :to-be nil)
-      ;; Create a test context and tool.
-      (let* ((context (macher--make-context))
-             (test-function (lambda (arg1 arg2) (list arg1 arg2)))
-             (tool
-              (macher--make-tool
-               context
-               :name "test_tool"
-               :function test-function
-               :description "A test tool"
-               :args '((:name "arg1" :type string) (:name "arg2" :type number)))))
-        ;; Verify gptel--known-tools is still empty after calling macher--make-tool.
-        (expect gptel--known-tools :to-be nil)
-        ;; Verify macher--tool-context returns the correct context.
-        (let ((retrieved-context (macher--tool-context tool)))
-          (expect retrieved-context :to-be context))
-        ;; Verify the tool function can be called.
-        (let* ((tool-fn (gptel-tool-function tool))
-               (result (funcall tool-fn "hello" 42)))
-          (expect result :to-equal '("hello" 42)))))
-
-    (it "returns nil for regular tools"
-      ;; Create a regular tool using gptel-make-tool (not macher--make-tool).
-      (let ((regular-tool
-             (gptel-make-tool
-              :name "regular_tool"
-              :function (lambda (x) x)
-              :description "A regular tool"
-              :args '((:name "x" :type string)))))
-        ;; Verify macher--tool-context returns nil for this regular tool.
-        (expect (macher--tool-context regular-tool) :to-be nil))))
 
   (describe "macher-action"
     :var ((original-action-buffer-setup-hook macher-action-buffer-setup-hook) project-file-buffer)
