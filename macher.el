@@ -204,8 +204,7 @@ Any matching tools already present in the variable
       :tools `(:function ,(apply-partially #'macher--preset-function-add-tools pred)))
      :parents parents)))
 
-;; TODO: Convert this to a private method (macher--) and add a deprecation defalias.
-(defun macher-action-from-region-or-input (input-prompt transform preset &optional input)
+(defun macher--action-from-region-or-input (input-prompt transform preset &optional input)
   "Get a macher action plist from user input or the selected region.
 
 First, gets user input from the selected region, or if no region is
@@ -228,8 +227,7 @@ The returned plist will contain the transformed :prompt, the
 that was passed to the transformer).
 
 This function is used by the default actions in the
-`macher-actions-alist', and provided as a convenience for defining
-custom actions with the same workflow."
+`macher-actions-alist'."
 
   ;; Prompt to save any unsaved buffers.
   (save-some-buffers nil (lambda () (and (buffer-file-name) (buffer-modified-p))))
@@ -248,6 +246,15 @@ custom actions with the same workflow."
          (is-selected (and (not input) (use-region-p)))
          (transformed-prompt (funcall transform user-input is-selected)))
     `(:prompt ,transformed-prompt :preset ,preset :summary ,user-input)))
+
+(define-obsolete-function-alias
+  'macher-action-from-region-or-input
+  'macher--action-from-region-or-input
+  "0.5.0"
+  "Removed from public API.
+
+You can use `macher--action-from-region-or-input' if you need to, but
+behavior is subject to change in the future.")
 
 (defconst macher--workspace-postfix
   (concat
@@ -302,19 +309,19 @@ filesystem.")
 (defcustom macher-actions-alist
   `((implement
      .
-     ,(apply-partially #'macher-action-from-region-or-input
+     ,(apply-partially #'macher--action-from-region-or-input
                        "To implement: "
                        #'macher--implement-prompt
                        'macher))
     (revise
      .
-     ,(apply-partially #'macher-action-from-region-or-input
+     ,(apply-partially #'macher--action-from-region-or-input
                        "Revision instructions: "
                        #'macher--revise-prompt
                        'macher))
     (discuss
      .
-     ,(apply-partially #'macher-action-from-region-or-input
+     ,(apply-partially #'macher--action-from-region-or-input
                        "Discuss: "
                        #'macher--discuss-prompt
                        'macher)))
