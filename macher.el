@@ -262,7 +262,8 @@ custom actions with the same workflow."
    "- Any CLI commands or file-reading operations you suggest to the user will NOT see your workspace changes\n"
    "- The contents of \"files\" in the workspace will be captured the first time you access them, so subsequent "
    "filesystem changes by other processes will NOT be reflected in the workspace\n"
-   "- The workspace is cleared every time the user sends a request")
+   "- The workspace is cleared every time the user sends a request\n"
+   "- Between requests, the user may apply all, some, or none of your changes, and may make additional edits")
   "Description of the workspace concept for tool descriptions.
 
 This text is appended to tool descriptions to clarify that workspace
