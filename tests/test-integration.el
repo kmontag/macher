@@ -1696,11 +1696,10 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                          (delete-file input-schema-file)))))))))))))
 
   (describe "context string generation"
-
-    (it "includes workspace info when nothing is in context"
+    (it "includes workspace info in system prompt"
       (funcall setup-backend '("Test response"))
       (funcall setup-project
-               "no-context"
+               "context-string"
                '(("README.md" . "# Test Project\n\nSimple test project.\n")
                  ("src/main.el" . "Main content")
                  ("src/util.el" . "Utility functions content")
@@ -1747,262 +1746,19 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (let ((system-content
                      (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
                 ;; Check for workspace description.
-                (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
-                ;; Check that all files are listed as available for editing since nothing is in context.
-                (expect "Files available for editing:" :to-appear-once-in system-content)
-                ;; Check that files appear in the correct structural relationship to the header.
-                (expect
-                 system-content
-                 :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    README\\.md")
-                (expect
-                 system-content
-                 :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/main\\.el")
-                (expect
-                 system-content
-                 :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/util\\.el")
-                (expect
-                 system-content
-                 :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    test/test-main\\.el")
-                ;; Should not have an "already provided" section since nothing is in context.
-                (expect system-content :not :to-match "Files already provided above")
+                (expect "The user is currently working on a project named:"
+                        :to-appear-once-in system-content)
+                ;; Check that files are listed.
+                (expect (format "Files in the %s workspace:" (file-name-nondirectory project-dir))
+                        :to-appear-once-in system-content)
+                ;; Check that files appear in the listing.
+                (expect system-content :to-match "    README\\.md")
+                (expect system-content :to-match "    src/main\\.el")
+                (expect system-content :to-match "    src/util\\.el")
+                (expect system-content :to-match "    test/test-main\\.el")
                 ;; Check that it mentions the project name in the description.
-                (expect (format "which is named `%s`" (file-name-nondirectory project-dir))
-                        :to-appear-once-in system-content)))))))
-
-    (it "includes workspace info when both files and buffers are in context"
-      (funcall setup-backend '("Test response"))
-      (funcall setup-project
-               "mixed"
-               '(("src/main.el" . "main content")
-                 ("src/context.el" . "context content")
-                 ("src/buffer.el" . "Buffer file content")
-                 ("docs/README.md" . "# Test Project\n\nThis is a test project.\n")))
-      (let ((response-received nil)
-            (callback-called nil)
-            (buffer-buffer nil)
-            ;; Explicitly make sure the context shows up in a system message.
-            (gptel-use-context 'system))
-
-        (gptel-context-remove-all)
-
-        ;; Open buffer for context.
-        (setq buffer-buffer (find-file-noselect (expand-file-name "src/buffer.el" project-dir)))
-
-        (unwind-protect
-            (progn
-              (with-temp-buffer
-                ;; Open the main project file.
-                (set-visited-file-name project-file)
-                ;; Set up context - add file to context.
-                (gptel-add-file (expand-file-name "src/context.el" project-dir))
-                ;; Add buffer to context.
-                (with-current-buffer buffer-buffer
-                  (gptel-add))
-
-                (macher-test--send
-                 'macher-prompt "Test prompt with mixed context"
-                 (macher-test--make-once-only-callback
-                  (lambda (exit-code fsm)
-                    (setq callback-called t)
-                    (setq response-received (not exit-code)))))
-
-                ;; Wait for the async response.
-                (let ((timeout 0))
-                  (while (and (not callback-called) (< timeout 100))
-                    (sleep-for 0.1)
-                    (setq timeout (1+ timeout))))
-
-                (expect callback-called :to-be-truthy)
-                (expect response-received :to-be-truthy)
-
-                ;; Validate that the request contains expected content.
-                (let ((requests (funcall received-requests)))
-                  (expect (> (length requests) 0) :to-be-truthy)
-                  (let* ((request (car requests))
-                         (messages (plist-get request :messages))
-                         (system-messages
-                          (cl-remove-if-not
-                           (lambda (msg) (string= (plist-get msg :role) "system")) messages)))
-                    (expect messages :to-be-truthy)
-                    (expect (> (length system-messages) 0) :to-be-truthy)
-
-                    ;; Verify that context appears in system message.
-                    (let ((system-content
-                           (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
-                      ;; Check for workspace description.
-                      (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
-                      ;; Check that files in context are in the "already provided" section.
-                      (expect "Files already provided above" :to-appear-once-in system-content)
-                      (expect system-content
-                              :to-match "Files already provided above.*\n    src/context\\.el")
-                      ;; Check that other files are in the "available for editing" section with proper structure.
-                      (expect "Other files available for editing:"
-                              :to-appear-once-in system-content)
-                      (expect
-                       system-content
-                       :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    src/buffer\\.el")
-                      (expect
-                       system-content
-                       :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    docs/README\\.md")
-                      (expect
-                       system-content
-                       :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    src/main\\.el")
-                      ;; Check that buffer content appears in context (since buffer was added).
-                      (expect "Buffer file content" :to-appear-once-in system-content)
-                      ;; Check that it mentions the project name in the description.
-                      (expect (format "which is named `%s`" (file-name-nondirectory project-dir))
-                              :to-appear-once-in system-content))))))
-          ;; Clean up the buffer.
-          (when (buffer-live-p buffer-buffer)
-            (kill-buffer buffer-buffer)))))
-
-
-    (it "includes project info when context has files"
-      (funcall setup-backend '("Test response"))
-      (funcall setup-project
-               "files"
-               '(("README.md" . "# Test Project\n\nSimple test project.\n")
-                 ("src/main.el" . "Main file content")
-                 ("test/test-file.el" . "Test file content")))
-      (let ((response-received nil)
-            (callback-called nil)
-            ;; Explicitly make sure the context shows up in a system message.
-            (gptel-use-context 'system))
-
-        (gptel-context-remove-all)
-
-        (with-temp-buffer
-          ;; Add the main file to gptel context.
-          (set-visited-file-name (expand-file-name "src/main.el" project-dir))
-          (gptel-add-file (expand-file-name "src/main.el" project-dir))
-          (with-temp-buffer
-            ;; Now open another project file for the test.
-            (set-visited-file-name project-file)
-
-            (macher-test--send
-             'macher-ro "Test prompt with file context"
-             (macher-test--make-once-only-callback
-              (lambda (error context)
-                (setq callback-called t)
-                (setq response-received (not error)))))
-
-            ;; Wait for the async response.
-            (let ((timeout 0))
-              (while (and (not callback-called) (< timeout 100))
-                (sleep-for 0.1)
-                (setq timeout (1+ timeout))))
-
-            (expect callback-called :to-be-truthy)
-            (expect response-received :to-be-truthy)
-
-            ;; Validate that the request contains expected content.
-            (let ((requests (funcall received-requests)))
-              (expect (> (length requests) 0) :to-be-truthy)
-              (let* ((request (car requests))
-                     (messages (plist-get request :messages))
-                     (system-messages
-                      (cl-remove-if-not
-                       (lambda (msg) (string= (plist-get msg :role) "system")) messages)))
-                (expect messages :to-be-truthy)
-                (expect (> (length system-messages) 0) :to-be-truthy)
-
-                ;; Verify that context appears in system message.
-                (let ((system-content
-                       (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
-                  ;; Check for workspace description.
-                  (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
-                  ;; Check that files are properly separated between context and available.
-                  (expect "Files already provided above" :to-appear-once-in system-content)
-                  (expect system-content
-                          :to-match "Files already provided above.*\n    src/main\\.el")
-                  (expect "Other files available for editing:" :to-appear-once-in system-content)
-                  (expect
-                   system-content
-                   :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    README\\.md")
-                  (expect
-                   system-content
-                   :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    test/test-file\\.el")
-                  ;; Check that file content appears in context.
-                  (expect "Main file content" :to-appear-once-in system-content)
-                  ;; Check that it mentions the project name in the description.
-                  (expect (format "which is named `%s`" (file-name-nondirectory project-dir))
-                          :to-appear-once-in system-content))))))))
-
-    (it "includes workspace info when only buffers are in context"
-      (funcall setup-backend '("Test response"))
-      (funcall setup-project
-               "buffers"
-               '(("first.el" . "first content")
-                 ("src/second.el" . "second content")
-                 ("src/third.el" . "third content")))
-      (let ((response-received nil)
-            (callback-called nil)
-            ;; Explicitly make sure the context shows up in a system message.
-            (gptel-use-context 'system)
-            (context-buffer nil))
-
-        (gptel-context-remove-all)
-
-        (unwind-protect
-            (progn
-              ;; Add context from another buffer.
-              (setq context-buffer
-                    (find-file-noselect (expand-file-name "src/second.el" project-dir)))
-              (with-current-buffer context-buffer
-                (gptel-add))
-
-              (with-temp-buffer
-                ;; Now open another project file.
-                (set-visited-file-name project-file)
-                (macher-test--send
-                 'macher-prompt "Test prompt with buffer context"
-                 (macher-test--make-once-only-callback
-                  (lambda (error context)
-                    (setq callback-called t)
-                    (setq response-received (not error)))))
-
-                ;; Wait for the async response.
-                (let ((timeout 0))
-                  (while (and (not callback-called) (< timeout 100))
-                    (sleep-for 0.1)
-                    (setq timeout (1+ timeout))))
-
-                (expect callback-called :to-be-truthy)
-                (expect response-received :to-be-truthy)
-
-                ;; Validate that the request contains expected content.
-                (let ((requests (funcall received-requests)))
-                  (expect (> (length requests) 0) :to-be-truthy)
-                  (let* ((request (car requests))
-                         (messages (plist-get request :messages))
-                         (system-messages
-                          (cl-remove-if-not
-                           (lambda (msg) (string= (plist-get msg :role) "system")) messages)))
-                    (expect messages :to-be-truthy)
-                    (expect (> (length system-messages) 0) :to-be-truthy)
-
-                    ;; Run all expected checks.
-                    (let ((system-content
-                           (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
-                      ;; Check for workspace description.
-                      (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
-                      ;; Check that all files are listed (buffer context doesn't affect file listing).
-                      (expect "Files available for editing:" :to-appear-once-in system-content)
-                      (expect
-                       system-content
-                       :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    first\\.el")
-                      (expect
-                       system-content
-                       :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/second\\.el")
-                      (expect
-                       system-content
-                       :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/third\\.el")
-                      (expect "second content" :to-appear-once-in system-content)
-                      ;; Check that it mentions the project name in the description.
-                      (expect (format "which is named `%s`" (file-name-nondirectory project-dir))
-                              :to-appear-once-in system-content))))))
-          (when context-buffer
-            (kill-buffer context-buffer))))))
+                (expect (format "project named: `%s`" (file-name-nondirectory project-dir))
+                        :to-appear-once-in system-content))))))))
 
   (describe "default before-action handler"
     :var*
