@@ -3621,9 +3621,12 @@
     (it "creates tools with wrapped functions that require context"
       (macher--install-tools)
       (let* ((tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
-             (tool-fn (gptel-tool-function tool)))
+             (tool-fn (gptel-tool-function tool))
+             (warn-called nil))
+        (spy-on 'warn :and-call-fake (lambda (&rest _args) (setq warn-called t)))
         ;; Calling tool without context should error.
-        (expect (funcall tool-fn "some-path") :to-throw)))
+        (expect (funcall tool-fn "some-path") :to-throw)
+        (expect warn-called :to-be-truthy)))
 
     (it "idempotently reinstalls tools"
       (macher--install-tools)
@@ -4117,9 +4120,12 @@
                :name "context_required_tool"
                :function (lambda (context) "result")
                :description "A tool requiring context"))
-             (tool-fn (gptel-tool-function tool)))
+             (tool-fn (gptel-tool-function tool))
+             (warn-called nil))
+        (spy-on 'warn :and-call-fake (lambda (&rest _args) (setq warn-called t)))
         ;; Calling without context should error.
-        (expect (funcall tool-fn "not-a-context") :to-throw)))
+        (expect (funcall tool-fn "not-a-context") :to-throw)
+        (expect warn-called :to-be-truthy)))
 
     (it "errors when called with nil context"
       (let* ((tool
@@ -4128,9 +4134,12 @@
                :name "nil_context_tool"
                :function (lambda (context) "result")
                :description "A tool"))
-             (tool-fn (gptel-tool-function tool)))
+             (tool-fn (gptel-tool-function tool))
+             (warn-called nil))
+        (spy-on 'warn :and-call-fake (lambda (&rest _args) (setq warn-called t)))
         ;; Calling with nil should error.
-        (expect (funcall tool-fn nil) :to-throw))))
+        (expect (funcall tool-fn nil) :to-throw)
+        (expect warn-called :to-be-truthy))))
 
   (describe "macher-resolve-tool"
     :var (original-tools)
@@ -4250,7 +4259,8 @@
       (let* ((get-context (lambda () nil))
              (read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
              (fsm (gptel-make-fsm))
-             (info (gptel-fsm-info fsm)))
+             (info (gptel-fsm-info fsm))
+             (warn-called nil))
         ;; Add tool to FSM.
         (setf (gptel-fsm-info fsm) (plist-put info :tools (list read-tool)))
         (setf (gptel-fsm-info fsm) (plist-put (gptel-fsm-info fsm) :buffer (current-buffer)))
@@ -4259,8 +4269,10 @@
         ;; Get processed tool and try to call it.
         (let* ((processed-tools (plist-get (gptel-fsm-info fsm) :tools))
                (processed-tool (car processed-tools)))
+          (spy-on 'warn :and-call-fake (lambda (&rest _args) (setq warn-called t)))
           ;; Calling should error since context is nil.
-          (expect (funcall (gptel-tool-function processed-tool) ".") :to-throw)))))
+          (expect (funcall (gptel-tool-function processed-tool) ".") :to-throw)
+          (expect warn-called :to-be-truthy)))))
 
   (describe "macher--context-for-fsm"
     (before-each
