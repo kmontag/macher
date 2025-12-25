@@ -5421,27 +5421,24 @@
         (let* ((fn (lambda () "Dynamic system message"))
                (result (macher--system-ensure-placeholder-or-context-string fn)))
           (expect (functionp result) :to-be-truthy)
-          ;; The wrapper evaluates the function and adds placeholder.
-          (spy-on 'gptel--parse-directive :and-return-value "Dynamic system message")
           (let ((evaluated (funcall result)))
             (expect
              evaluated
-             :to-equal (concat "Dynamic system message" macher-context-string-placeholder)))))
+             :to-equal (list (concat "Dynamic system message" macher-context-string-placeholder))))))
 
       (it "wraps function that returns string with placeholder"
-        (let* ((with-placeholder (concat "Dynamic message" macher-context-string-placeholder))
+        (let* ((with-placeholder
+                (concat "Dynamic message" macher-context-string-placeholder "dynamic message end"))
                (fn (lambda () with-placeholder))
                (result (macher--system-ensure-placeholder-or-context-string fn)))
           (expect (functionp result) :to-be-truthy)
-          (spy-on 'gptel--parse-directive :and-return-value with-placeholder)
           (let ((evaluated (funcall result)))
-            (expect evaluated :to-equal with-placeholder))))
+            (expect evaluated :to-equal (list with-placeholder)))))
 
       (it "wraps function that returns list"
         (let* ((fn (lambda () '("System" "user")))
                (result (macher--system-ensure-placeholder-or-context-string fn)))
           (expect (functionp result) :to-be-truthy)
-          (spy-on 'gptel--parse-directive :and-return-value '("System" "user"))
           (let ((evaluated (funcall result)))
             (expect (car evaluated) :to-equal (concat "System" macher-context-string-placeholder))
             (expect (cdr evaluated) :to-equal '("user")))))
@@ -5451,7 +5448,6 @@
                (fn (lambda () (list first-elem "user")))
                (result (macher--system-ensure-placeholder-or-context-string fn)))
           (expect (functionp result) :to-be-truthy)
-          (spy-on 'gptel--parse-directive :and-return-value (list first-elem "user"))
           (let ((evaluated (funcall result)))
             (expect (car evaluated) :to-equal first-elem)))))
 
@@ -5613,31 +5609,20 @@
       (it "evaluates function and processes result"
         (let* ((macher-context-string-function (lambda () "CTX"))
                (fn (lambda () (concat "Dynamic" macher-context-string-placeholder)))
-               (result nil))
-          (spy-on 'gptel--parse-directive
-                  :and-return-value (concat "Dynamic" macher-context-string-placeholder))
-          (setq result (macher--system-replace-placeholder fn))
-          (expect result :to-match "Dynamic")
-          (expect result :to-match "CTX")
-          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
+               (result (macher--system-replace-placeholder fn))
+               (result-system (car result)))
+          (expect (length result) :to-be 1)
+          (expect result-system :to-match "Dynamic")
+          (expect result-system :to-match "CTX")
+          (expect result-system :not :to-match (regexp-quote macher-context-string-placeholder))))
 
       (it "handles function returning list"
         (let* ((macher-context-string-function (lambda () "CTX"))
                (fn (lambda () (list (concat "System" macher-context-string-placeholder) "user"))))
-          (spy-on
-           'gptel--parse-directive
-           :and-return-value (list (concat "System" macher-context-string-placeholder) "user"))
           (let ((result (macher--system-replace-placeholder fn)))
             (expect (listp result) :to-be-truthy)
             (expect (car result) :to-match "CTX")
-            (expect (nth 1 result) :to-equal "user"))))
-
-      (it "passes raw flag to gptel--parse-directive"
-        (let* ((macher-context-string-function (lambda () "CTX"))
-               (fn (lambda () "test")))
-          (spy-on 'gptel--parse-directive :and-return-value "test")
-          (macher--system-replace-placeholder fn)
-          (expect 'gptel--parse-directive :to-have-been-called-with fn 'raw))))
+            (expect (nth 1 result) :to-equal "user")))))
 
     (describe "idempotency and double-injection prevention"
       (it "calling twice produces same result as calling once"
