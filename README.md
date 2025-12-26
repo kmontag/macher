@@ -57,12 +57,9 @@ Example configuration with elpaca + `use-package` integration:
   )
 
 (use-package gptel
-  ;; ...
   :config
   ;; Optional - set up macher as soon as gptel is loaded.
-  (require 'macher)
-  ;; ...
-  )
+  (require 'macher))
 ```
 
 See the docstrings of `macher-install` and `macher-enable` if you want to know more about what these
