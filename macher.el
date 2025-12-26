@@ -26,29 +26,28 @@
 ;; This file is NOT part of GNU Emacs.
 
 ;;; Commentary:
-;; macher provides a toolset for project-aware LLM file editing based on gptel.
+;; macher is a project-aware LLM editing toolset built on gptel.
 ;;
 ;; Key features:
-;; - Use gptel presets to add context and read/edit tools for the current project
-;; - View proposed changes as diff-mode-friendly patches
-;; - Send implementation requests using `macher-implement'
-;; - Request revisions to patches with `macher-revise'
+;; - gptel presets that add read/edit tools and workspace context to requests
+;; - View proposed changes as reviewable patches (potentially spanning multiple files)
+;; - Quick workflow via `macher-implement', `macher-revise', and `macher-discuss'
 ;;
-;; Conceptually, when making a request, macher provides the LLM with a "workspace" containing files
-;; from the current project (or just the current file if not in a project), and tools to read/edit
-;; files in the workspace.  Edits are not persisted to disk, but rather stored in the request's
-;; associated `macher-context' object, where they can later be used to generate patches.
+;; Conceptually, when you send a macher request, the LLM receives tools to read/search/edit files in
+;; your "workspace" (typically the current project).  Changes are captured in memory and displayed
+;; as patches, never written directly to disk.
 ;;
-;; The main interactive entrypoints are `macher-implement', `macher-revise', and (read-only)
-;; `macher-discuss', all of which are wrappers around the more general `macher-action'.  Actions run
-;; in a dedicated per-workspace request buffer.
+;; Setup: Call `macher-install' to register presets and tools with gptel.  Optionally call
+;; `macher-enable' to apply base infrastructure globally, allowing use of macher tools and dynamic
+;; context in any gptel buffer.
 ;;
-;; Under the hood, actions use (ephemeral) gptel presets to set up the request context/tools, and to
-;; display changes in a diff buffer when the request is complete.  You can also install these presets
-;; globally using `macher-install', and then use them in any gptel workflow - for example, you could
-;; send a gptel request like:
+;; Usage: The action commands (`macher-implement', `macher-revise', `macher-discuss') provide a
+;; quick workflow in dedicated buffers.  Alternatively, use macher presets in any gptel request:
 ;;
 ;;   @macher set up eslint with sensible defaults
+;;
+;; Available presets: `@macher' (full editing), `@macher-ro' (read-only), `@macher-system' (context
+;; only), and others - see `macher-presets-alist'.
 
 ;;; Code:
 
