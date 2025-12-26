@@ -3380,14 +3380,15 @@ CALLBACK must be called when preparation is complete."
     (goto-char (point-max))
     (when prompt
       (insert
-       ;; Don't add any stray newlines, they can break the diff-mode parsing.
-       "# -----------------------------\n"
-       (format "# PROMPT for patch ID %s:\n" patch-id)
-       "# -----------------------------\n"
-       ;; Add comment prefix to each line of the prompt.
-       (replace-regexp-in-string "^" "# " prompt)
-       ;; A trailing newline at the end appears to be okay.
-       "\n"))
+       (concat
+        ;; Don't add any stray newlines, they can break the diff-mode parsing.
+        "# -----------------------------\n"
+        (format "# PROMPT for patch ID %s:\n" patch-id)
+        "# -----------------------------\n"
+        ;; Add comment prefix to each line of the prompt.
+        (replace-regexp-in-string "^" "# " prompt)
+        ;; A trailing newline at the end appears to be okay.
+        "\n")))
 
     ;; Note: The original prompt is no longer stored in the context structure.
     ;; If prompt tracking is needed, it should be added to the context structure.
