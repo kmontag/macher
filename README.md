@@ -39,8 +39,7 @@ Example configuration with elpaca + `use-package` integration:
   (macher-install)
 
   ;; Recommended - enable macher infrastructure for tools/prompts in
-  ;; any buffer. (Presets and actions will still work if you don't do
-  ;; this, though.)
+  ;; any buffer.  (Actions and presets will still work without this.)
   (macher-enable)
 
   ;; Adjust buffer positioning to taste.
@@ -62,14 +61,17 @@ Example configuration with elpaca + `use-package` integration:
   (require 'macher))
 ```
 
-See the docstrings of `macher-install` and `macher-enable` if you want to know more about what these
-add to your environment.
+`macher-install` and `macher-enable` are intended to be very unintrusive, and shouldn't have any
+effect on non-macher requests, but they do modify the global gptel environment. See the docstrings
+if you want more specifics. Action commands will work regardless of whether you've run these.
 
 ## Usage
 
 ### Presets
 
-After calling `(macher-install)`, you can use macher presets in any gptel request or buffer:
+After calling `(macher-install)`, you can use macher presets in any gptel request or buffer.
+
+https://github.com/user-attachments/assets/9b3e0734-5907-4e01-a356-6f9066d7b844
 
 - **`@macher`**: Full editing capabilities. Adds tools to read, search, and edit files. Changes are
   captured in memory and displayed as a patch. Also inherits `@macher-system`.
@@ -89,9 +91,12 @@ After calling `(macher-install)`, you can use macher presets in any gptel reques
 
 - **`@macher-base`**: Utility preset that enables macher tool infrastructure. This gets applied
   automatically when using other macher presets, but you may want to apply it globally via
-  `macher-enable`, if you want to use macher tools and/or dynamic context in more generic contexts.
+  `macher-enable`, if you want to use macher tools and/or dynamic context in more generic contexts. This adds transforms that run on every outgoing request, which:
+    - provide macher tools with a shared editing environment
+    - replace instances of the `macher-context-string-placeholder` in the system prompt
 
-https://github.com/user-attachments/assets/9b3e0734-5907-4e01-a356-6f9066d7b844
+    This preset shouldn't have any effect on requests that don't use macher tools or include the
+    placeholder.
 
 All built-in presets can safely be repeatedly applied.
 
