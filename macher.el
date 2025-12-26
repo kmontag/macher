@@ -1499,9 +1499,7 @@ before running the `macher-action-buffer-setup-hook'."
      (macher--action-buffer-setup-basic))
     ;; nil: no automatic setup
     ((pred null))
-    (_
-     (user-error
-      (format "Unrecognized action buffer UI configuration: %s" macher-action-buffer-ui)))))
+    (_ (user-error "Unrecognized action buffer UI configuration: %s" macher-action-buffer-ui))))
 
 (defun macher--before-action (execution)
   "Default function for before-action processing.
@@ -1611,9 +1609,7 @@ before running the `macher-patch-buffer-setup-hook'."
      (macher--patch-buffer-setup-diff))
     ;; nil: no automatic setup.
     ((pred null))
-    (_
-     (user-error
-      (format "Unrecognized patch buffer UI configuration: %s" macher-patch-buffer-ui)))))
+    (_ (user-error "Unrecognized patch buffer UI configuration: %s" macher-patch-buffer-ui))))
 
 (defun macher--patch-ready ()
   "Set up the patch buffer with appropriate modes and settings.
@@ -2053,7 +2049,7 @@ file.  Also updates the context's :contents alist."
          (new-content (cdr contents)))
     ;; Check if the file exists for editing.
     (if (not new-content)
-        (error (format "File '%s' not found in workspace" path))
+        (error "File '%s' not found in workspace" path)
       ;; Set the dirty flag to indicate changes are being made if requested.
       (when set-dirty-p
         (setf (macher-context-dirty-p context) t))
@@ -2145,7 +2141,7 @@ Signals an error if the directory is not found in the workspace."
       (let ((contents (cdr existing-entry)))
         ;; Has new-content, so it's a file.
         (when (cdr contents)
-          (error (format "Path '%s' is a file, not a directory" path)))))
+          (error "Path '%s' is a file, not a directory" path))))
 
     ;; Check if the directory exists on disk OR has files in the context.
     ;; A directory is considered to exist if:
@@ -2165,7 +2161,7 @@ Signals an error if the directory is not found in the workspace."
                      (file-name-as-directory full-path) (file-name-as-directory file-dir))))))
             context-contents)))
       (unless (or (file-directory-p full-path) directory-has-context-files-p)
-        (error (format "Directory '%s' not found in workspace" path))))
+        (error "Directory '%s' not found in workspace" path)))
 
     ;; Helper function to check if a file is deleted in the context.
     (cl-labels
@@ -2497,7 +2493,7 @@ indicate changes."
     ;; Check if destination already exists.
     (let ((dest-contents (macher-context--contents-for-file dest-full-path context)))
       (when (cdr dest-contents)
-        (error (format "Destination '%s' already exists" destination-path))))
+        (error "Destination '%s' already exists" destination-path)))
     ;; Use the helper function to move the file.
     (macher--with-workspace-file context source-path
                                  (lambda (source-full-path source-new-content)
@@ -4192,7 +4188,7 @@ implements one possible workflow."
              (assoc action macher-actions-alist)
            action)))
     (unless action-config
-      (user-error (format "Unrecognized action: %s" action)))
+      (user-error "Unrecognized action: %s" action))
 
     (let* ((action-function-or-plist (cdr action-config))
            (action-plist
