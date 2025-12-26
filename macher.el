@@ -3543,7 +3543,12 @@ SYSTEM can be a string, a function, or a list:
 
 - Function: A dynamic directive that generates the system message at
   request time.  We return a wrapper that evaluates this directive and
-  then handles the result as with other strings/lists."
+  then handles the result as with other strings/lists.
+
+If `macher-context-string-placeholder' is nil, simply appends the
+current result of `macher-context-string-function' (if no start marker
+already present), i.e. goes straight to the \"@macher-system-commit\"
+state."
   (cl-etypecase system
     (string
      (if (and macher-context-string-placeholder
