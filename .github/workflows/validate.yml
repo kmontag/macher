@@ -6,6 +6,7 @@ on:
   workflow_call:
   pull_request:
   push:
+    branches: ["main"]
 
 # Cancel in-progress jobs on PRs when new commits are pushed.
 concurrency:
