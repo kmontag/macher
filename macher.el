@@ -252,7 +252,7 @@ This function is used by the default actions in the
 
 (define-obsolete-function-alias
   'macher-action-from-region-or-input
-  'macher--action-from-region-or-input
+  #'macher--action-from-region-or-input
   "0.5.0"
   "Removed from public API.
 
