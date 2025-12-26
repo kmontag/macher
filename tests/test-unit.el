@@ -4014,7 +4014,51 @@
                   'macher-base
                   (lambda ()
                     ;; Transforms should be in the same order.
-                    (expect gptel-prompt-transform-functions :to-equal first-transforms))))))))))
+                    (expect gptel-prompt-transform-functions :to-equal first-transforms)))))))))
+
+      (it "preserves custom non-macher transforms in gptel-prompt-transform-functions"
+        (with-temp-buffer
+          (find-file project-file)
+          (let* ((custom-transform-1 (lambda (callback _fsm) (funcall callback)))
+                 (custom-transform-2 (lambda (callback _fsm) (funcall callback)))
+                 (gptel-prompt-transform-functions (list custom-transform-1 custom-transform-2)))
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               ;; Both custom transforms should still be present.
+               (expect (member custom-transform-1 gptel-prompt-transform-functions) :to-be-truthy)
+               (expect (member custom-transform-2 gptel-prompt-transform-functions) :to-be-truthy)
+               ;; Macher transforms should also be present.
+               (expect (member #'macher--transform-setup-tools gptel-prompt-transform-functions)
+                       :to-be-truthy)
+               (expect (member
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
+                       :to-be-truthy)
+               ;; Total count should be 4 (2 custom + 2 macher).
+               (expect (length gptel-prompt-transform-functions) :to-equal 4))))))
+
+      (it "only adds transforms once when applied multiple times"
+        (let* ((orig-prompt-transforms gptel-prompt-transform-functions)
+               (callback-invoked nil))
+          (expect orig-prompt-transforms :not :to-contain 'macher--transform-setup-tools)
+          (expect orig-prompt-transforms
+                  :not
+                  :to-contain 'macher--transform-system-replace-placeholder)
+          (macher--with-preset
+           'macher-base
+           (lambda ()
+             (macher--with-preset
+              'macher-base
+              (lambda ()
+                (setq callback-invoked t)
+                (expect gptel-prompt-transform-functions
+                        :to-equal
+                        (append
+                         orig-prompt-transforms
+                         '(macher--transform-system-replace-placeholder
+                           macher--transform-setup-tools)))))))
+          (expect callback-invoked :to-be t))))
 
     (describe "preset idempotency"
       (it "does not duplicate tools when preset applied twice"
