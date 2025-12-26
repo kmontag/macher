@@ -3318,24 +3318,22 @@ patch buffer) are included in the generated prompt."
                 (buffer-substring-no-properties (point-min) (point-max)))
             ;; Doesn't make sense to call this without a patch.
             (user-error "No patch buffer found for revision"))))
-    (format (concat
-             "TASK: Revise your previous implementation based on new feedback.\n\n"
-             "WHAT YOU NEED TO DO:\n"
-             "1. Read the revision instructions below (if any)\n"
-             "2. Review your previous patch and its original prompt\n"
-             "3. Understand what needs to be changed or improved\n"
-             "4. Create a NEW implementation that addresses the feedback\n"
-             "5. Use the workspace editing tools to make the changes\n\n"
-             "%s"
-             "\n\n"
-             "==================================\n"
-             "YOUR PREVIOUS WORK (for reference)\n"
-             "==================================\n\n"
-             "%s")
-            (if (and input (not (string-empty-p input)))
-                (format "REVISION INSTRUCTIONS:\n%s\n\n" input)
-              "")
-            patch-content)))
+    (concat
+     "TASK: Revise your previous implementation based on new feedback.\n\n"
+     "WHAT YOU NEED TO DO:\n"
+     "1. Read the revision instructions below (if any)\n"
+     "2. Review your previous patch and its original prompt\n"
+     "3. Understand what needs to be changed or improved\n"
+     "4. Create a NEW implementation that addresses the feedback\n"
+     "5. Use the workspace editing tools to make the changes\n\n"
+     (if (and input (not (string-empty-p input)))
+         (format "REVISION INSTRUCTIONS:\n%s\n\n" input)
+       "")
+     "\n\n"
+     "==================================\n"
+     "YOUR PREVIOUS WORK (for reference)\n"
+     "==================================\n\n"
+     patch-content)))
 
 (defun macher--discuss-prompt (input _is-selected)
   "Generate a prompt for discussion based on INPUT.
