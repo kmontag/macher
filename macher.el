@@ -3,7 +3,7 @@
 ;; Copyright (C) 2025 Kevin Montag
 
 ;; Author: Kevin Montag
-;; Version: 0.4.0
+;; Version: 0.5.0
 ;; Package-Requires: ((emacs "30.1") (gptel "0.9.8.5"))
 ;; Keywords: convenience, gptel, llm
 ;; URL: https://github.com/kmontag/macher
@@ -26,29 +26,28 @@
 ;; This file is NOT part of GNU Emacs.
 
 ;;; Commentary:
-;; macher provides a toolset for project-aware LLM file editing based on gptel.
+;; macher is a project-aware LLM editing toolset built on gptel.
 ;;
 ;; Key features:
-;; - Use gptel presets to add context and read/edit tools for the current project
-;; - View proposed changes as diff-mode-friendly patches
-;; - Send implementation requests using `macher-implement'
-;; - Request revisions to patches with `macher-revise'
+;; - gptel presets that add read/edit tools and workspace context to requests
+;; - View proposed changes as reviewable patches (potentially spanning multiple files)
+;; - Quick workflow via `macher-implement', `macher-revise', and `macher-discuss'
 ;;
-;; Conceptually, when making a request, macher provides the LLM with a "workspace" containing files
-;; from the current project (or just the current file if not in a project), and tools to read/edit
-;; files in the workspace.  Edits are not persisted to disk, but rather stored in the request's
-;; associated `macher-context' object, where they can later be used to generate patches.
+;; Conceptually, when you send a macher request, the LLM receives tools to read/search/edit files in
+;; your "workspace" (typically the current project).  Changes are captured in memory and displayed
+;; as patches, never written directly to disk.
 ;;
-;; The main interactive entrypoints are `macher-implement', `macher-revise', and (read-only)
-;; `macher-discuss', all of which are wrappers around the more general `macher-action'.  Actions run
-;; in a dedicated per-workspace request buffer.
+;; Setup: Call `macher-install' to register presets and tools with gptel.  Optionally call
+;; `macher-enable' to apply base infrastructure globally, allowing use of macher tools and dynamic
+;; context in any gptel buffer.
 ;;
-;; Under the hood, actions use (ephemeral) gptel presets to set up the request context/tools, and to
-;; display changes in a diff buffer when the request is complete.  You can also install these presets
-;; globally using `macher-install', and then use them in any gptel workflow - for example, you could
-;; send a gptel request like:
+;; Usage: The action commands (`macher-implement', `macher-revise', `macher-discuss') provide a
+;; quick workflow in dedicated buffers.  Alternatively, use macher presets in any gptel request:
 ;;
 ;;   @macher set up eslint with sensible defaults
+;;
+;; Available presets: `@macher' (full editing), `@macher-ro' (read-only), `@macher-system' (context
+;; only), and others - see `macher-presets-alist'.
 
 ;;; Code:
 
@@ -72,7 +71,138 @@
 
 ;;; Preliminary definitions needed for defcustom defaults
 
-(defun macher-action-from-region-or-input (input-prompt transform preset &optional input)
+(defconst macher--preset-setup-tools
+  '(:description
+    "macher base: setup tools"
+    :prompt-transform-functions
+    (:function
+     ;; Remove any existing instances of the base transform, and then append it at the end. This
+     ;; explicit at-the-end ordering ensures that if we append this preset to the end of, for
+     ;; example, a list of other @presets in a request, we'll capture the prompt text as it appears
+     ;; _after_ any other prompt transforms.
+     (lambda (prompt-transform-functions)
+       (let ((transform #'macher--transform-setup-tools))
+         (append
+          (seq-remove (lambda (el) (equal el transform)) prompt-transform-functions)
+          (list transform))))))
+  "Helper preset for tool setup in macher-base.")
+
+(defconst macher--preset-system-transform
+  '(:description
+    "macher base: setup system prompt context injection"
+    :prompt-transform-functions
+    (:function
+     (lambda (prompt-transform-functions)
+       (macher--append-if-missing
+        prompt-transform-functions (list #'macher--transform-system-replace-placeholder))))))
+
+(defconst macher-preset-base
+  `(:description
+    "Utility preset, must be applied to use macher tools and system prompts"
+    :parents (,macher--preset-system-transform ,macher--preset-setup-tools))
+  "Preset spec to set up macher behavior for outgoing gptel requests.
+
+You can apply this preset globally by calling `macher-enable'.
+
+Or, if you've run `macher-install' with default settings, you can apply
+the \"@macher-base\" preset from the gptel menu.
+
+Without this preset (or a preset inheriting from it), macher tools won't
+work (they'll just respond with an error), and the
+`macher-context-string-placeholder' won't be replaced in the system
+prompt.
+
+If you're making your own presets involving macher tools, the easiest
+way to make them work robustly is to add this preset as a parent.
+
+This preset should be safe to apply globally and/or repeatedly.  It
+won't change anything about the content of your outgoing requests, other
+than replacing the `macher-context-string-placeholder' in the system
+prompt if present.")
+
+(defconst macher-preset-system
+  `(:description
+    "Add macher workspace info to the system prompt (if not already present)"
+    :parents (,macher--preset-system-transform)
+    :system (:function macher--system-ensure-placeholder-or-context-string))
+  "Preset spec to ensure the macher workspace context appears in the system prompt.
+
+If the system prompt already contains the
+`macher-context-string-placeholder' OR the
+`macher-context-string-marker-start' (i.e. if the context has been
+commiitted), this preset is a no-op.
+
+Otherwise, this preset appends the `macher-context-string-placeholder'
+to the end of the system prompt.
+
+This preset also pulls in the prompt transform to replace the
+placeholder in the system prompt at request-time.")
+
+(defconst macher-preset-system-commit
+  '(:description
+    "Commit the current macher context string to the system prompt"
+    :system (:function macher--system-replace-placeholder))
+  "Preset spec to commit the current macher workspace context in the system prompt.
+
+Replaces all instances of the `macher-context-string-placeholder' in the
+system prompt with the current result of the
+`macher-context-string-function'.
+
+This preset is a no-op unless the system prompt contains the
+`macher-context-string-placeholder'.
+
+This might be useful, for example, if you want to avoid cache churn.
+
+It probably only makes sense to apply this at the buffer-local level.")
+
+(defconst macher--preset-clear-tools
+  '(:description
+    "Remove all macher tools"
+    :tools
+    (:function
+     (lambda (tools)
+       (seq-remove
+        (lambda (tool) (equal (gptel-tool-category tool) macher-tool-category)) tools)))))
+
+(defun macher--tools-preset (pred &rest keys)
+  "Get a gptel preset spec which enables a selection of macher tools.
+
+KEYS is a baseline spec plist, as would be passed to
+`gptel-make-preset'.  It cannot include :tools or :use-tools.
+
+The baseline spec will be augmented with:
+
+- an appropriate :tools entry (which appends all matching tools to
+  variable `gptel-tools', unless they already appear there).
+
+- a :use-tools entry to ensure `gptel-use-tools' is non-nil.
+
+- `macher-preset-base' as a parent.
+
+When the preset is applied, the PRED receives each element of
+`macher-tools', and should return non-nil for tools that should be
+enabled.  Tools are then normalized using `macher-resolve-tool'.
+
+Any matching tools already present in the variable
+`gptel-tools' (according to their name/category) will be skipped."
+  (when (plist-get keys :tools)
+    (error "Cannot include :tools in a preset spec for `macher--tools-preset'"))
+  (when (plist-get keys :use-tools)
+    (error "Cannot include :use-tools in a preset spec for `macher--tools-preset'"))
+  (let* ((parents
+          (append (ensure-list (plist-get keys :parents)) (list macher--preset-setup-tools))))
+    (plist-put
+     (plist-put
+      (plist-put
+       keys
+       ;; Make sure tools are enabled, but preserve the existing value of `gptel-use-tools' if
+       ;; already non-nil (e.g. \\='force.
+       :use-tools '(:function (lambda (use-tools) (or use-tools t))))
+      ;; Add tools from `macher-tools' matching the predicate.
+      :tools `(:function ,(apply-partially #'macher--preset-function-add-tools pred)))
+     :parents parents)))
+
+(defun macher--action-from-region-or-input (input-prompt transform preset &optional input)
   "Get a macher action plist from user input or the selected region.
 
 First, gets user input from the selected region, or if no region is
@@ -95,8 +225,7 @@ The returned plist will contain the transformed :prompt, the
 that was passed to the transformer).
 
 This function is used by the default actions in the
-`macher-actions-alist', and provided as a convenience for defining
-custom actions with the same workflow."
+`macher-actions-alist'."
 
   ;; Prompt to save any unsaved buffers.
   (save-some-buffers nil (lambda () (and (buffer-file-name) (buffer-modified-p))))
@@ -116,6 +245,36 @@ custom actions with the same workflow."
          (transformed-prompt (funcall transform user-input is-selected)))
     `(:prompt ,transformed-prompt :preset ,preset :summary ,user-input)))
 
+(define-obsolete-function-alias
+  'macher-action-from-region-or-input
+  'macher--action-from-region-or-input
+  "0.5.0"
+  "Removed from public API.
+
+You can use `macher--action-from-region-or-input' if you need to, but
+behavior is subject to change in the future.")
+
+(defconst macher--workspace-postfix
+  (concat
+   "\n\n"
+   "WORKSPACE DEFINITION:\n"
+   "The \"workspace\" is a purely in-memory editing environment containing a snapshot of files from "
+   "the user's current project. When you use these tools:\n"
+   "- You are reading from and modifying this in-memory snapshot, NOT the actual files on disk\n"
+   "- Changes you make will NOT be saved directly to the filesystem\n"
+   "- Instead, all changes are tracked and will be presented to the user as a patch for review\n"
+   "- The user can then decide whether to apply your proposed changes to their actual files\n"
+   "- Any CLI commands or file-reading operations you suggest to the user will NOT see your workspace changes\n"
+   "- The contents of \"files\" in the workspace will be captured the first time you access them, so subsequent "
+   "filesystem changes by other processes will NOT be reflected in the workspace\n"
+   "- The workspace is cleared every time the user sends a request\n"
+   "- Between requests, the user may apply all, some, or none of your changes, and may make additional edits")
+  "Description of the workspace concept for tool descriptions.
+
+This text is appended to tool descriptions to clarify that workspace
+tools operate on an in-memory editing environment, not directly on the
+filesystem.")
+
 ;;; Customization
 
 (defgroup macher nil
@@ -123,22 +282,44 @@ custom actions with the same workflow."
   :group 'convenience
   :prefix "macher-")
 
+(defgroup macher-actions nil
+  "Customization for macher actions and action buffers."
+  :group 'macher
+  :prefix "macher-")
+
+(defgroup macher-workspace nil
+  "Customization for workspace detection and context generation."
+  :group 'macher
+  :prefix "macher-")
+
+(defgroup macher-processing nil
+  "Customization for processing completed requests and generating patches."
+  :group 'macher
+  :prefix "macher-")
+
+(defgroup macher-tools nil
+  "Customization for macher tools and presets."
+  :group 'macher
+  :prefix "macher-")
+
+;;;; Actions
+
 (defcustom macher-actions-alist
   `((implement
      .
-     ,(apply-partially #'macher-action-from-region-or-input
+     ,(apply-partially #'macher--action-from-region-or-input
                        "To implement: "
                        #'macher--implement-prompt
                        'macher))
     (revise
      .
-     ,(apply-partially #'macher-action-from-region-or-input
+     ,(apply-partially #'macher--action-from-region-or-input
                        "Revision instructions: "
                        #'macher--revise-prompt
                        'macher))
     (discuss
      .
-     ,(apply-partially #'macher-action-from-region-or-input
+     ,(apply-partially #'macher--action-from-region-or-input
                        "Discuss: "
                        #'macher--discuss-prompt
                        'macher)))
@@ -157,8 +338,11 @@ returns) a plist containing the following keys:
 - :prompt - the full prompt string to send to the LLM.
 
 - :preset - gptel preset to use for the request (optional, defaults to
-  ='macher').  This can be a symbol (one of the keys from
-  `macher--presets-alist') or a raw gptel preset plist.
+  ='macher').  This can be a symbol or a plain preset spec plist (like
+  the keys from `gptel-make-preset').  If it's a symbol, it will be
+  resolved first by checking the global gptel registry for a preset of
+  that name, or if not found, by checking for an entry with that name in
+  the `macher-presets-alist'.
 
 - :summary - a summarized version of the prompt (optional).  This won't
   affect the actual request content, but it will be included with the
@@ -174,13 +358,23 @@ where the action was initiated, so it can access buffer content,
 region-selection status, etc.  The function must be callable with no
 arguments, although additional (i.e. &rest) arguments passed to
 `macher-action' will be forwarded to it if provided - this allows, for
-example, input strings to be passed programmatically to actions based on
-`macher-action-from-region-or-input'."
+example, input strings to be passed programmatically to the default
+actions."
   :type
   '(alist
     :key-type symbol
-    :value-type (plist :key-type keyword :value-type (choice string symbol function)))
-  :group 'macher)
+    :value-type
+    (choice
+     (function :tag "Function that generates action plist")
+     (plist
+      :tag "Action plist"
+      :options
+      ((:prompt (string :tag "Full prompt string to send to the LLM"))
+       (:preset
+        (choice (symbol :tag "Preset symbol") (plist :tag "Preset spec plist"))
+        :tag "Preset to use (optional, defaults to 'macher)")
+       (:summary (string :tag "Summarized prompt (optional)"))))))
+  :group 'macher-actions)
 
 (defcustom macher-action-buffer-ui 'default
   "Specifies a base UI configuration to use for action buffers.
@@ -224,7 +418,7 @@ change."
     (const :tag "Default UI with gptel-mode and formatting" default)
     (const :tag "Org-mode UI with gptel-org" org)
     (const :tag "No setup - full manual control" nil))
-  :group 'macher)
+  :group 'macher-actions)
 
 (defcustom macher-action-buffer-setup-hook nil
   "Hook run when creating new macher action buffers.
@@ -245,7 +439,7 @@ customize (globally or buffer-locally) the
 `macher-before-action-functions' to make sure the buffer actually gets
 displayed."
   :type 'hook
-  :group 'macher)
+  :group 'macher-actions)
 
 (defcustom macher-action-dispatch-hook nil
   "Hook run when invoking a macher action.
@@ -258,7 +452,7 @@ the selected region, or add the current file to the gptel context.
 This runs prior to the `macher-before-action-functions', and potentially
 prior to the creation of the action buffer."
   :type 'hook
-  :group 'macher)
+  :group 'macher-actions)
 
 (defcustom macher-before-action-functions nil
   "Abnormal hook run before sending the request for a macher action.
@@ -282,7 +476,7 @@ the action buffer when you make a request.  If you set
 `macher-action-buffer-ui' to nil, you'll probably also want to add
 something to this hook which at least displays the action buffer."
   :type 'hook
-  :group 'macher)
+  :group 'macher-actions)
 
 (defcustom macher-after-action-functions nil
   "Abnormal hook run after a macher action's request completes.
@@ -300,34 +494,78 @@ case.
 
 This hook runs after the callback provided to `macher-action' (if any)."
   :type 'hook
-  :group 'macher)
+  :group 'macher-actions)
+
+;;;; Context
+
+(defcustom macher-context-string-placeholder "\n[macher_placeholder]\n"
+  "A placeholder in the system prompt for the macher context string.
+
+This gets inserted (if not already present) into the gptel system
+message when applying the \"@macher\", \"@macher-ro\", and
+\"@macher-system\" presets.  You can also use it in your own gptel
+directives if you want finer control over placement.
+
+At request time, as long as you've activated the \"@macher-base\"
+preset (or are using one of the other built-in presets), this will be
+replaced with the current result of the `macher-context-string-function'
+in your system prompt.
+
+Setting this to nil will disable request-time modification of the
+outgoing system prompt.  Note, though, that in that case
+\"@macher-system\" etc. will still insert the _current_ result of
+`macher-context-string-function' (if not already present) directly into
+the system prompt when applied.  If you want to disable macher's
+interaction with the system prompt entirely, you can set both this and
+`macher-context-string-function' to nil."
+  :type '(choice (string :tag "Placeholder string") (const :tag "Disabled" nil))
+  :group 'macher-workspace)
+
+(defcustom macher-context-string-marker-start "\n<current-project>\n"
+  "A marker for the start of the macher context string in the system prompt.
+
+You should avoid using this exact string elsewhere in your system
+prompt, otherwise the workspace context string might not get added to
+macher requests."
+  :type 'string
+  :group 'macher-workspace)
+
+(defcustom macher-context-string-marker-end "\n</current-project>\n"
+  "A marker for the end of the macher context string in the system prompt.
+
+For now this is purely cosmetic, but you should avoid using this exact
+string elsewhere in your system prompt, as it may be used for additional
+system transforms in the future."
+  :type 'string
+  :group 'macher-workspace)
 
 (defcustom macher-context-string-function #'macher--context-string
   "Function for generating workspace information strings during macher requests.
 
 This function will be called from the buffer where the request is being
-sent, and receives the same arguments as the standard
-`gptel-context-string-function'.  It can be synchronous (one argument,
-just the context list) or asynchronous (two args, a callback and the
-context list) - see that function's docstring for details.
+sent (or a preset is being applied).  It receives no arguments.  You can
+use `macher-workspace' to get the buffer's current workspace.
 
-The function should return (or invoke the async callback with) a
-workspace information string that will be added to the request content,
-in the same place the standard gptel context as indicated by
-`gptel-use-context'.  It can also return nil, in which case the request
-will not be modified.
+The function should return a workspace information string that can be
+included in the system prompt.
 
-The default function adds information about the current workspace (e.g.
-the project being edited) including file listings and context
-indicators."
+As long as `macher-preset-base' is applied, any instances of the
+`macher-context-string-placeholder' in the system prompt will be
+replaced with the result of this function.
+
+Set this to nil to disable workspace context injection.  Note that in
+that case, \"@macher-system\" etc. will still insert the
+`macher-context-string-placeholder' into the raw system prompt.  If you
+want to disable macher's interaction with the system prompt entirely,
+you can set both this and `macher-context-string-placeholder' to nil."
   :type '(function :tag "Workspace string function")
-  :group 'macher)
+  :group 'macher-workspace)
 
 (defcustom macher-context-string-max-files 50
   "Maximum number of files to include in the workspace context string.
 
-When generating the workspace context information, only up to this many
-files will be listed.
+When using the default `macher-context-string-function', only up to this
+many files will be listed.
 
 Files from the gptel context are always included in the workspace
 context (even if their count exceeds this limit).  Additional workspace
@@ -343,12 +581,14 @@ Note: This value is used within the default `macher--context-string'
 function.  If you customize `macher-context-string-function' to use a
 different function, this value will have no effect."
   :type '(choice (natnum :tag "Maximum number of files") (const :tag "No limit" nil))
-  :group 'macher)
+  :group 'macher-workspace)
+
+;;;; Result processing
 
 (defcustom macher-process-request-function #'macher--process-request
   "Function to take action based on the current state of a macher request.
 
-This function is called when requests involving macher tools are
+This function is called when requests where macher tools were used are
 completed (with success or error), or manually via
 `macher-process-request' and variants.
 
@@ -374,14 +614,14 @@ The function is called with three arguments:
 - FSM: the `gptel-fsm' (state machine) for the request.
 
 This function is only called for requests that actually create a
-`macher-context', i.e. requests with macher tools of some sort.  The
-='macher-notools' preset will not cause the hook to be called.
+`macher-context', i.e. requests where macher tools are present and used.
+The ='macher-system' preset will not cause the hook to be called.
 
 The value of this variable will be stored at request-time and used
 throughout a particular request.  This enables custom handling on a
 per-request basis."
   :type 'function
-  :group 'macher)
+  :group 'macher-processing)
 
 (defcustom macher-patch-prepare-functions
   '(macher--patch-prepare-diff macher--patch-prepare-metadata)
@@ -414,7 +654,7 @@ This hook is run within the default `macher-process-request-function'.
 If you modify that function for a particular request, this hook won't be
 run."
   :type 'hook
-  :group 'macher)
+  :group 'macher-processing)
 
 (defcustom macher-patch-buffer-ui 'diff
   "Specifies a base UI configuration to use for patch buffers.
@@ -442,7 +682,7 @@ The choices are:
   '(choice
     (const :tag "Default diff UI with diff-mode" diff)
     (const :tag "No setup - full manual control" nil))
-  :group 'macher)
+  :group 'macher-processing)
 
 (defcustom macher-patch-buffer-setup-hook nil
   "Hook run when creating new macher patch buffers.
@@ -460,7 +700,7 @@ If you want full control over the patch buffer UI, set
 `macher-patch-buffer-ui' to nil and use this hook to perform all
 setup from scratch."
   :type 'hook
-  :group 'macher)
+  :group 'macher-processing)
 
 (defcustom macher-patch-ready-hook nil
   "Hook called after the patch buffer has been prepared.
@@ -486,43 +726,328 @@ This hook is run within the default `macher-process-request-function'.
 If you modify that function for a particular request, this hook won't be
 run."
   :type 'hook
-  :group 'macher)
+  :group 'macher-processing)
 
-(defcustom macher-read-tools-function #'macher--read-tools
-  "Function for generating read-only tools for macher requests.
+;;;; Tools, Presets, and Tool Settings
 
-This function is called with two arguments:
+(defcustom macher-tool-category "macher"
+  "The category to use when installing macher tools.
 
-- CONTEXT: the macher-context object for the current request.
+Tools in this category receive special handling to enable them to
+interact with the current request's `macher-context'.  You should avoid
+adding tools to this category directly; instead, customize
+`macher-tools' as needed."
+  :type 'string
+  :group 'macher-tools)
 
-- MAKE-TOOL-FUNCTION: function that takes the same arguments as
-  `gptel-make-tool', but must be used instead of `gptel-make-tool' to
-  create tools.
+(defcustom macher-tools
+  `((:name
+     "read_file_in_workspace"
+     :category "read"
+     :function macher--tool-read-file
+     :description
+     ,(concat
+       "Read file contents from your workspace.\n"
+       "\n"
+       "Returns the file contents as a string. Supports optional line-based slicing "
+       "(offset/limit) and line numbering.\n"
+       "\n"
+       "Returns file contents on success. Fails if the file is not found in the workspace "
+       "or if the content exceeds the maximum read length."
+       macher--workspace-postfix)
+     :confirm nil
+     :include nil
+     :args
+     ((:name "path" :type string :description "Path to the file, relative to workspace root")
+      (:name
+       "offset"
+       :type number
+       :optional t
+       :description
+       ,(concat
+         "Line number to start reading from (1-based). For negative values, starts at that many "
+         "lines before the end of the file. ONLY use for targeted re-reads - read entire file first!"))
+      (:name
+       "limit"
+       :type number
+       :optional t
+       :description
+       ,(concat
+         "Number of lines to read from the start position. For negative values, the actual "
+         "limit is computed as (total_lines + limit). For example, with a 100-line file: "
+         "limit=10 reads 10 lines, limit=-10 reads 90 lines (100 + (-10)). "
+         "ONLY use for targeted re-reads - read entire file first!"))
+      (:name
+       "show_line_numbers"
+       :type boolean
+       :optional t
+       :description
+       ,(concat
+         "Include line numbers in output (cat -n style: each line prefixed with right-aligned "
+         "line number and a tab character)"))))
 
-The function should return a list of tools that provide read-only access
-to the workspace.  Only tools created via the MAKE-TOOL-FUNCTION may be
-returned - these will be scoped to the current request, and will not be
-added to the global gptel registry."
-  :type 'function
-  :group 'macher)
+    (:name
+     "list_directory_in_workspace"
+     :category "read"
+     :function macher--tool-list-directory
+     :description
+     ,(concat
+       "List directory contents, reflecting current workspace state including your changes. "
+       "Shows files (file:), directories (dir:), and symlinks (link:) with optional file sizes and "
+       "recursive traversal.\n"
+       "\n"
+       "Returns formatted directory listing on success. Fails if the directory is not found in "
+       "the workspace."
+       macher--workspace-postfix)
+     :confirm nil
+     :include nil
+     :args
+     ((:name "path" :type string :description "Path to the directory, relative to workspace root")
+      (:name
+       "recursive"
+       :type boolean
+       :optional t
+       :description "If true, recursively list subdirectories")
+      (:name
+       "sizes"
+       :type boolean
+       :optional t
+       :description "If true, include file sizes in the output")))
 
-(defcustom macher-edit-tools-function #'macher--edit-tools
-  "Function for generating file editing tools for macher requests.
+    (:name
+     "search_in_workspace"
+     :category "read"
+     :function macher--tool-search
+     :description
+     ,(concat
+       "Search for regex patterns across workspace files. Searches reflect your pending changes.\n"
+       "\n"
+       "Two modes:\n"
+       "- 'files' (default): file paths + match counts\n"
+       "- 'content': matching lines with optional context (lines_before/after)\n"
+       "\n"
+       "Returns formatted search results on success. Fails if pattern is empty or if parameters "
+       "are invalid."
+       macher--workspace-postfix)
+     :confirm nil
+     :include nil
+     :args
+     ((:name
+       "pattern"
+       :type string
+       :description "Regular expression pattern to search for (required)")
+      (:name
+       "path"
+       :type string
+       :optional t
+       :description "Directory or file to search, relative to workspace root (defaults to workspace root)")
+      (:name
+       "file_regexp"
+       :type string
+       :optional t
+       :description
+       ,(concat
+         "Filter files by regular expression matched against file path relative to search path. "
+         "Examples: '\\.py$' for Python files, 'src/.*\\.js$' for JS files in src/, "
+         "'test.*\\.py$' for test files"))
+      (:name
+       "mode"
+       :type string
+       :optional t
+       :description
+       ,(concat
+         "Output mode: ='files' (default, shows paths + counts) or "
+         "='content' (shows grep-style matching lines)"))
+      (:name
+       "case_insensitive"
+       :type boolean
+       :optional t
+       :description "If true, perform case-insensitive search (default: false)")
+      (:name
+       "lines_after"
+       :type number
+       :optional t
+       :description "Number of lines to show after each match (content mode only). Like `grep -A`.")
+      (:name
+       "lines_before"
+       :type number
+       :optional t
+       :description "Number of lines to show before each match (content mode only). Like `grep -B`.")
+      (:name
+       "show_line_numbers"
+       :type boolean
+       :optional t
+       :description "Include line numbers in output (content mode only). Like `grep -n`.")
+      (:name
+       "head_limit"
+       :type number
+       :optional t
+       :description "Limit output to first N lines (equivalent to piping through `head -N`)")))
 
-This function is called with two arguments:
+    (:name
+     "edit_file_in_workspace"
+     :function macher--tool-edit-file
+     :description
+     ,(concat
+       "Replace exact text in a file in your workspace. old_text must match precisely (whitespace, newlines, indentation). "
+       "Use actual file content only - NO line numbers.\n"
+       "\n"
+       "If replace_all=false and multiple matches exist: ERROR. Add more context to old_text to make "
+       "the match unique.\n"
+       "\n"
+       "Returns null on success. Fails if the file is not found, if the text to replace is not found, "
+       "or if multiple matches exist when replace_all is false."
+       macher--workspace-postfix)
+     :confirm nil
+     :include nil
+     :args
+     ((:name "path" :type string :description "Path to the file, relative to workspace root")
+      (:name
+       "old_text"
+       :type string
+       :description
+       ,(concat
+         "Exact text to find and replace. Must match precisely including whitespace and "
+         "newlines. Do NOT include line numbers."))
+      (:name "new_text" :type string :description "Text to replace the old_text with")
+      (:name
+       "replace_all"
+       :type boolean
+       :optional t
+       :description "If true, replace all occurrences. If false (default), error if multiple matches exist")))
 
-- CONTEXT: the `macher-context' object for the current request.
+    (:name
+     "multi_edit_file_in_workspace"
+     :function macher--tool-multi-edit-file
+     :description
+     ,(concat
+       "Apply multiple replacements to one file in your workspace sequentially. All edits use exact text matching "
+       "(whitespace, newlines, indentation). Use actual content - NO line numbers.\n"
+       "\n"
+       "Edits apply in array order. If ANY edit fails, ALL changes are rolled back.\n"
+       "\n"
+       "Returns null on success. Fails if the file is not found or if any individual edit fails "
+       "(text not found, multiple matches without replace_all, etc.)."
+       macher--workspace-postfix)
+     :confirm nil
+     :include nil
+     :args
+     ((:name "path" :type string :description "Path to the file, relative to workspace root")
+      (:name
+       "edits"
+       :type array
+       :description "Array of edit operations to apply in sequence"
+       :items
+       (:type
+        object
+        :properties
+        (:old_text
+         (:type
+          string
+          :description
+          ,(concat
+            "Exact text to find and replace. Must match precisely including whitespace "
+            "and newlines. Do NOT include line numbers."))
+         :new_text (:type string :description "Text to replace the old_text with")
+         :replace_all
+         (:type
+          boolean
+          :description "If true, replace all occurrences. If false (default), error if multiple matches exist"))
+        :required ["old_text" "new_text"]))))
 
-- MAKE-TOOL-FUNCTION: function that takes the same arguments as
-  `gptel-make-tool', but must be used instead of `gptel-make-tool' to
-  create tools.
+    (:name
+     "write_file_in_workspace"
+     :function macher--tool-write-file
+     :description
+     ,(concat
+       "Create new file or completely replace existing file content in your workspace.\n"
+       "\n"
+       "WARNING: Overwrites ALL existing content. Use edit_file_in_workspace for partial changes.\n"
+       "\n"
+       "Returns null on success. Fails if the path is invalid or outside the workspace."
+       macher--workspace-postfix)
+     :confirm nil
+     :include nil
+     :args
+     ((:name "path" :type string :description "Path to the file, relative to workspace root")
+      (:name
+       "content"
+       :type string
+       :description "Complete new content that will replace the entire file")))
 
-The function should return a list of tools that provide read/write access
-to the workspace.  Only tools created via the MAKE-TOOL-FUNCTION may be
-returned - these will be scoped to the current request, and will not be
-added to the global gptel registry."
-  :type 'function
-  :group 'macher)
+    (:name
+     "move_file_in_workspace"
+     :function macher--tool-move-file
+     :description
+     ,(concat
+       "Move or rename a file in your workspace. Can change both location and name in one operation.\n"
+       "\n"
+       "Fails if destination already exists.\n"
+       "\n"
+       "Returns null on success."
+       macher--workspace-postfix)
+     :confirm nil
+     :include nil
+     :args
+     ((:name
+       "source_path"
+       :type string
+       :description "Current path of the file to move, relative to workspace root")
+      (:name
+       "destination_path"
+       :type string
+       :description "New path for the file, relative to workspace root")))
+
+    (:name
+     "delete_file_in_workspace"
+     :function macher--tool-delete-file
+     :description
+     ,(concat
+       "Delete a file in your workspace.\n"
+       "\n"
+       "Fails if file doesn't exist.\n"
+       "\n"
+       "Returns null on success."
+       macher--workspace-postfix)
+     :confirm nil
+     :include nil
+     :args
+     ((:name
+       "path"
+       :type string
+       :description "Path to the file to delete, relative to workspace root"))))
+  "List of macher tool definitions.
+
+Entries are plists of keyword arguments for `gptel-make-tool', except
+that:
+
+- FUNCTION (in both the sync and async cases) takes an additional first
+  argument, the `macher-context' that the tool is interacting with.
+
+- CATEGORY is ignored when creating the tool (all tools will live in the
+  `macher-tool-category'), but can be used for internal organization -
+  currently, the \"@macher-ro\" preset uses the value \"read\" to select
+  tools, though the exact behavior here is subject to change.
+
+These tools will be installed to gptel's global tool registry (but not
+to the global variable `gptel-tools') when calling `macher-install'.
+
+When using the \"@macher\" and \"@macher-ro\" presets, tool names will
+be looked up in the global gptel registry and used if they exist;
+otherwise, anonymous tools will be created using these definitions."
+  :group 'macher
+  :type
+  '(repeat
+    (plist
+     :options
+     ((:name string)
+      (:function function)
+      (:description string)
+      (:args (vector plist))
+      (:category string)
+      (:async boolean)
+      (:confirm (choice (const nil) (const t) (function)))
+      (:include boolean)))))
 
 (defcustom macher-match-max-columns 300
   "Maximum length in characters for individual lines in search matches.
@@ -533,7 +1058,56 @@ length will be replaced with an omission message, similar to ripgrep's
 
 Set to nil to disable the limit entirely."
   :type '(choice (natnum :tag "Maximum number of characters") (const :tag "No limit" nil))
-  :group 'macher)
+  :group 'macher-tools)
+
+(defcustom macher-presets-alist
+  `(
+    ;; Enable all macher tools.
+    (macher
+     .
+     ,(macher--tools-preset
+       ;; Include all macher tools.
+       (lambda (_) t)
+       :description "Send macher workspace context + tools to read files and propose edits"
+       :parents (list macher-preset-system)))
+    ;; Enable read-only macher tools, and disable other macher tools.
+    (macher-ro
+     .
+     ,(macher--tools-preset
+       ;; Only include macher tools categorized as read tools.
+       (lambda (tool-def) (equal (plist-get tool-def :category) "read"))
+       :description "Send macher workspace context + tools to read files"
+       ;; Clear other macher tools before applying - force read-only.
+       :parents (list macher-preset-system macher--preset-clear-tools)))
+    (macher-tools
+     .
+     ,(macher--tools-preset
+       ;; Include all macher tools.
+       (lambda (_) t)
+       :description "Enable macher tools only"))
+    ;; Add dynamic contextual info about the current workspace to the system prompt.
+    (macher-system . ,macher-preset-system)
+    ;; Commit current system prompt with contextual info (i.e. make it non-dynamic) - may be useful
+    ;; to avoid cache thrashing.
+    (macher-system-commit . ,macher-preset-system-commit)
+    ;; Inject context into macher tools.
+    (macher-base . ,macher-preset-base))
+  "Alist of definitions for macher presets.
+
+Entries have the form (NAME . KEYS).  NAME is the name to use when
+installing presets globally with `macher-install'.  KEYS are the keys to
+pass to `gptel-make-preset'.
+
+This list will also be used to resolve preset symbols when using
+`macher-action', in case a symbol isn't found in the global gptel
+registry.
+
+Otherwise there's nothing special about this list - you can also use
+macher tools in your custom presets, etc."
+  :type '(alist :key-type symbol :value-type plist)
+  :group 'macher-tools)
+
+;;;; Workspace selection and configuration
 
 (defcustom macher-workspace-functions '(macher--project-workspace macher--file-workspace)
   "Functions to determine the workspace for the current buffer.
@@ -561,7 +1135,7 @@ Custom functions should return a cons cell (TYPE . ID) where:
   but for custom workspace types, it can be any string as long as you
   can use it to resolve a real root path)"
   :type 'hook
-  :group 'macher)
+  :group 'macher-workspace)
 
 (defcustom macher-workspace-types-alist
   '((project
@@ -591,7 +1165,7 @@ cdr of a workspace cons cell whose type matches the associated alist key.
 To add a new workspace type, add an entry to this alist and update
 `macher-workspace-functions' to detect it."
   :type '(alist :key-type symbol :value-type (plist :key-type keyword :value-type function))
-  :group 'macher)
+  :group 'macher-workspace)
 
 ;;; Constants
 
@@ -813,114 +1387,37 @@ Returns a list of absolute file paths."
                (expand-file-name f root-path)))
            files))))))
 
-(defun macher--context-string (contexts)
+(defun macher--context-string ()
   "Generate workspace information string for the current workspace.
-
-CONTEXTS is the list of contexts as passed to the standard gptel context
-string function, potentially nil.
 
 Returns a workspace information string to be added to the request."
   (let* ((workspace (macher-workspace))
          (workspace-name (macher--workspace-name workspace))
-         (workspace-files (macher--workspace-files workspace))
-         ;; Extract normalized file paths from contexts for comparison.
-         (context-file-paths
-          (let (file-paths)
-            (dolist (context contexts)
-              (let ((source (car context)))
-                (when (stringp source)
-                  (push (file-truename source) file-paths))))
-            file-paths)))
+         (workspace-files (macher--workspace-files workspace)))
 
-    ;; Generate workspace description with context indicators.
+    ;; Generate workspace description.
     (when workspace-files
-      ;; Separate files into two categories based on whether they're in the context.
-      ;; Files from gptel context are always listed first and all included.
-      (let ((files-in-context '())
-            (files-available-for-editing '()))
+      (let ((files-for-listing workspace-files))
 
-        ;; Single pass: collect files in original order, separating context vs non-context files.
-        (dolist (file-path workspace-files)
-          (let* ((rel-path (file-relative-name file-path (macher--workspace-root workspace)))
-                 (normalized-file-path
-                  (condition-case nil
-                      (file-truename file-path)
-                    (error
-                     file-path)))
-                 (in-context-p (member normalized-file-path context-file-paths)))
-            (if in-context-p
-                (push rel-path files-in-context)
-              (push rel-path files-available-for-editing))))
-
-        ;; Reverse to maintain original order.
-        (setq files-in-context (reverse files-in-context))
-        (setq files-available-for-editing (reverse files-available-for-editing))
-
-        ;; Trim the available files list if there's a limit.
+        ;; Trim the files list if there's a limit.
         (when macher-context-string-max-files
-          (let ((remaining-limit
-                 (max 0 (- macher-context-string-max-files (length files-in-context)))))
-            (when (> (length files-available-for-editing) remaining-limit)
-              (setq files-available-for-editing
-                    (seq-take files-available-for-editing remaining-limit)))))
+          (when (> (length files-for-listing) macher-context-string-max-files)
+            (setq files-for-listing (seq-take files-for-listing macher-context-string-max-files))))
 
         (with-temp-buffer
-          (insert "\n")
-          (insert "=======================================================\n")
-          (insert "WORKSPACE CONTEXT:\n")
-          (insert "=======================================================\n")
-          (insert "\n")
           (insert
-           "!!! IMPORTANT INFORMATION, READ AND UNDERSTAND THIS SECTION BEFORE USING TOOLS !!!\n")
-          (insert "\n")
-          (insert "The workspace is an in-memory editing environment containing files from ")
-          (insert (format "the user's current project, which is named `%s`.\n" workspace-name))
-          (insert "\n")
-          (insert "ONLY YOU, the LLM, have access to the files in the workspace. You DO NOT ")
-          (insert "need to check for external changes.\n")
-          (insert "\n")
-          (insert "Edit freely using workspace tools. ")
-          (insert "No permissions required - this is a safe virtual editing space.\n")
-
-          (when files-in-context
-            (insert "\n")
-            (insert "!!! CRITICAL RULE: DO NOT RE-READ OR SEARCH THESE FILES !!!\n")
-            (insert
-             "Some files' contents have already been provided to you above in the REQUEST CONTEXT.\n")
-            (insert "You MUST NOT re-read or search the contents of these files.\n")
-            (insert "This is wasteful and unnecessary!\n")
-
-            (insert "\n")
-            (insert
-             "== Files already provided above (DO NOT use read or search tools on these): ==\n")
-            (dolist (rel-path files-in-context)
-              (insert (format "    %s\n" rel-path))))
-
-          (when files-available-for-editing
-            (insert "\n")
-            (insert
-             (format "%s available for editing:\n"
-                     (if files-in-context
-                         "Other files"
-                       "Files")))
-            (dolist (rel-path files-available-for-editing)
-              (insert (format "    %s\n" rel-path)))
-            ;; Add a note if files were truncated due to the limit.
-            (when macher-context-string-max-files
-              (let* ((total-files (length workspace-files))
-                     (listed-files
-                      (+ (length files-in-context) (length files-available-for-editing)))
-                     (truncated-files (- total-files listed-files)))
-                (when (> truncated-files 0)
-                  (insert (format "\n    ... and %d more files\n" truncated-files)))))
-            (insert "\n"))
-
-          (insert "\n")
-          (insert "=======================================================\n")
-          (insert "END WORKSPACE CONTEXT:\n")
-          (insert "=======================================================\n")
-          (insert "\n")
-
+           (format "The user is currently working on a project named: \"%s\"\n" workspace-name))
+          (insert (format "Files in the \"%s\" project:" workspace-name))
+          (dolist (file-path files-for-listing)
+            (let ((rel-path (file-relative-name file-path (macher--workspace-root workspace))))
+              (insert (format "\n    %s" rel-path))))
+          ;; Add a note if files were truncated due to the limit.
+          (when macher-context-string-max-files
+            (let* ((total-files (length workspace-files))
+                   (listed-files (length files-for-listing))
+                   (truncated-files (- total-files listed-files)))
+              (when (> truncated-files 0)
+                (insert (format "\n    ... and %d more files" truncated-files)))))
           (buffer-string))))))
 
 (defun macher--workspace-hash (workspace &optional length)
@@ -1161,13 +1658,11 @@ FSM is the `gptel-fsm' (state machine) for the request being processed."
 
 FSM is a `gptel-fsm' (state machine) for a request.
 
-Returns the `macher-context' object if the FSM has macher tools, nil otherwise."
+Returns the request's `macher-context' object if macher tools have been
+invoked during the FSM lifecycle, otherwise returns nil."
   (when fsm
-    (let* ((info (gptel-fsm-info fsm))
-           (tools (plist-get info :tools)))
-      ;; Look through the FSM's tools for one with a macher context.
-      (when tools
-        (cl-some #'macher--tool-context tools)))))
+    (when-let* ((info (gptel-fsm-info fsm)))
+      (plist-get info :macher--context))))
 
 (defun macher--build-patch (context fsm)
   "Run the `macher-patch-prepare-functions' and the `macher-patch-ready-hook'.
@@ -1310,32 +1805,6 @@ Ensures paths are consistently handled throughout the codebase."
   (if (file-name-absolute-p path)
       (expand-file-name path)
     (error "PATH must be an absolute file path")))
-
-(defun macher--load-gptel-context-files (contexts macher-context)
-  "Prepare editing buffers for any workspace files that are in the gptel context.
-
-CONTEXTS is the list of gptel contexts as passed to the context string
-function.  MACHER-CONTEXT is a `macher-context' struct.  This function
-creates implementation buffers for any files that are within both the
-gptel context and the current workspace.  This ensures that those
-workspace file contents are frozen at request time, even if the files
-are modified on disk before editing operations occur - that is, it
-ensures that the LLM can trust that file contents provided to it in the
-context won't change before it can edit them."
-  (when-let* ((workspace (macher-context-workspace macher-context))
-              (workspace-files (macher--workspace-files workspace)))
-    ;; Pre-compute truenames for workspace files for efficient comparison.
-    (let ((workspace-files-truenames (mapcar #'file-truename workspace-files)))
-      (dolist (context-entry contexts)
-        (let ((source (car context-entry)))
-          ;; Only process file paths (strings), not buffers.
-          (when (stringp source)
-            (let* ((full-path (expand-file-name source))
-                   (full-path-truename (file-truename full-path))
-                   (in-workspace-p (member full-path-truename workspace-files-truenames)))
-              ;; If this context file is in the workspace, load implementation contents for it.
-              (when in-workspace-p
-                (macher-context--contents-for-file full-path macher-context)))))))))
 
 (defun macher--resolve-workspace-path (workspace rel-path)
   "Get the full path for REL-PATH within the WORKSPACE.
@@ -2590,302 +3059,6 @@ context including any pending changes, creations, or deletions."
    :show-line-numbers show-line-numbers
    :head-limit head-limit))
 
-(defun macher--read-tools (context make-tool-function)
-  "Generate read-only tools for workspace operations with CONTEXT.
-
-CONTEXT is a `macher-context' struct with slots for workspace info.
-MAKE-TOOL-FUNCTION is a function that takes the same arguments as
-`gptel-make-tool' but must be used instead of `gptel-make-tool' to create tools.
-
-Returns a list of read-only tools that allow the LLM to inspect files
-in the workspace.
-
-Tools are created using MAKE-TOOL-FUNCTION so they can be properly removed from
-the global gptel registry when the request completes."
-  (list
-   (funcall
-    make-tool-function
-    :name "read_file_in_workspace"
-    :function (apply-partially #'macher--tool-read-file context)
-    :description
-    (concat
-     "Read file contents in the workspace.\n"
-     "\n"
-     "USAGE RULES:\n"
-     "1. NEVER re-read files that were already provided in the REQUEST CONTEXT\n"
-     "2. For files NOT in the REQUEST CONTEXT: try reading the ENTIRE file first "
-     "(no offset/limit) to understand its structure\n"
-     "\n"
-     "!!! CRITICAL: You MUST NOT use this tool to read files whose contents were already "
-     "provided to you in the REQUEST CONTEXT, except to resolve confusion or verify edits.\n"
-     "\n"
-     "Returns the file contents as a string.")
-    :confirm nil
-    :include nil
-    :args
-    `((:name "path" :type string :description "Path to the file, relative to workspace root")
-      (:name
-       "offset"
-       :type number
-       :optional t
-       :description
-       ,(concat
-         "Line number to start reading from (1-based). For negative values, starts at that many "
-         "lines before the end of the file. ONLY use for targeted re-reads - read entire file first!"))
-      (:name
-       "limit"
-       :type number
-       :optional t
-       :description
-       ,(concat
-         "Number of lines to read from the start position. For negative values, the actual "
-         "limit is computed as (total_lines + limit). For example, with a 100-line file: "
-         "limit=10 reads 10 lines, limit=-10 reads 90 lines (100 + (-10)). "
-         "ONLY use for targeted re-reads - read entire file first!"))
-      (:name
-       "show_line_numbers"
-       :type boolean
-       :optional t
-       :description
-       ,(concat
-         "Include line numbers in output (cat -n style: each line prefixed with right-aligned "
-         "line number and a tab character)"))))
-
-   (funcall make-tool-function
-            :name "list_directory_in_workspace"
-            :function (apply-partially #'macher--tool-list-directory context)
-            :description
-            (concat
-             "List directory contents in the workspace. "
-             "Shows files and directories with clear prefixes (file: or dir:). "
-             "Can optionally recurse into subdirectories and show file sizes. "
-             "Takes the current workspace state into account, including pending changes.\n\n"
-             "NOTE: The full workspace file listing is usually already provided in the "
-             "WORKSPACE CONTEXT. Only use this tool if you need specific directory "
-             "details or file sizes.")
-            :confirm nil
-            :include nil
-            :args
-            `((:name
-               "path"
-               :type string
-               :description "Path to the directory, relative to workspace root")
-              (:name
-               "recursive"
-               :type boolean
-               :optional t
-               :description "If true, recursively list subdirectories")
-              (:name
-               "sizes"
-               :type boolean
-               :optional t
-               :description "If true, include file sizes in the output")))
-
-   (funcall
-    make-tool-function
-    :name "search_in_workspace"
-    :function (apply-partially #'macher--tool-search context)
-    :description
-    (concat
-     "Search for patterns within the workspace using grep or something like it.\n"
-     "\n"
-     "Supports two output modes:\n"
-     "- ='files' (default): Shows file paths with match counts\n"
-     "- ='content': Shows matching lines with optional context\n"
-     "\n"
-     "!!! CRITICAL: You MUST NOT use this tool to search files whose contents were "
-     "already provided to you in the REQUEST CONTEXT. You already have their contents!")
-    :confirm nil
-    :include nil
-    :args
-    `((:name
-       "pattern"
-       :type string
-       :description "Regular expression pattern to search for (required)")
-      (:name
-       "path"
-       :type string
-       :optional t
-       :description "Directory or file to search, relative to workspace root (defaults to workspace root)")
-      (:name
-       "file_regexp"
-       :type string
-       :optional t
-       :description
-       ,(concat
-         "Filter files by regular expression matched against file path relative to search path. "
-         "Examples: '\\.py$' for Python files, 'src/.*\\.js$' for JS files in src/, "
-         "'test.*\\.py$' for test files"))
-      (:name
-       "mode"
-       :type string
-       :optional t
-       :description
-       ,(concat
-         "Output mode: ='files' (default, shows paths + counts) or "
-         "='content' (shows grep-style matching lines)"))
-      (:name
-       "case_insensitive"
-       :type boolean
-       :optional t
-       :description "If true, perform case-insensitive search (default: false)")
-      (:name
-       "lines_after"
-       :type number
-       :optional t
-       :description "Number of lines to show after each match (content mode only). Like `grep -A`.")
-      (:name
-       "lines_before"
-       :type number
-       :optional t
-       :description "Number of lines to show before each match (content mode only). Like `grep -B`.")
-      (:name
-       "show_line_numbers"
-       :type boolean
-       :optional t
-       :description "Include line numbers in output (content mode only). Like `grep -n`.")
-      (:name
-       "head_limit"
-       :type number
-       :optional t
-       :description "Limit output to first N lines (equivalent to piping through `head -N`)")))))
-
-(defun macher--edit-tools (context make-tool-function)
-  "Generate file editing tools for workspace operations with CONTEXT.
-
-CONTEXT is a `macher-context' struct with slots for workspace info.
-MAKE-TOOL-FUNCTION is a function that takes the same arguments as
-`gptel-make-tool' but must be used instead of `gptel-make-tool' to create tools.
-
-Returns a list of tools that allow the LLM to edit files in the workspace.
-
-Tools are created using MAKE-TOOL-FUNCTION so they can be properly removed from
-the global gptel registry when the request completes."
-  (list
-   (funcall
-    make-tool-function
-    :name "edit_file_in_workspace"
-    :function (apply-partially #'macher--tool-edit-file context)
-    :description
-    (concat
-     "Make exact string replacements in a text file. "
-     "The old_text must match exactly including all whitespace, newlines, and indentation. "
-     "Do NOT include line numbers in old_text or new_text - use only the actual file content. "
-     "If replace_all is false and multiple matches exist, the operation fails - "
-     "provide more specific context in old_text to make the match unique. "
-     "Returns null on success.")
-    :confirm nil
-    :include nil
-    :args
-    `((:name "path" :type string :description "Path to the file, relative to workspace root")
-      (:name
-       "old_text"
-       :type string
-       :description
-       ,(concat
-         "Exact text to find and replace. Must match precisely including whitespace and "
-         "newlines. Do NOT include line numbers."))
-      (:name "new_text" :type string :description "Text to replace the old_text with")
-      (:name
-       "replace_all"
-       :type boolean
-       :optional t
-       :description "If true, replace all occurrences. If false (default), error if multiple matches exist")))
-
-   (funcall
-    make-tool-function
-    :name "multi_edit_file_in_workspace"
-    :function (apply-partially #'macher--tool-multi-edit-file context)
-    :description
-    (concat
-     "Make multiple exact string replacements in a single file. "
-     "Edits are applied sequentially in array order to the same file. "
-     "Each edit requires exact whitespace matching. Do NOT include line numbers in old_text or new_text. "
-     "If any edit fails, no changes are made. Returns null on success.")
-    :confirm nil
-    :include nil
-    :args
-    `((:name "path" :type string :description "Path to the file, relative to workspace root")
-      (:name
-       "edits"
-       :type array
-       :description "Array of edit operations to apply in sequence"
-       :items
-       (:type
-        object
-        :properties
-        (:old_text
-         (:type
-          string
-          :description
-          ,(concat
-            "Exact text to find and replace. Must match precisely including whitespace "
-            "and newlines. Do NOT include line numbers."))
-         :new_text (:type string :description "Text to replace the old_text with")
-         :replace_all
-         (:type
-          boolean
-          :description "If true, replace all occurrences. If false (default), error if multiple matches exist"))
-        :required ["old_text" "new_text"]))))
-
-   (funcall make-tool-function
-            :name "write_file_in_workspace"
-            :function (apply-partially #'macher--tool-write-file context)
-            :description
-            (concat
-             "Create a new file or completely overwrite an existing file. "
-             "WARNING: This replaces ALL existing content without warning. "
-             "Use edit_file_in_workspace for partial changes. "
-             "Returns null on success.")
-            :confirm nil
-            :include nil
-            :args
-            '((:name
-               "path"
-               :type string
-               :description "Path to the file, relative to workspace root")
-              (:name
-               "content"
-               :type string
-               :description "Complete new content that will replace the entire file")))
-
-   (funcall make-tool-function
-            :name "move_file_in_workspace"
-            :function (apply-partially #'macher--tool-move-file context)
-            :description
-            (concat
-             "Move or rename files within the workspace. "
-             "Can move files between directories and rename them in a single operation. "
-             "Fails if the destination already exists. "
-             "Returns null on success.")
-            :confirm nil
-            :include nil
-            :args
-            '((:name
-               "source_path"
-               :type string
-               :description "Current path of the file to move, relative to workspace root")
-              (:name
-               "destination_path"
-               :type string
-               :description "New path for the file, relative to workspace root")))
-
-   (funcall make-tool-function
-            :name "delete_file_in_workspace"
-            :function (apply-partially #'macher--tool-delete-file context)
-            :description
-            (concat
-             "Delete a file from the workspace. "
-             "Fails if the file does not exist. "
-             "Returns null on success.")
-            :confirm nil
-            :include nil
-            :args
-            '((:name
-               "path"
-               :type string
-               :description "Path to the file to delete, relative to workspace root")))))
-
 (defun macher--edit-string (content old-string new-string &optional replace-all)
   "In CONTENT string, replace OLD-STRING with NEW-STRING.
 
@@ -3230,337 +3403,440 @@ CALLBACK must be called when preparation is complete."
 
     (funcall callback)))
 
-;;; Tool Management
-;;
-;; We use a potentially-too-clever overload of the :category field on gptel tool objects to allow
-;; the `macher-context' to be retrieved from existing tool definitions.  Normally the :category is
-;; expected to be a string, but since we're not adding tools to the global registry, it should
-;; hopefully never be accessed elsewhere.
-;;
-;; This enables sharing of the `macher-context' across all tools for a request, even when they're
-;; added across multiple presets.  It also allows for sensible merging of tools with request forms
-;; like "@macher-ro @macher my query".
-
-(defun macher--tool-context (tool)
-  "Get the `macher-context' for a TOOL created with `macher--make-tool'.
-Returns nil if the tool was not created with `macher--make-tool'."
-  (let ((category (gptel-tool-category tool)))
-    (when (macher-context-p category)
-      category)))
-
-(defun macher--make-tool (context &rest slots)
-  "Make an ephemeral tool associated with a macher CONTEXT.
-SLOTS supports the same keyword arguments as `gptel-make-tool' except
-for :category.
-
-The context can be retrieved later using `macher--tool-context'."
-
-  ;; Extract the original function from slots.
-  (let ((slots (plist-put (copy-sequence slots) :category context)))
-    ;; Use the internal constructor to avoid interacting with the global registry at all.
-    (apply #'gptel--make-tool slots)))
-
-(defun macher--merge-tools (preset tools-function)
-  "Merge macher tools generated by TOOLS-FUNCTION into the PRESET spec.
-
-PRESET is a gptel spec containing at least the :tools and
-:prompt-transform-functions keys, containing the existing values for
-these fields in the environment at this point.
-
-TOOLS-FUNCTION is a function that accepts two arguments: CONTEXT and
-MAKE-TOOL-FUNCTION.  The correct `macher-context' will be extracted from
-any existing macher tools, or created if no matching tools are present.
-
-If any tools with the same name as the generated ones are present in
-the preset :tools, they will be removed.
-
-Returns the updated preset spec."
-  (let ((context))
-    (if-let ((matching-tool
-              (cl-find-if
-               #'macher--tool-context (seq-filter #'gptel-tool-p (plist-get preset :tools)))))
-      (setq context (macher--tool-context matching-tool))
-      (let ((make-context-result (macher--make-context-for-preset preset)))
-        (setq context (car make-context-result))
-        (setq preset (cdr make-context-result))))
-    (if context
-        (let* ((existing-tools (seq-filter #'gptel-tool-p (plist-get preset :tools)))
-               ;; Create a make-tool function using the correct context.
-               (make-tool-function (apply-partially #'macher--make-tool context))
-               ;; Generate new tools using the tools function.
-               (new-tools (funcall tools-function context make-tool-function))
-               ;; Get names of new tools for removal from existing tools.
-               (new-tool-names (mapcar #'gptel-tool-name new-tools))
-               ;; Remove existing tools with same names as new tools.
-               (filtered-existing-tools
-                (cl-remove-if
-                 (lambda (tool) (member (gptel-tool-name tool) new-tool-names)) existing-tools))
-               ;; Combine filtered existing tools with new tools.
-               (updated-tools (append filtered-existing-tools new-tools)))
-          ;; Return updated preset with new tools.
-          (plist-put (copy-sequence preset) :tools updated-tools))
-
-      ;; If no context (i.e. no current workspace, print a warning and return the preset as-is.
-      (display-warning '(macher requests) "No macher workspace found for the current buffer")
-      preset)))
-
-(defun macher--make-context-for-preset (preset)
-  "Create a `macher-context' and add appropriate transforms to the PRESET spec.
-
-PRESET is a plist containing at least the existing
-:prompt-transform-functions for this preset; the new preset will append
-to this list.
-
-The added transforms will handle setting up the
-`macher-context' (storing the prompt and preloading files from the
-context), hooking into the request lifecycle to process the request on
-completion, and storing the outgoing FSM in `macher--fsm-latest'.
-
-Returns a cons cell (macher-context . updated-preset).
-
-If no workspace can be determined from the current buffer, returns
-\(nil . preset) with no modifications."
-
-  (if-let ((workspace (macher-workspace)))
-    (let* ((context (macher--make-context :workspace workspace))
-           (prompt-transforms (plist-get preset :prompt-transform-functions))
-
-           ;; Handler for the first state machine transtion, i.e. as soon as the request is sent.
-           (transition-handler-invoked nil)
-           (transition-handler
-            (lambda (fsm)
-              (unless transition-handler-invoked
-                (with-current-buffer (plist-get (gptel-fsm-info fsm) :buffer)
-                  ;; It's better to set `macher--fsm-latest' in a transition handler rather than
-                  ;; immediately in a prompt transformer, since the latter can also be used when not
-                  ;; actually sending requests, e.g. when inspecting an outgoing query.
-                  (setq macher--fsm-latest fsm))
-                ;; Only allow this function to be called once.
-                (setq transition-handler-invoked t))))
-
-           ;; Handler for the end of the request.
-           (termination-handler
-            (lambda (fsm)
-              "Process termination of a macher request."
-              (macher-process-request 'complete fsm)))
-
-           ;; Transform to capture the prompt and other contextual information, and store it on the
-           ;; context.
-           (prompt-transform-store-context-data
-            (lambda (_fsm)
-              (setf (macher-context-prompt context) (buffer-string))
-              (setf (macher-context-process-request-function context)
-                    macher-process-request-function)))
-
-           ;; Transform to preload files from the gptel context into the macher context.
-           (prompt-transform-preload-context
-            (lambda (_fsm) (macher--load-gptel-context-files (gptel-context--collect) context)))
-
-           ;; Transform to store the FSM locally as soon as the state machine transitions.
-           (prompt-transform-transition-handler
-            (lambda (fsm) (macher--add-transition-handler fsm transition-handler)))
-
-           ;; Transform to hook into the request lifecycle with our callback.
-           (prompt-transform-termination-handler
-            (lambda (fsm) (macher--add-termination-handler fsm termination-handler)))
-
-           ;; Global transforms list including our custom ones.  Note that our custom transforms
-           ;; won't actually modify the prompt - they're simply there to capture information and
-           ;; hook into the request lifecycle.
-           (updated-prompt-transforms
-            (append
-             prompt-transforms
-             ;; Add these after the earlier prompt transforms, to ensure that all presets and other
-             ;; modifications from other transforms have already been applied.
-             (list
-              prompt-transform-store-context-data
-              prompt-transform-preload-context
-              prompt-transform-termination-handler
-              prompt-transform-transition-handler))))
-      ;; Return the context and the updated preset.
-      (cons
-       context
-       (plist-put (copy-sequence preset) :prompt-transform-functions updated-prompt-transforms)))
-    (cons nil preset)))
-
 ;;; Preset Definitions
 
-(defun macher--functional-preset (spec-function &rest baseline-spec)
-  "Get a spec for a gptel preset whose values are set dynamically.
+(defun macher--append-if-missing (list new-items &optional testfn)
+  "Get a copy of the LIST with NEW-ITEMS appended, unless already present.
 
-- SPEC-FUNCTION is a function which returns a partial spec based on the
-  current environment.  This spec should only contain keys that directly
-  correspond to gptel variables, e.g. :use-tools,
-  :prompt-transform-functions, etc.
+Presence is determined by TESTFN, as defined in e.g. `seq-contains-p',
+defaulting to `equal'."
+  (let ((result (copy-sequence list)))
+    (dolist (item new-items)
+      (unless (seq-contains-p result item testfn)
+        (setq result (append result (list item)))))
+    result))
 
-- BASELINE-SPEC is the baseline preset specification (minus :pre and :post
-  functions).  Keys returned by SPEC-FUNCTION should appear in this baseline
-  definition.
+(defun macher--test-fn-tools (first second)
+  "Return t if the FIRST gptel tool matches the SECOND.
 
-For the moment, this function is a bit of a hack, and dependent on some
-implementation details of the gptel preset system."
-  ;; Local value to store the spec between invocations of the created pre/post functions.  We assume
-  ;; that these functions will always be called in succession, i.e. if :pre is called, :post will be
-  ;; called synchronously afterwards, with no other calls to :pre in between.
-  ;;
-  ;; We (ab)use the fact that, between the :pre and :post functions, `gptel--apply-preset' will use
-  ;; its provided setter to set the values of all the 'gptel-*' variables associated with the
-  ;; baseline spec.  Although the provided setter won't always be a normal `set', it appears that it
-  ;; will always work such that using normal `set' in the :post function will behave correctly.  In
-  ;; some cases, `gptel--apply-preset' will run with a buffer-local setter, after which we can use
-  ;; `set' and still only affect the buffer-local value.  In the setter associated with the transient
-  ;; menu's oneshot setting, a post-response hook is added to reset to the original value, so it
-  ;; doesn't matter if we change it again in :post.
-  ;;
-  ;; This might be brittle if `gptel--apply-preset' is used with other setters, though.
-  ;;
-  ;; Hopefully something like https://github.com/karthink/gptel/pull/940 will get merged so we can
-  ;; do this in a less hacky way.
-  (let ((current-spec nil)
-        ;; Extract all keys from the baseline spec to validate against
-        (baseline-keys
-         (let (keys)
-           (cl-loop for (key _value) on baseline-spec by #'cddr do (push key keys))
-           keys)))
+Compares the tool names and categories."
+  (and (string= (gptel-tool-category first) (gptel-tool-category second))
+       (string= (gptel-tool-name first) (gptel-tool-name second))))
 
-    (let ((initial-spec (copy-sequence baseline-spec)))
-      ;; Set the spec's :pre to a function which gets the spec based on the current environment and
-      ;; stores it.
-      (setq initial-spec
-            (plist-put
-             initial-spec
-             :pre
-             (lambda ()
-               "Get the current dynamic spec and store it."
-               (setq current-spec (funcall spec-function))
-               current-spec)))
+(defun macher--preset-function-add-tools (pred tools)
+  "Augment TOOLS with macher tools matching PRED.
 
-      ;; Set the spec's :post function, which runs `set' for each of the keys in the spec stored by
-      ;; :pre. the allowed KEYS array.
-      (setq initial-spec
-            (plist-put
-             initial-spec
-             :post
-             (lambda ()
-               "Apply the stored dynamic spec values to gptel variables."
-               (when current-spec
-                 (cl-loop
-                  for (key value) on current-spec by #'cddr do
-                  ;; Verify that the key is in the allowed baseline keys list.
-                  (unless (memq key baseline-keys)
-                    (error "Key %s not in allowed baseline keys list %s" key baseline-keys))
-                  ;; Convert key to gptel variable name and set it.
-                  (let ((gptel-var (intern-soft (concat "gptel-" (substring (symbol-name key) 1)))))
-                    (when (and gptel-var (boundp gptel-var))
-                      (set gptel-var value)))))
-               ;; Reset for cleanliness.
-               (setq current-spec nil))))
+Use `apply-partially' to transform this into a suitable value for a
+:function spec in a gptel preset's :tools value."
+  (let* ((tool-defs (seq-filter pred macher-tools))
+         (new-tools (mapcar #'macher-resolve-tool tool-defs)))
+    (macher--append-if-missing tools new-tools #'macher--test-fn-tools)))
 
-      initial-spec)))
+(defun macher-resolve-tool (tool)
+  "Resolve a macher TOOL definition to a `gptel-tool'.
 
-(defvar macher--presets-alist
-  `((macher
-     .
-     ,(macher--functional-preset
-       #'macher--preset-default
-       :description "Send macher workspace context + tools to read files and propose edits"
-       :prompt-transform-functions nil
-       :tools nil
-       :use-tools nil))
-    (macher-ro
-     .
-     ,(macher--functional-preset
-       #'macher--preset-ro
-       :description "Send macher workspace context + tools to read files"
-       :prompt-transform-functions nil
-       :tools nil
-       :use-tools nil))
-    (macher-notools
-     .
-     ,(macher--functional-preset
-       #'macher--preset-notools
-       :description "Send macher workspace context without tools"
-       :prompt-transform-functions nil)))
-  "Alist of definitions for macher presets.
+TOOL is a plist of the same form as elements of `macher-tools'.
 
-Entries have the form (NAME . KEYS).  NAME is the name to use (by
-default) when installing presets globally with `macher-install'.  KEYS
-are the keys to pass to `gptel-make-preset'.
+First looks for an existing tool in the global gptel registry, under the
+`macher-tool-category', with the same name as the provided TOOL
+definition.  If found, returns it.
 
-This list will be used to install presets globally, and also to create
-ephemeral presets when using workspace actions.  These ephemeral presets
-allow us to reuse gptel's preset functionality when making requests
-programmatically, without relying on certain names or config existing in
-the global state.")
+Otherwise, creates an anonymous tool based on the provided definition.
+
+This might be useful, for example, in custom preset definitions if tools
+have not have been installed globally."
+  (let* ((tool-name (plist-get tool :name))
+         ;; Look up the tool in the gptel registry using category and name.
+         (registry-tool
+          (condition-case nil
+              (gptel-get-tool (list macher-tool-category tool-name))
+            ;; `gptel-get-tool' throws an error if the tool was not found; we'll just create an
+            ;; anonymous one in this case.
+            (error
+             nil))))
+    (or registry-tool
+        ;; Tool not found in registry, create an anonymous tool.
+        (apply #'macher--make-tool t tool))))
 
 (defun macher--with-preset (preset callback)
   "Run the CALLBACK with the macher PRESET applied.
 
-PRESET is a key from the `macher--presets-alist', or a raw preset spec
-like \\='(:use-tools t).  Note that this function does not accept a name
-from the global gptel registry - it's for cases where you want to use a
-well-defined preset independent of how gptel is currently configured.
+PRESET is a symbol or a raw preset spec plist as would be passed to
+`gptel-make-preset', like \\='(:use-tools t).  If preset is a symbol, it
+will be looked up from the global gptel registry, or if not found
+there (e.g. if `macher-install' was never called), from the
+`macher-presets-alist'.
 
 CALLBACK takes no arguments."
-  (let ((spec
-         (if (symbolp preset)
-             (cdr (assq preset macher--presets-alist))
-           preset)))
-    ;; Adapted from `gptel-with-preset'.  Currently that macro sets all symbol values to nil before
-    ;; applying the preset (since it doesn't expect dynamic values), but we want to pull in
-    ;; existing values, so we can extend rather than overwrite things like 'gptel-tools'.
-    (let* ((preset-syms (gptel--preset-syms spec))
-           ;; Get the current values of all variables affected by the preset.
-           (preset-sym-values (mapcar #'symbol-value preset-syms)))
-      (cl-progv preset-syms preset-sym-values
-        (gptel--apply-preset spec)
-        (funcall callback)))))
+  (let
+      ((preset-for-gptel
+        (if (symbolp preset)
+            ;; For symbols, if found in the global registry, just pass the symbol directly. This leads to
+            ;; clearer warnings/debugging from gptel if something goes wrong, compared to a raw preset
+            ;; spec.
+            ;;
+            ;; TODO: Disabled for now due to the gptel :parents issue - see hack below.  The fix has
+            ;; now been merged upstream, we can re-enable this when gptel cuts a release that includes
+            ;; it: https://github.com/karthink/gptel/pull/1192
+            ;;
+            ;; (if (gptel-get-preset preset)
+            ;;     preset
+            (or
+             (gptel-get-preset preset)
+             ;; If the symbol wasn't found in the global registry, try to get it from the macher list.
+             (cdr (assq preset macher-presets-alist)))
+          ;; If not a symbol, just pass the value directly - presumably it's a plist spec, or else we'll
+          ;; delegate error handling to gptel.
+          preset)))
 
-(defun macher--preset-default ()
-  "Set up the default macher preset with full editing capabilities."
-  ;; Start with the read-only preset.
-  (let ((preset (macher--preset-ro)))
-    ;; Add editing tools to the existing setup.
-    (setq preset (macher--merge-tools preset macher-edit-tools-function))
-    preset))
+    (unless preset-for-gptel
+      (user-error
+       "Macher preset \"%s\": Cannot find preset in gptel registry or macher presets list"
+       preset))
 
-(defun macher--preset-ro ()
-  "Set up the read-only macher preset."
-  ;; Start with the notools preset.
-  (let ((preset (copy-sequence (macher--preset-notools))))
-    (setq preset (plist-put preset :tools gptel-tools))
-    ;; Add reading tools to the existing setup.
-    (setq preset (macher--merge-tools preset macher-read-tools-function))
-    ;; Make sure tool use is enabled (but don't overwrite it if it's set to anything non-nil, like
-    ;; 'force).
-    (setq preset (plist-put preset :use-tools (or gptel-use-tools t)))
-    preset))
+    ;; TODO: This is a hack around a current issue in gptel that prevents anonymous presets from
+    ;; being used as parents in `gptel-with-preset'. We can simplify this (no need for recursive
+    ;; calls) once there's a gptel release that includes
+    ;; https://github.com/karthink/gptel/pull/1192.
+    (if-let ((parents (plist-get preset-for-gptel :parents)))
+      ;; If the current preset has any parents, apply them and call this function recursively with
+      ;; one parent popped from the front of the list.
+      (let* ((first-parent (car parents))
+             (remaining-parents (cdr parents)))
+        (macher--with-preset
+         first-parent
+         (lambda ()
+           (macher--with-preset
+            (plist-put (copy-sequence preset-for-gptel) :parents remaining-parents) callback))))
+      (gptel-with-preset preset-for-gptel (funcall callback)))))
 
-(defun macher--preset-notools ()
-  "Set up the macher preset without tools (context only)."
-  `(:prompt-transform-functions
-    ,(append gptel-prompt-transform-functions (list #'macher--prompt-transform-add-context))))
+(defun macher--parse-directive (directive)
+  "Normalize DIRECTIVE to a standard format.
 
-(defun macher--prompt-transform-add-context (callback fsm)
-  "A gptel prompt transformer to add context from the current workspace.
+DIRECTIVE is a gptel directive: it can be a string, a list or a function
+that returns either, see `gptel-directives'.
+
+Return a cons cell consisting of the system message (a string) and a
+template consisting of alternating user/LLM records (a list of strings
+or nil).
+
+This is basically the same as `gptel--parse-directive' with a non-nil
+RAW parameter, but we re-implemnt it to avoid depending on private gptel
+methods."
+  (and directive
+       (cl-etypecase directive
+         (string (list directive))
+         (function (macher--parse-directive (funcall directive)))
+         (cons directive))))
+
+(defun macher--system-ensure-placeholder-or-context-string (system)
+  "Ensure there's a macher placeholder or actual context string in SYSTEM prompt.
+
+If the system prompt already contains the `macher-context-string-placeholder'
+or the `macher-context-string-marker-start', this is a no-op.
+
+Otherwise, appends the `macher-context-string-placeholder' to the end of
+the system prompt.
+
+SYSTEM can be a string, a function, or a list:
+
+- String: The most common case, a static system message.  We check if
+  the placeholder or marker is present, and append the placeholder if
+  not.
+
+- List: A conversation template, where the first element is the system
+  message and subsequent elements are pre-filled user/assistant
+  messages for few-shot prompting.  We check and modify only the first
+  element (consing a new list to avoid mutation).
+
+- Function: A dynamic directive that generates the system message at
+  request time.  We return a wrapper that evaluates this directive and
+  then handles the result as with other strings/lists.
+
+If `macher-context-string-placeholder' is nil, simply appends the
+current result of `macher-context-string-function' (if no start marker
+already present), i.e. goes straight to the \"@macher-system-commit\"
+state.
+
+If both `macher-context-string-placeholder' AND
+`macher-context-string-function' are nil, does nothing."
+  ;; No placeholder to append or context function to call. Treat this as a special case, bail
+  ;; immediately.
+  (if (not (or macher-context-string-function macher-context-string-placeholder))
+      system
+    (cl-etypecase system
+      (string
+       (cond
+        ;; Already has marker-start, nothing to do.
+        ((string-match-p (regexp-quote macher-context-string-marker-start) system)
+         system)
+        ;; Placeholder is set and not already in string, append it.
+        ((and macher-context-string-placeholder
+              (not (string-match-p (regexp-quote macher-context-string-placeholder) system)))
+         (concat system macher-context-string-placeholder))
+        ;; Placeholder is nil, append demarcated context directly.
+        ((not macher-context-string-placeholder)
+         ;; Note the `macher-context-string-function' can't be nil at this point, due to the first
+         ;; bail check.  Also note that even if the context string is nil, we render this block it
+         ;; for parity with the `macher--system-replace-placeholder' result, i.e. treat this exactly
+         ;; as if we appended an "anonymous" placeholder at the end and then committed it.  This seems
+         ;; like the most consistent way to handle things.
+         (let ((context-string (funcall macher-context-string-function)))
+           (concat
+            system
+            macher-context-string-marker-start
+            context-string
+            macher-context-string-marker-end)))
+        (t
+         system)))
+      (function
+       ;; Note - it'd be nice if we didn't have to actually wrap the function if we already know it
+       ;; contains the context string. As-is, this will overwrite functional user directives with a
+       ;; lambda - this is functionally fine, but may look weird in gptel's directives UI.
+       (lambda ()
+         ;; By definition this lambda is being called in whatever buffer functional system prompts are
+         ;; supposed to be run.  So it should be fine not to worry about changing buffers or anything
+         ;; before resolving the system message.
+         (macher--system-ensure-placeholder-or-context-string (macher--parse-directive system))))
+      (list
+       (cons (macher--system-ensure-placeholder-or-context-string (car system)) (cdr system))))))
+
+(defun macher--system-replace-placeholder (system &optional buffer)
+  "Inject macher context into the SYSTEM prompt.
+
+Replaces any instances of the `macher-context-string-placeholder' with
+the current result of `macher-context-string-function', surrounded by
+`macher-context-string-marker-start' and
+`macher-context-string-marker-end'.  Returns the result.
+
+If BUFFER is non-nil, switch to it while generating the context string
+and while evaluating function directives.  Otherwise, just use the
+current buffer.
+
+If `macher-context-string-placeholder' is nil, returns SYSTEM unchanged.
+
+If the `macher-context-string-function' is or returns nil, replaces the
+placeholder with empty markers (i.e. start marker immediately followed
+by end marker).  This is for consistency on repeated applications of
+things like \"@macher-system\" and \"@macher-system-commit\" - we don't
+want to just remove the placeholder entirely, as it could end up getting
+appended again later, which would be surprising.
+
+SYSTEM can be a string, a function, or a list:
+
+- String: The most common case.  We search for the placeholder and
+  replace it with the demarcated context string.
+
+- Function: A dynamic directive.  We call `macher--parse-directive' to
+  evaluate it and get the actual string, then recursively process the
+  result.  This is useful for system messages that need to adapt based
+  on buffer state or other dynamic factors.
+
+- List: A conversation template of the form (SYSTEM-MSG USER-MSG
+  ASSISTANT-MSG ...).  We recursively process only the first element,
+  consing a new list to avoid mutating the original.  This format is
+  used for few-shot prompting, where you pre-fill a conversation with
+  example exchanges to guide the LLM's behavior.
+
+This function should be called in the prompt transform buffer for a
+gptel request.  That's where dynamic directives are evaluated in
+built-in contexts like `gptel-context--wrap-in-buffer' (though note
+`macher-request' seems to evaluate them in the request buffer)."
+  (if (not macher-context-string-placeholder)
+      system
+    (cl-etypecase system
+      (string
+       (let* ((context-string
+               (with-current-buffer (or buffer (current-buffer))
+                 (when macher-context-string-function
+                   (funcall macher-context-string-function))))
+              (demarcated-context-string
+               (concat
+                macher-context-string-marker-start
+                (or context-string "")
+                macher-context-string-marker-end)))
+         (if (string-match-p (regexp-quote macher-context-string-placeholder) system)
+             (replace-regexp-in-string
+              (regexp-quote macher-context-string-placeholder) demarcated-context-string system
+              t t)
+           system)))
+      (function
+       ;; Should hopefully be ok to call this in the current buffer i.e. prompt buffer. Note though
+       ;; that the `gptel--transform-add-context' ultimately calls `gptel--parse-directive' in the
+       ;; :data buffer from the FSM's info struct - but it seems like that's the same as the prompt
+       ;; buffer?
+       ;;
+       ;; This resolves functional directives to strings or lists.
+       (let ((parsed (macher--parse-directive system)))
+         (macher--system-replace-placeholder parsed buffer)))
+      (list (cons (macher--system-replace-placeholder (car system) buffer) (cdr system))))))
+
+(defun macher--transform-system-replace-placeholder (callback fsm)
+  "A prompt transform to inject the macher context string in the system prompt.
+
+Uses `macher--system-replace-placeholder' to perform the
+replacement, invoked in the request buffer.
+
+If the `macher-context-string-placeholder' is nil, or if it doesn't
+appear in the system prompt for the current request, this is a no-op.
 
 CALLBACK and FSM are as described in the
-`gptel-prompt-transform-functions' documentation.
+`gptel-prompt-transform-functions' documentation."
+  (when-let* ((info (gptel-fsm-info fsm))
+              (buffer (plist-get info :buffer))
+              (_ (buffer-live-p buffer)))
+    ;; The system message needs to be set in the temporary buffer where this prompt transform is
+    ;; being invoked, but the context string needs to be generated in the buffer where the request
+    ;; is actually being sent.  Pass the request buffer to the replace function.
+    (setq gptel--system-message (macher--system-replace-placeholder gptel--system-message buffer)))
+  (funcall callback))
 
-Adds the result of the `macher-context-string-function' to the prompt,
-in the same place as the default gptel context as specified by
-`gptel-use-context'."
-  (when macher-context-string-function
-    (when-let* (
-                ;; plist containing information about the upcoming request.
-                (info (gptel-fsm-info fsm))
-                ;; Buffer where the request is being sent.
-                (buffer (plist-get info :buffer))
-                (_ (buffer-live-p buffer))
-                (workspace-string
-                 (with-current-buffer buffer
-                   (funcall macher-context-string-function (gptel-context--collect)))))
-      (gptel-context--wrap-in-buffer workspace-string)))
+(defun macher--setup-tools (fsm get-context)
+  "Provide a `macher-context' to macher tools in the gptel FSM.
+
+GET-CONTEXT should be a function that always returns the same
+`macher-context' object - this allows for lazy initialization of the
+object.  GET-CONTEXT may also return nil if no workspace could be
+determined for the request.
+
+This function updates the FSM's tools list by wrapping tools from the
+`macher-tool-category' to inject the result of GET-CONTEXT as the first
+argument.
+
+This function is intended to be used as a transition handler at the
+start of a gptel request, i.e. before any tools are invoked but after
+they're accessible on the FSM."
+  (let* ((info (gptel-fsm-info fsm))
+         (tools (plist-get info :tools))
+         (buffer (plist-get info :buffer))
+         (processed-tools
+          (mapcar
+           (lambda (tool)
+             (if (equal macher-tool-category (gptel-tool-category tool))
+                 ;; If this is a macher tool, inject the current context as the first argument.
+                 (let* ((orig-fn (gptel-tool-function tool))
+                        (tool-name (gptel-tool-name tool))
+                        ;; Wrapped function that injects context.
+                        (wrapped-fn
+                         (apply-partially `(lambda (get-context orig-fn &rest args)
+                                             ,(format
+                                               "Request-specific wrapper for macher tool \"%s\"."
+                                               tool-name)
+                                             (let ((context (funcall get-context)))
+                                               (unless context
+                                                 (warn
+                                                  (concat
+                                                   (format
+                                                    "macher tool \"%s\" called, but no workspace "
+                                                    ,tool-name)
+                                                   (format
+                                                    "could be determined for request buffer \"%s\" "
+                                                    ,buffer)))
+                                                 (error
+                                                  "The tool \"%s\" is not available" ,tool-name))
+                                               ;; Call original function with args plus the context.
+                                               (apply orig-fn context args)))
+                                          get-context orig-fn))
+                        (tool-copy (gptel--copy-tool tool)))
+                   ;; Set the function on the tool copy to the request-specific wrapper.
+                   (setf (gptel-tool-function tool-copy) wrapped-fn)
+                   ;; Replace the category so we don't try to modify this tool again if this
+                   ;; function somehow gets run more than once.
+                   (setf (gptel-tool-category tool-copy)
+                         (format "%s__processed" macher-tool-category))
+                   ;; Return the request-specific tool copy.
+                   tool-copy)
+               ;; For non-macher tools, just pass them through unmodified.
+               tool))
+           tools)))
+    ;; Update the tools list that the FSM will actually use for tool calls.
+    (setf (gptel-fsm-info fsm) (plist-put info :tools processed-tools))))
+
+(defun macher--transform-setup-tools (callback fsm)
+  "A gptel prompt transform to set up macher tools and behavior.
+
+This transform does not affect the actual request content of outgoing
+gptel requests; it's a no-op if there are no macher tools associated
+with a request.  It just interacts with the gptel state machine to
+provide request-specific context (e.g. the current workspace) to macher
+tools, and to set up a termination handler so we can call the
+`macher-process-request-function'.
+
+This transform MUST be present in `gptel-prompt-transform-functions' in
+order to use macher tools.  All of the built-in macher presets pull it
+in automatically, but if you want to use macher tools in other
+ways (e.g. directly from the gptel menu), you'll need to make sure this
+transform is present.  You can do this by applying `macher-preset-base',
+or using it as a parent in your own presets.
+
+CALLBACK and FSM are as described in the
+`gptel-prompt-transform-functions' documentation."
+  (let* (
+         ;; Capture information that needs to be included in the macher context if it gets created.
+         (prompt (buffer-string))
+         (process-request-function macher-process-request-function)
+         ;; Shared context object for this request, with a lazy initializer.  The context will only
+         ;; be initialized if macher tools are invoked during the request.  We use t as a flag that
+         ;; we tried to load the context, but there was no macher workspace (that way we can use nil
+         ;; to indicate that the context was never accessed).
+         (context-or-t nil)
+         (get-context
+          (lambda ()
+            (unless context-or-t
+              (let* ((info (gptel-fsm-info fsm))
+                     (buffer (plist-get info :buffer)))
+                (when (plist-get info :macher--context)
+                  (error "Macher context already present on FSM during setup"))
+                ;; We always expect the request buffer to be non-nil.
+                (unless buffer
+                  (error "Trying to set up macher tools, but coudn't determine request buffer"))
+                (setq context-or-t
+                      (if (buffer-live-p buffer)
+                          (if-let ((workspace (macher-workspace buffer)))
+                            ;; If we found a workspace, perform context initialization.
+                            (let ((context
+                                   (macher--make-context
+                                    :workspace workspace
+                                    :prompt prompt
+                                    :process-request-function process-request-function)))
+                              ;; Store the context on the FSM, so we can look it up e.g. for
+                              ;; processing later.
+                              (setq info (plist-put info :macher--context context))
+                              (setf (gptel-fsm-info fsm) info)
+                              ;; Mark this FSM as the most recent macher request.
+                              (with-current-buffer buffer
+                                (setq macher--fsm-latest fsm))
+                              context)
+                            ;; Request buffer live but no workspace found.
+                            t)
+                        ;; Request buffer not live - no workspace can be found.
+                        t))))
+            ;; Now return the cached context.
+            (if (eq context-or-t t)
+                ;; t actually means "no workspace found".
+                nil
+              context-or-t)))
+
+         ;; Handler for the first state machine transition, i.e. as soon as the request is sent.
+         (init-handler-invoked nil)
+         (init-handler
+          (lambda (fsm)
+            "Inject context into macher tools (no-op on repeated calls)."
+            (unless init-handler-invoked
+              (setq init-handler-invoked t)
+              ;; Replace tools with versions that have the current macher context injected. We can't
+              ;; do this directly in the prompt transform because the :tools entry isn't available
+              ;; at that point.
+              (macher--setup-tools fsm get-context))))
+         (termination-handler
+          (lambda (fsm)
+            "Process the `macher-context' (if any) on request termination."
+            ;; When the context was accessed and successfully initialized, i.e. when a tool was
+            ;; successfully called.
+            (when (and context-or-t (funcall get-context))
+              (macher-process-request 'complete fsm)))))
+    (macher--add-transition-handler fsm init-handler)
+    (macher--add-termination-handler fsm termination-handler))
   (funcall callback))
 
 (defun macher--add-termination-handler (fsm handler)
@@ -3665,7 +3941,6 @@ request lifecycle."
     ;; Update the handlers list.
     (setf (gptel-fsm-handlers fsm) augmented-handlers)))
 
-
 (defun macher--gptel-request (callback &optional prompt &rest keys)
   "Send PROMPT to the LLM and invoke the CALLBACK when the request terminates.
 
@@ -3731,49 +4006,133 @@ Then pass arguments through to the original callback."
       (setf (gptel-fsm-info fsm) (plist-put info :callback wrapped-callback))
       fsm)))
 
+(defun macher--make-tool (anon &rest slots)
+  "Create a gptel tool with access to the macher context.
+
+SLOTS are as described in the `gptel-make-tool' docstring, except that:
+
+- FUNCTION takes an extra argument at the front, the `macher-context'
+  which the tool is interacting with.
+
+- CATEGORY is ignored, and the `macher-tool-category' is used.
+
+If ANON is non-nil, don't register the tool with the gptel registry."
+  ;; Extract the original function from slots.
+  (let*
+      ((name (plist-get slots :name))
+       (orig-fn (plist-get slots :function))
+       ;; Wrap the provided tool function with a sanity check to ensure that the macher context has
+       ;; been provided as the first argument.  This happens via the
+       ;; `macher--transform-setup-tools' transform, which injects the appropriate context
+       ;; into tool functions for outgiong gptel requests.
+       (wrapped-fn
+        (apply-partially `(lambda (orig-fn &rest args)
+                            ,(format "Wrapper for macher tool \"%s\"." name)
+                            ;; The context should be the last argument if provided.
+                            ;; If not provided, this will gracefully fail with an error.
+                            (let ((context (car args)))
+                              (unless (macher-context-p context)
+                                (warn
+                                 (concat
+                                  (format "macher tool \"%s\" called without context.  " ,name)
+                                  "If you're managing macher tools manually, make sure you "
+                                  "apply the \"@macher-base\" preset before using them."))
+                                (error "The tool \"%s\" is not available" ,name))
+                              ;; Call original function with context first, then the tool args.
+                              (apply orig-fn args)))
+                         orig-fn))
+       (slots (plist-put (copy-sequence slots) :category macher-tool-category))
+       (slots (plist-put slots :function wrapped-fn)))
+    (apply (if anon
+               ;; Use the internal constructor to avoid interacting with the global registry at all.
+               #'gptel--make-tool
+             #'gptel-make-tool)
+           slots)))
+
+(defun macher--install-tools ()
+  "Install all tools specified in `macher-tools'.
+
+Tools will be available in the global gptel registry, but not
+activated (i.e. not added to the variable `gptel-tools')."
+  (dolist (tool-def macher-tools)
+    ;; Create and register the tool.
+    (apply #'macher--make-tool nil tool-def)))
+
+(defun macher--install-presets ()
+  "Install all presets specified in `macher-presets-alist'.
+
+Presets will be available in the global gptel registry, with the keys of
+the alist used as preset names."
+  (dolist (preset-entry macher-presets-alist)
+    (apply #'gptel-make-preset preset-entry)))
+
 ;;; Core Functions
 
 ;;;###autoload
-(defun macher-install (&optional names)
-  "Register macher presets with gptel.
+(defun macher-install (&optional deprecated)
+  "Register macher presets and tools with gptel.
+
+Uses `macher-presets-alist' and `macher-tools' to determine the
+presets/tools to install.
 
 Once presets are registered, you can use macher functionality in any
 gptel request using the \"@preset\" syntax, for example:
 
   @macher Add an eslint config to this project.
 
-This function registers three presets:
+You can also enable/disable macher tools directly from the gptel tools
+menu, or use them in restored gptel sessions.  In that case, you should
+also make sure to call `macher-enable' in your init, or to apply
+\"@macher-base\" (or a higher-level preset) anywhere that you're
+managing tools manually.
 
-- @macher: Send contextual information about the workspace + tools to
-  read files and propose edits.  At the end of the request, update the
-  patch buffer.
+A DEPRECATED parameter was previously used to control preset names; this
+can now be done by customizing the `macher-presets-alist'."
+  (when deprecated
+    (warn
+     (concat
+      "The NAMES parameter to `macher-install' is no longer supported.  "
+      "You can customize preset names by customizing `macher-presets-alist'.")))
+  (macher--install-presets)
+  (macher--install-tools))
 
-- @macher-ro: Send contextual information about the workspace + tools to
-  read files.
+;;;###autoload
+(defun macher-enable ()
+  "Install prompt transforms needed to support macher infrastructure.
 
-- @macher-notools: Send contextual information about the workspace, but
-  no tools.
+This is equivalent to applying the \"@macher-base\" preset globally.
 
-NAMES is an optional alist of name overrides, whose entries are
-like (PRESET . NAME).  PRESET is the preset's standard name symbol (e.g.
-='macher-notools') and NAME is the symbol to actually register
-with gptel.  You can also pass a nil NAME to disable registering a preset
-globally.  For example:
+This adds entries to `gptel-prompt-transform-functions' which will do
+the following for outgoing gptel requests:
 
-\\='((macher . m) (macher-ro . mr) (macher-notools . nil))"
+- Provide a request's macher tools with a shared in-memory workspace,
+  (lazily initialized when the tools are actually called), which is used
+  to track changes throughout the request and generate a patch at the
+  end.  This is a purely internal step and doesn't affect the request
+  itself.
 
-  (dolist (preset-entry macher--presets-alist)
-    (let* ((preset-name (car preset-entry))
-           (preset-config (cdr preset-entry))
-           ;; Check if there's a name override in the NAMES alist.
-           (override-entry (assq preset-name names))
-           (actual-name
-            (if override-entry
-                (cdr override-entry)
-              preset-name)))
-      ;; Only register the preset if actual-name is not nil.
-      (when actual-name
-        (apply #'gptel-make-preset actual-name preset-config)))))
+- Replace instances of the `macher-context-string-placeholder' in the
+  system prompt with the current result of the
+  `macher-context-string-function'.  This won't modify your system
+  prompt in any other way; if the outgoing prompt doesn't already
+  contain the `macher-context-string-placeholder', it won't be modified.
+  You can also disable this transform entirely by setting
+  `macher-context-string-placeholder' to nil.
+
+These transforms will run on every gptel request, though they should
+effectively be no-ops for requests that don't use macher tools or the
+context-string placeholder.
+
+In case you're wary of adding these transforms globally, you have some
+alternatives:
+
+- You don't need to call this if you're only using macher via actions or
+  direct applications of built-in presets.
+
+- You can also just make sure to apply \"@macher-base\" in places where
+  you're using macher tools or context-string placeholders without
+  explicitly applying a preset, e.g. in restored gptel buffers."
+  (gptel--apply-preset macher-preset-base))
 
 ;;;###autoload
 (defun macher-action (action &optional callback &rest action-args)
@@ -3811,8 +4170,8 @@ simply ignored if the action is defined as a plain plist.
 When called interactively, prompts the user to select an ACTION from
 those available in the `macher-actions-alist'.
 
-Note that macher presets can be used with any gptel request, and you
-don't need to use this function to use macher.  This function simply
+Note that macher tools/presets can be used with any gptel request, and
+you don't need to use this function to use macher.  This function simply
 implements one possible workflow."
   (interactive (let* ((actions (mapcar #'car macher-actions-alist))
                       (action-names (mapcar #'symbol-name actions))

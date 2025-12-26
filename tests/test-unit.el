@@ -166,40 +166,76 @@
           (expect (cddr entry) :to-equal "new file content")))))
 
   (describe "edit tools"
-    :var (temp-file)
+    :var (temp-file context)
 
     (before-each
       (setq temp-file (make-temp-file "macher-test"))
       ;; Write some test content to the file.
       (with-temp-buffer
         (insert "original file content")
-        (write-region (point-min) (point-max) temp-file)))
+        (write-region (point-min) (point-max) temp-file))
+      (setq context (macher--make-context :workspace `(file . ,temp-file)))
+
+      ;; Shared sanity-check expectation.
+      (expect (macher-context-dirty-p context) :to-be nil))
 
     (after-each
       (when (file-exists-p temp-file)
         (delete-file temp-file)))
 
-    (it "sets the dirty-p flag"
-      ;; Test that edit tools set the dirty-p flag via the wrapper.
-      (let* ((workspace (cons 'file temp-file))
-             (context (macher--make-context :workspace workspace))
-             (make-tool-function (apply-partially #'macher--make-tool context))
-             (edit-tools (macher--edit-tools context make-tool-function)))
-        ;; Initially, dirty-p should be nil.
+    (describe "macher--tool-write-file"
+      (it "replaces file contents"
+        (macher--tool-write-file context temp-file "new content")
+        (let ((contents (macher-context-contents context)))
+          (expect contents :to-equal `((,temp-file . ("original file content" . "new content"))))))
+      (it "sets the dirty-p flag"
+        (macher--tool-write-file context temp-file "new content")
+        (expect (macher-context-dirty-p context) :to-be-truthy)))
+
+    (describe "macher--tool-move-file"
+      (it "moves file to new location"
+        (let ((dest-file (concat temp-file "-moved")))
+          (macher--tool-move-file context temp-file dest-file)
+          (let ((contents (macher-context-contents context)))
+            ;; Original file should be deleted (content set to nil).
+            (expect (cdr (assoc temp-file contents)) :to-equal '("original file content" . nil))
+            ;; New file should have the original content.
+            (expect (cdr (assoc dest-file contents)) :to-equal '(nil . "original file content")))))
+      (it "sets the dirty-p flag"
+        (let ((dest-file (concat temp-file "-moved")))
+          (macher--tool-move-file context temp-file dest-file)
+          (expect (macher-context-dirty-p context) :to-be-truthy))))
+
+    (describe "macher--tool-delete-file"
+      (it "deletes file content"
+        (macher--tool-delete-file context temp-file)
+        (let ((contents (macher-context-contents context)))
+          (expect (cdr (assoc temp-file contents)) :to-equal '("original file content" . nil))))
+      (it "sets the dirty-p flag"
+        (macher--tool-delete-file context temp-file)
+        (expect (macher-context-dirty-p context) :to-be-truthy)))
+
+    (describe "macher--tool-edit-file"
+      (it "edits file content with single replacement"
+        (macher--tool-edit-file context temp-file "original" "modified" nil)
+        (let ((contents (macher-context-contents context)))
+          (expect (cdr (assoc temp-file contents))
+                  :to-equal '("original file content" . "modified file content"))))
+      (it "edits file content with replace-all"
+        ;; Create a file with multiple occurrences.
+        (with-temp-buffer
+          (insert "hello world hello universe")
+          (write-region (point-min) (point-max) temp-file))
+        ;; Reload context with new content.
+        (setq context (macher--make-context :workspace `(file . ,temp-file)))
         (expect (macher-context-dirty-p context) :to-be nil)
-        ;; Find the write_file_in_workspace tool.
-        (let ((write-tool
-               (cl-find-if
-                (lambda (tool)
-                  (string= (gptel-tool-name tool) "write_file_in_workspace"))
-                edit-tools)))
-          (expect write-tool :to-be-truthy)
-          ;; Call the tool function.
-          (funcall (gptel-tool-function write-tool)
-                   (file-name-nondirectory temp-file)
-                   "test content")
-          ;; dirty-p should now be t.
-          (expect (macher-context-dirty-p context) :to-be t)))))
+        (macher--tool-edit-file context temp-file "hello" "hi" t)
+        (let ((contents (macher-context-contents context)))
+          (expect (cdr (assoc temp-file contents))
+                  :to-equal '("hello world hello universe" . "hi world hi universe"))))
+      (it "sets the dirty-p flag"
+        (macher--tool-edit-file context temp-file "original" "modified" nil)
+        (expect (macher-context-dirty-p context) :to-be-truthy))))
 
   (describe "macher--process-request"
     :var (context fsm temp-file build-patch-called)
@@ -238,47 +274,6 @@
       (macher--process-request 'test nil fsm)
       ;; Verify macher--build-patch was not called.
       (expect #'macher--build-patch :not :to-have-been-called)))
-
-  (describe "macher--context-for-fsm"
-    :var (context)
-
-    (before-each
-      (funcall setup-project)
-      (setq context (macher--make-context :workspace `(project . ,project-dir))))
-
-    (it "extracts context from FSM with macher tools"
-      ;; Create a macher tool with our context.
-      (let ((tool (macher--make-tool context :name "test_tool" :function (lambda () "test"))))
-        (with-temp-buffer
-          ;; Set up tools in the buffer as gptel would.
-          (setq-local gptel-tools (list tool))
-          ;; Create FSM using gptel-request with dry-run to get proper setup.
-          (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
-            ;; Should find the context.
-            (expect (macher--context-for-fsm fsm) :to-be context)))))
-
-    (it "returns nil when FSM has no macher tools"
-      ;; Create a regular gptel tool without macher context.
-      (let ((regular-tool (gptel-make-tool :name "regular" :function (lambda () "test"))))
-        (with-temp-buffer
-          ;; Set up tools in the buffer as gptel would.
-          (setq-local gptel-tools (list regular-tool))
-          ;; Create FSM using gptel-request with dry-run to get proper setup.
-          (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
-            ;; Should return nil.
-            (expect (macher--context-for-fsm fsm) :to-be nil)))))
-
-    (it "returns nil when FSM is nil"
-      (expect (macher--context-for-fsm nil) :to-be nil))
-
-    (it "returns nil when FSM has no tools"
-      (with-temp-buffer
-        ;; No tools set up.
-        (setq-local gptel-tools nil)
-        ;; Create FSM using gptel-request with dry-run.
-        (let ((fsm (gptel-request "test prompt" :buffer (current-buffer) :dry-run t)))
-          ;; FSM with no tools should return nil.
-          (expect (macher--context-for-fsm fsm) :to-be nil)))))
 
   (describe "macher-process-request"
     :var (context original-process-fn dummy-process-fn fsm workspace)
@@ -2993,37 +2988,30 @@
 
       (it "generates context string for project workspace"
         (let* ((macher--workspace (cons 'project temp-dir))
-               (contexts `((,file1) (,file2)))
-               (result (macher--context-string contexts)))
+               (result (macher--context-string)))
           (expect (stringp result) :to-be-truthy)
           ;; Should contain workspace information.
-          (expect result :to-match "WORKSPACE CONTEXT")
+          (expect result :to-match "The user is currently working on a project named:")
           ;; Should contain our test files with full relative paths.
           (expect result :to-match "file1.txt")
           (expect result :to-match "file2.el")
           (expect result :to-match "subdir/file3.md")
-          ;; Should distinguish between files in context and files available for editing.
-          ;; Files in context should be in "already provided" section with proper structure.
+          ;; Should list files in the workspace.
           (expect result
-                  :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    file1\\.txt")
-          (expect result
-                  :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    file2\\.el")
-          ;; Files not in context should be in "available for editing" section.
-          (expect
-           result
-           :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    subdir/file3\\.md")
-          ;; Should contain workspace description.
-          (expect result :to-match "In-memory editing environment")))
+                  :to-match
+                  (regexp-quote
+                   (format "Files in the \"%s\" project:" (file-name-nondirectory temp-dir))))))
 
       (it "generates context string for single-file workspace"
         (let* ((macher--workspace (cons 'file file1))
-               (contexts `((,file1)))
-               (result (macher--context-string contexts)))
+               (result (macher--context-string)))
           (expect (stringp result) :to-be-truthy)
           ;; Should contain workspace information.
-          (expect result :to-match "WORKSPACE CONTEXT")
+          (expect result
+                  :to-match "The user is currently working on a project named: \"file1.txt\"")
+          (message "reus %s" result)
           ;; Should contain only the single file.
-          (expect result :to-match "file1.txt")
+          (expect result :to-match "Files in the \"file1.txt\" project:\n[ ]+file1.txt")
           ;; Should not contain other files.
           (expect result :not :to-match "file2.el")
           (expect result :not :to-match "file3.md")))
@@ -3031,7 +3019,6 @@
       (it "properly categorizes files with same name in different directories"
         (let* ((workspace '(project . "/test/project/"))
                (workspace-files '("/test/project/test.txt" "/test/project/subdir/test.txt"))
-               (contexts '(("/test/project/test.txt")))
                result)
           ;; Mock workspace functions.
           (spy-on 'macher--workspace-root :and-return-value "/test/project/")
@@ -3041,25 +3028,21 @@
           ;; Set the test workspace.
           (with-temp-buffer
             (setq-local macher--workspace workspace)
-            (setq result (macher--context-string contexts)))
+            (setq result (macher--context-string)))
 
           ;; Verify the result structure.
           (expect (stringp result) :to-be-truthy)
-          (expect result :to-match "WORKSPACE CONTEXT")
-
-          ;; test.txt should be in the "already provided" section since it's in contexts
           (expect result
-                  :to-match "Files already provided above.*\n\\(    [^\n]*\n\\)*    test\\.txt")
+                  :to-match "The user is currently working on a project named: \"test-project\"")
 
-          ;; subdir/test.txt should be in "available for editing" since it's not in contexts
-          (expect
-           result
-           :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    subdir/test\\.txt")
+          ;; Both files should be listed.
+          (expect result :to-match "    test\\.txt")
+          (expect result :to-match "    subdir/test\\.txt")
 
-          ;; Should contain workspace description
-          (expect result :to-match "In-memory editing environment"))))
+          ;; Should contain workspace file listing.
+          (expect result :to-match "Files in the \"test-project\" project:"))))
 
-    (describe "macher--context-string with max-files limit"
+    (describe "with max-files limit"
       :var (temp-dir workspace all-files original-max-files)
 
       (before-each
@@ -3096,18 +3079,18 @@
 
       (it "lists all files when max-files is nil (no limit)"
         (setq macher-context-string-max-files nil)
-        (let ((result (macher--context-string '())))
+        (let ((result (macher--context-string)))
           (expect result :to-match "file1.txt")
           (expect result :to-match "file2.txt")
           (expect result :to-match "file3.txt")
           (expect result :to-match "file4.txt")
           (expect result :to-match "file5.txt")
-          (expect result :not :to-match "truncated")))
+          (expect result :not :to-match "more files")))
 
-      (it "respects max-files limit for non-context files"
+      (it "respects max-files limit"
         (setq macher-context-string-max-files 3)
-        (let ((result (macher--context-string '())))
-          ;; Should show only first 3 files in workspace order
+        (let ((result (macher--context-string)))
+          ;; Should show only first 3 files in workspace order.
           (expect result :to-match "file1.txt")
           (expect result :to-match "file2.txt")
           (expect result :to-match "file3.txt")
@@ -3115,91 +3098,28 @@
           (expect result :not :to-match "file5.txt")
           (expect result :to-match "2 more files")))
 
-      (it "always lists gptel context files first, even if they exceed the limit"
-        (setq macher-context-string-max-files 2)
-        ;; Create context with 3 files (more than the limit)
-        (let* ((file1 (nth 0 all-files))
-               (file3 (nth 2 all-files))
-               (file5 (nth 4 all-files))
-               (contexts `((,file1) (,file3) (,file5)))
-               (result (macher--context-string contexts)))
-
-          ;; All 3 context files should be listed in the "already provided" section
-          (expect result :to-match "Files already provided above")
-          (expect result :to-match "file1.txt")
-          (expect result :to-match "file3.txt")
-          (expect result :to-match "file5.txt")
-
-          ;; No additional files should be listed since context files exceed the limit
-          (expect result :not :to-match "Other files available")
-          (expect result :not :to-match "file2.txt")
-          (expect result :not :to-match "file4.txt")))
-
-      (it "lists remaining files up to limit after context files"
+      (it "lists files up to limit"
         (setq macher-context-string-max-files 4)
-        ;; Create context with 2 files, leaving room for 2 more
-        (let* ((file1 (nth 0 all-files))
-               (file3 (nth 2 all-files))
-               (contexts `((,file1) (,file3)))
-               (result (macher--context-string contexts)))
-          ;; Context files should be in "already provided" section
-          (expect result :to-match "Files already provided above")
+        (let ((result (macher--context-string)))
+          ;; Should show first 4 files.
           (expect result :to-match "file1.txt")
-          (expect result :to-match "file3.txt")
-
-          ;; Should list 2 more files (file2.txt and file4.txt in workspace order)
-          (expect result :to-match "Other files available")
           (expect result :to-match "file2.txt")
+          (expect result :to-match "file3.txt")
           (expect result :to-match "file4.txt")
-
-          ;; file5.txt should be truncated
+          ;; file5.txt should be truncated.
           (expect result :not :to-match "file5.txt")
           (expect result :to-match "1 more files")))
 
-      (it "shows correct truncation count when context files are included"
-        (setq macher-context-string-max-files 3)
-        ;; Context has 1 file, limit allows 2 more, but 4 files remain
-        (let* ((file1 (nth 0 all-files))
-               (contexts `((,file1)))
-               (result (macher--context-string contexts)))
-
-          ;; Should show file1 in context, file2 and file3 in available, truncate file4 and file5
-          (expect result :to-match "file1.txt")
-          (expect result :to-match "file2.txt")
-          (expect result :to-match "file3.txt")
-          (expect result :not :to-match "file4.txt")
-          (expect result :not :to-match "file5.txt")
-          (expect result :to-match "2 more files")))
-
-      (it "handles case where all files are in context"
-        (setq macher-context-string-max-files 3)
-        ;; All files are in context
-        (let* ((contexts (mapcar #'list all-files))
-               (result (macher--context-string contexts)))
-
-          ;; All files should be listed in "already provided" section
-          (expect result :to-match "Files already provided above")
+      (it "lists all files when all are within limit"
+        (setq macher-context-string-max-files 10)
+        (let ((result (macher--context-string)))
+          ;; All files should be listed.
           (expect result :to-match "file1.txt")
           (expect result :to-match "file2.txt")
           (expect result :to-match "file3.txt")
           (expect result :to-match "file4.txt")
           (expect result :to-match "file5.txt")
-
-          ;; No "other files" section
-          (expect result :not :to-match "Other files available")
-          (expect result :not :to-match "more files")))
-
-      (it "shows no truncation message when limit is nil"
-        (setq macher-context-string-max-files nil)
-        (let* ((file1 (nth 0 all-files))
-               (contexts `((,file1)))
-               (result (macher--context-string contexts)))
-
-          (expect result :to-match "file1.txt")
-          (expect result :to-match "file2.txt")
-          (expect result :to-match "file3.txt")
-          (expect result :to-match "file4.txt")
-          (expect result :to-match "file5.txt")
+          ;; No truncation message.
           (expect result :not :to-match "more files")))))
 
   (describe "Workspace detection functions"
@@ -3441,196 +3361,77 @@
             ;; Clean up
             (when (file-exists-p temp-dir)
               (delete-directory temp-dir t)))))))
+  (describe "macher--append-if-missing"
+    (it "appends new items to empty list"
+      (let ((result (macher--append-if-missing '() '(1 2 3))))
+        (expect result :to-equal '(1 2 3))))
 
-  (describe "macher--merge-tools"
-    (before-each
-      (funcall setup-project))
+    (it "appends new items to non-empty list"
+      (let ((result (macher--append-if-missing '(1 2) '(3 4))))
+        (expect result :to-equal '(1 2 3 4))))
 
-    (it "merges tools into empty preset and creates context"
-      (with-temp-buffer
-        (find-file project-file)
-        (let* ((preset '(:tools nil :prompt-transform-functions nil))
-               (test-tools-function
-                (lambda (context make-tool-function)
-                  (list
-                   (funcall make-tool-function
-                            :name "test_tool"
-                            :function (lambda () "test")
-                            :description "A test tool"))))
-               (result (macher--merge-tools preset test-tools-function)))
-          ;; Should return an updated preset.
-          (expect (plistp result) :to-be-truthy)
-          ;; Should have tools.
-          (let ((tools (plist-get result :tools)))
-            (expect (length tools) :to-equal 1)
-            (expect (gptel-tool-name (car tools)) :to-equal "test_tool")))))
+    (it "skips items already present in list"
+      (let ((result (macher--append-if-missing '(1 2 4) '(2 3 4))))
+        (expect result :to-equal '(1 2 4 3))))
 
-    (it "merges tools with existing regular tools in preset"
-      (with-temp-buffer
-        (find-file project-file)
-        (let* ((regular-tool
-                (gptel-make-tool
-                 :name "regular_tool"
-                 :function (lambda () "regular")
-                 :description "A regular tool"))
-               (preset `(:tools (,regular-tool) :prompt-transform-functions nil))
-               (test-tools-function
-                (lambda (context make-tool-function)
-                  (list
-                   (funcall make-tool-function
-                            :name "macher_tool"
-                            :function (lambda () "macher")
-                            :description "A macher tool"))))
-               (result (macher--merge-tools preset test-tools-function)))
-          ;; Should have both tools.
-          (let ((tools (plist-get result :tools)))
-            (expect (length tools) :to-equal 2)
-            ;; Should contain the regular tool.
-            (expect (cl-find-if
-                     (lambda (tool) (string= (gptel-tool-name tool) "regular_tool")) tools)
-                    :to-be-truthy)
-            ;; Should contain the macher tool.
-            (expect (cl-find-if
-                     (lambda (tool) (string= (gptel-tool-name tool) "macher_tool")) tools)
-                    :to-be-truthy)))))
+    (it "returns copy when all items already present"
+      (let* ((original '(1 2 3))
+             (result (macher--append-if-missing original '(1 2 3))))
+        (expect result :to-equal '(1 2 3))
+        ;; Should be a copy, not the same list.
+        (expect result :not :to-be original)))
 
-    (it "reuses existing macher context from same workspace"
-      (with-temp-buffer
-        (find-file project-file)
-        (let* ((existing-context (macher--make-context :workspace (macher-workspace)))
-               (existing-tool
-                (macher--make-tool
-                 existing-context
-                 :name "existing_macher_tool"
-                 :function (lambda () "existing")
-                 :description "An existing macher tool"))
-               (preset `(:tools (,existing-tool) :prompt-transform-functions nil))
-               (context-received nil)
-               (test-tools-function
-                (lambda (context make-tool-function)
-                  (setq context-received context)
-                  ;; Should reuse the existing context.
-                  (expect context :to-be existing-context)
-                  (list
-                   (funcall make-tool-function
-                            :name "new_macher_tool"
-                            :function (lambda () "new")
-                            :description "A new macher tool"))))
-               (result (macher--merge-tools preset test-tools-function)))
-          ;; Should have both tools.
-          (let ((tools (plist-get result :tools)))
-            (expect (length tools) :to-equal 2)
-            ;; Should contain the existing tool.
-            (expect (cl-find-if
-                     (lambda (tool) (string= (gptel-tool-name tool) "existing_macher_tool")) tools)
-                    :to-be-truthy)
-            ;; Should contain the new tool.
-            (expect (cl-find-if
-                     (lambda (tool) (string= (gptel-tool-name tool) "new_macher_tool")) tools)
-                    :to-be-truthy))
-          ;; Verify the context was reused.
-          (expect context-received :to-be existing-context))))
+    (it "returns copy of original list"
+      (let* ((original '(1 2 3))
+             (result (macher--append-if-missing original '())))
+        (expect result :to-equal original)
+        ;; Should be a copy, not the same list.
+        (expect result :not :to-be original)))
 
-    (it "removes existing tools with same names as new ones"
-      (with-temp-buffer
-        (find-file project-file)
-        (let* ((regular-tool
-                (gptel-make-tool
-                 :name "conflicting_tool"
-                 :function (lambda () "regular")
-                 :description "A regular tool"))
-               (macher-context (macher--make-context :workspace '(project . "/other/workspace")))
-               (macher-tool
-                (macher--make-tool
-                 macher-context
-                 :name "other_tool"
-                 :function (lambda () "other")
-                 :description "Another tool"))
-               (preset `(:tools (,regular-tool ,macher-tool) :prompt-transform-functions nil))
-               (test-tools-function
-                (lambda (context make-tool-function)
-                  (list
-                   (funcall make-tool-function
-                            :name "conflicting_tool"
-                            :function (lambda () "new conflicting")
-                            :description "New conflicting tool")
-                   (funcall make-tool-function
-                            :name "unique_tool"
-                            :function (lambda () "unique")
-                            :description "Unique tool"))))
-               (result (macher--merge-tools preset test-tools-function)))
-          ;; Should have 3 tools: other_tool + 2 new tools.
-          (let ((tools (plist-get result :tools)))
-            (expect (length tools) :to-equal 3)
-            ;; Should not contain the old conflicting tool.
-            (expect (cl-find-if
-                     (lambda (tool)
-                       (and (string= (gptel-tool-name tool) "conflicting_tool")
-                            (not (macher--tool-context tool))))
-                     tools)
-                    :to-be nil)
-            ;; Should contain the new conflicting tool.
-            (expect (cl-find-if
-                     (lambda (tool)
-                       (and (string= (gptel-tool-name tool) "conflicting_tool")
-                            (macher--tool-context tool)))
-                     tools)
-                    :to-be-truthy)
-            ;; Should contain the other tool.
-            (expect (cl-find-if (lambda (tool) (string= (gptel-tool-name tool) "other_tool")) tools)
-                    :to-be-truthy)
-            ;; Should contain the unique tool.
-            (expect (cl-find-if
-                     (lambda (tool) (string= (gptel-tool-name tool) "unique_tool")) tools)
-                    :to-be-truthy)))))
+    (it "handles empty new-items list"
+      (let ((result (macher--append-if-missing '(1 2 3) '())))
+        (expect result :to-equal '(1 2 3))))
 
-    (it "creates new context when no existing macher tools found"
-      (with-temp-buffer
-        (find-file project-file)
-        (let* ((regular-tool
-                (gptel-make-tool
-                 :name "regular_tool"
-                 :function (lambda () "regular")
-                 :description "A regular tool"))
-               (preset `(:tools (,regular-tool) :prompt-transform-functions nil))
-               (context-received nil)
-               (test-tools-function
-                (lambda (context make-tool-function)
-                  (setq context-received context)
-                  ;; Should get a new context.
-                  (expect (macher-context-p context) :to-be-truthy)
-                  ;; Should have the current workspace.
-                  (expect (macher-context-workspace context) :to-equal (macher-workspace))
-                  (list
-                   (funcall make-tool-function
-                            :name "new_tool"
-                            :function (lambda () "new")
-                            :description "A new tool"))))
-               (result (macher--merge-tools preset test-tools-function)))
-          ;; Should have both tools.
-          (let ((tools (plist-get result :tools)))
-            (expect (length tools) :to-equal 2))
-          ;; Verify a new context was created.
-          (expect (macher-context-p context-received) :to-be-truthy)
-          (expect (macher-context-workspace context-received) :to-equal (macher-workspace)))))
+    (it "uses custom test function when provided"
+      (let* ((testfn (lambda (a b) (= (mod a 10) (mod b 10))))
+             (result (macher--append-if-missing '(1 2 3) '(11 14) testfn)))
+        ;; 11 matches 1, so shouldn't be added.
+        ;; 14 matches 4 (not present), so should be added.
+        (expect result :to-equal '(1 2 3 14))))
 
-    (it "warns and returns unchanged preset when no workspace found"
-      (with-temp-buffer
-        ;; Don't set up any workspace.
-        (let ((macher-workspace-functions nil)
-              (preset '(:tools nil :prompt-transform-functions nil))
-              (warning-triggered nil))
-          ;; Mock the warn function to capture warnings.
-          (spy-on 'display-warning
-                  :and-call-fake
-                  (lambda (type msg &optional level buffer-name)
-                    (when (string-match "No macher workspace found" msg)
-                      (setq warning-triggered t))))
-          (let ((result (macher--merge-tools preset (lambda (context make-tool-function) nil))))
-            ;; Should return the original preset unchanged.
-            (expect result :to-equal preset)
-            ;; Should have triggered a warning.
-            (expect warning-triggered :to-be-truthy))))))
+    (it "uses equal as default test function"
+      (let ((result (macher--append-if-missing '("a" "b") '("b" "c"))))
+        (expect result :to-equal '("a" "b" "c"))))
+
+    (it "preserves order of original list"
+      (let ((result (macher--append-if-missing '(3 1 2) '(4 5))))
+        (expect result :to-equal '(3 1 2 4 5))))
+
+    (it "appends items in order from new-items"
+      (let ((result (macher--append-if-missing '(1) '(5 4 3 2))))
+        (expect result :to-equal '(1 5 4 3 2))))
+
+    (it "handles lists with nil values"
+      (let ((result (macher--append-if-missing '(1 nil 2) '(nil 3))))
+        ;; nil already exists in the original list, so it won't be added again.
+        (expect result :to-equal '(1 nil 2 3))))
+
+    (it "appends nil when not already present"
+      (let ((result (macher--append-if-missing '(1 2) '(nil 3))))
+        (expect result :to-equal '(1 2 nil 3))))
+
+    (it "handles complex data structures"
+      (let* ((obj1 '(a . 1))
+             (obj2 '(b . 2))
+             (obj3 '(c . 3))
+             (result (macher--append-if-missing (list obj1 obj2) (list obj2 obj3))))
+        (expect result :to-equal (list obj1 obj2 obj3))))
+
+    (it "uses custom testfn for complex structures"
+      (let* ((testfn (lambda (a b) (equal (car a) (car b))))
+             (result (macher--append-if-missing '((a . 1) (b . 2)) '((b . 999) (c . 3)) testfn)))
+        ;; (b . 999) should be skipped because car matches (b . 2).
+        (expect result :to-equal '((a . 1) (b . 2) (c . 3))))))
 
   (describe "macher--with-preset"
     :var (original-presets)
@@ -3707,14 +3508,15 @@
              ;; Set up the existing transforms list.
              (gptel-prompt-transform-functions (list existing-transform)))
         (macher--with-preset
-         'macher-notools
+         'macher-system
          (lambda ()
            ;; Capture the transforms list inside the preset context.
            (setq captured-transforms gptel-prompt-transform-functions)
            ;; Verify that the existing transform is preserved.
            (expect (member existing-transform gptel-prompt-transform-functions) :to-be-truthy)
            ;; Verify that macher transform is also present.
-           (expect (member #'macher--prompt-transform-add-context gptel-prompt-transform-functions)
+           (expect (member
+                    #'macher--transform-system-replace-placeholder gptel-prompt-transform-functions)
                    :to-be-truthy)))
         ;; Verify that the global transforms list is restored after the preset.
         (expect gptel-prompt-transform-functions :to-equal (list existing-transform))
@@ -3753,7 +3555,7 @@
                  (lambda (tool) (string= (gptel-tool-name tool) "existing_tool")) captured-tools)
                 :to-be-truthy))))
 
-  (describe "macher-install"
+  (describe "macher--install-presets"
     :var (original-presets)
 
     (before-each
@@ -3771,19 +3573,778 @@
       ;; Verify that gptel--known-presets now contains the expected presets.
       (expect gptel--known-presets :not :to-be nil)
       ;; Check that all three macher presets are installed.
-      (expect (assq 'macher gptel--known-presets) :to-be-truthy)
-      (expect (assq 'macher-ro gptel--known-presets) :to-be-truthy)
-      (expect (assq 'macher-notools gptel--known-presets) :to-be-truthy)
-      ;; Verify the descriptions of the installed presets.
-      (let ((macher-preset (gptel-get-preset 'macher))
-            (macher-ro-preset (gptel-get-preset 'macher-ro))
-            (macher-notools-preset (gptel-get-preset 'macher-notools)))
+      (dolist (preset-name
+               '(macher macher-ro macher-system macher-system-commit macher-tools macher-base))
+        (expect (assq preset-name gptel--known-presets) :to-be-truthy)
+        (let ((preset (gptel-get-preset preset-name)))
+          (expect preset :to-be-truthy)
+          (expect (stringp (plist-get preset :description)) :to-be-truthy)))
+      ;; Verify the description of one of the presets explicitly, just to be sure everything is
+      ;; getting registered correctly.
+      (let ((macher-preset (gptel-get-preset 'macher)))
         (expect (plist-get macher-preset :description)
-                :to-equal "Send macher workspace context + tools to read files and propose edits")
-        (expect (plist-get macher-ro-preset :description)
-                :to-equal "Send macher workspace context + tools to read files")
-        (expect (plist-get macher-notools-preset :description)
-                :to-equal "Send macher workspace context without tools"))))
+                :to-equal "Send macher workspace context + tools to read files and propose edits")))
+
+    (it "installs custom presets"
+      (let ((macher-presets-alist '((test-preset . (:description "Test preset")))))
+        (macher--install-presets)
+        (expect (gptel-get-preset 'test-preset) :to-be-truthy)
+        (expect (gptel-get-preset 'macher) :not :to-be-truthy))))
+
+  (describe "macher--install-tools"
+    :var (original-tools)
+
+    (before-each
+      (setq original-tools gptel--known-tools)
+      (setq gptel--known-tools nil))
+
+    (after-each
+      (setq gptel--known-tools original-tools))
+
+    (it "installs all macher tools to the global registry"
+      (expect gptel--known-tools :to-be nil)
+      (macher--install-tools)
+      ;; Tools should be registered.
+      (expect gptel--known-tools :not :to-be nil)
+      ;; Check that each tool from macher-tools is registered.
+      (dolist (tool-def macher-tools)
+        (let* ((tool-name (plist-get tool-def :name))
+               (registry-tool (gptel-get-tool (list macher-tool-category tool-name))))
+          (expect registry-tool :to-be-truthy)
+          (expect (gptel-tool-name registry-tool) :to-equal tool-name)
+          (expect (gptel-tool-category registry-tool) :to-equal macher-tool-category))))
+
+    (it "does not add tools to gptel-tools variable"
+      (let ((original-gptel-tools gptel-tools))
+        (macher--install-tools)
+        ;; gptel-tools should remain unchanged.
+        (expect gptel-tools :to-equal original-gptel-tools)))
+
+    (it "creates tools with wrapped functions that require context"
+      (macher--install-tools)
+      (let* ((tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+             (tool-fn (gptel-tool-function tool))
+             (warn-called nil))
+        (spy-on 'warn :and-call-fake (lambda (&rest _args) (setq warn-called t)))
+        ;; Calling tool without context should error.
+        (expect (funcall tool-fn "some-path") :to-throw)
+        (expect warn-called :to-be-truthy)))
+
+    (it "idempotently reinstalls tools"
+      (macher--install-tools)
+      (let ((first-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace"))))
+        (macher--install-tools)
+        ;; Tool should still be retrievable.
+        (let ((second-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace"))))
+          (expect second-tool :to-be-truthy)
+          (expect (gptel-tool-name second-tool) :to-equal (gptel-tool-name first-tool))))))
+
+  (describe "macher-presets-alist"
+    :var (original-presets original-tools)
+
+    (before-each
+      (funcall setup-project)
+      (setq original-presets gptel--known-presets)
+      (setq original-tools gptel--known-tools)
+      (setq gptel--known-presets nil)
+      (setq gptel--known-tools nil))
+
+    (after-each
+      (setq gptel--known-presets original-presets)
+      (setq gptel--known-tools original-tools))
+
+    (describe "macher preset"
+      (it "adds all macher tools to gptel-tools"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-tools nil))
+            (macher--with-preset
+             'macher
+             (lambda ()
+               ;; Should have macher tools.
+               (expect gptel-tools :not :to-be nil)
+               ;; Check for specific tools.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "edit_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy))))))
+
+      (it "preserves existing non-macher tools"
+        (with-temp-buffer
+          (find-file project-file)
+          (let* ((existing-tool
+                  (gptel-make-tool
+                   :name "existing_tool"
+                   :function (lambda () "test")
+                   :description "An existing tool"
+                   :category "other"))
+                 (gptel-tools (list existing-tool)))
+            (macher--with-preset
+             'macher
+             (lambda ()
+               ;; Should still have existing tool.
+               (expect (cl-find-if
+                        (lambda (tool) (string= (gptel-tool-name tool) "existing_tool"))
+                        gptel-tools)
+                       :to-be-truthy)
+               ;; Should also have macher tools.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy))))))
+
+      (it "enables tool use"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-use-tools nil))
+            (macher--with-preset 'macher (lambda () (expect gptel-use-tools :to-be-truthy))))))
+
+      (it "adds system context injector to transforms"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher
+             (lambda ()
+               (expect (member
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
+                       :to-be-truthy))))))
+
+      (it "adds macher--transform-setup-tools to transforms"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher
+             (lambda ()
+               (expect (member #'macher--transform-setup-tools gptel-prompt-transform-functions)
+                       :to-be-truthy)))))))
+
+    (describe "macher-ro preset"
+      (it "adds only read tools to gptel-tools"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-tools nil))
+            (macher--with-preset
+             'macher-ro
+             (lambda ()
+               ;; Should have read tools.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "list_directory_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "search_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)
+               ;; Should NOT have write tools.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "edit_file_in_workspace"))
+                        gptel-tools)
+                       :to-be nil)
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "write_file_in_workspace"))
+                        gptel-tools)
+                       :to-be nil))))))
+
+      (it "removes existing macher write tools"
+        (with-temp-buffer
+          (find-file project-file)
+          ;; Install tools first to get the edit tool.
+          (macher--install-tools)
+          (let* ((edit-tool (gptel-get-tool (list macher-tool-category "edit_file_in_workspace")))
+                 (gptel-tools (list edit-tool)))
+            (macher--with-preset
+             'macher-ro
+             (lambda ()
+               ;; Edit tool should be removed.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "edit_file_in_workspace"))
+                        gptel-tools)
+                       :to-be nil)
+               ;; Read tools should be present.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)))))))
+
+    (describe "macher-system preset"
+      (it "does not add any tools"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-tools nil))
+            (macher--with-preset 'macher-system (lambda () (expect gptel-tools :to-be nil))))))
+
+      (it "adds context transform"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-system
+             (lambda ()
+               (expect (member
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
+                       :to-be-truthy)))))))
+
+    (describe "macher-system-commit preset"
+      (it "does not add any tools"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-tools nil))
+            (macher--with-preset
+             'macher-system-commit (lambda () (expect gptel-tools :to-be nil))))))
+
+      (it "does not add transforms"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-system-commit
+             (lambda () (expect gptel-prompt-transform-functions :to-be nil))))))
+
+      (it "replaces placeholder in system prompt with current context string"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((macher-context-string-function (lambda () "foobar"))
+                (gptel--system-message (concat "System prompt" macher-context-string-placeholder)))
+            (macher--with-preset
+             'macher-system-commit
+             (lambda ()
+               ;; Should have replaced placeholder with actual context.
+               (expect (string-match-p
+                        (regexp-quote macher-context-string-placeholder) gptel--system-message)
+                       :to-be nil)
+               ;; Should contain the marker start (indicating context was injected).
+               (expect (string-match-p
+                        (regexp-quote
+                         (concat
+                          macher-context-string-marker-start
+                          "foobar"
+                          macher-context-string-marker-end))
+                        gptel--system-message)
+                       :to-be-truthy))))))
+
+      (it "is a no-op when system prompt has no placeholder"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel--system-message "System prompt without placeholder"))
+            (macher--with-preset
+             'macher-system-commit
+             (lambda ()
+               ;; System message should be unchanged.
+               (expect gptel--system-message :to-equal "System prompt without placeholder")))))))
+
+    (describe "macher-tools preset"
+      (it "adds all macher tools to gptel-tools"
+        (with-temp-buffer
+          (find-file project-file)
+          ;; Install tools first so we can reference them.
+          (macher--install-tools)
+          (let ((gptel-tools nil))
+            (macher--with-preset
+             'macher-tools
+             (lambda ()
+               ;; Should have all macher tools.
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "edit_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy)
+               (expect (cl-find-if
+                        (lambda (tool)
+                          (string= (gptel-tool-name tool) "write_file_in_workspace"))
+                        gptel-tools)
+                       :to-be-truthy))))))
+
+      (it "does not add system prompt modifications"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel--system-message "Original system prompt"))
+            (macher--with-preset
+             'macher-tools
+             (lambda ()
+               ;; System prompt should be unchanged (no placeholder added).
+               (expect gptel--system-message :to-equal "Original system prompt"))))))
+
+      (it "adds macher--transform-setup-tools transform"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-tools
+             (lambda ()
+               ;; Should add the setup transform.
+               (expect (member #'macher--transform-setup-tools gptel-prompt-transform-functions)
+                       :to-be-truthy))))))
+
+      (it "does not add system-replace-placeholder transform"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-tools
+             (lambda ()
+               ;; Should NOT add the system prompt transform.
+               (expect (member
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
+                       :to-be nil)))))))
+
+    (describe "macher-base preset"
+      (it "adds base transforms but no tools"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-tools nil)
+                (gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               ;; Should not add tools.
+               (expect gptel-tools :to-be nil)
+               ;; Should add base transforms.
+               (expect (member #'macher--transform-setup-tools gptel-prompt-transform-functions)
+                       :to-be-truthy)
+               (expect (member
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
+                       :to-be-truthy))))))
+
+      (it "replaces existing base transform and re-appends it at the end"
+        (with-temp-buffer
+          (find-file project-file)
+          (let* ((other-transform (lambda (callback _fsm) (funcall callback)))
+                 ;; Start with base transform in the middle of the list.
+                 (gptel-prompt-transform-functions
+                  (list other-transform #'macher--transform-setup-tools other-transform)))
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               ;; Base transform should appear exactly once.
+               (expect (cl-count #'macher--transform-setup-tools gptel-prompt-transform-functions)
+                       :to-equal 1)
+               ;; Base transform should be at the end.
+               (expect (car (last gptel-prompt-transform-functions))
+                       :to-be #'macher--transform-setup-tools)
+               ;; Other transforms should still be present.
+               (expect (cl-count other-transform gptel-prompt-transform-functions) :to-equal 2))))))
+
+      (it "does not add context transform"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               ;; Should NOT add context transform (that's macher-prompt's job).
+               (expect (member
+                        #'macher--prompt-transform-add-context gptel-prompt-transform-functions)
+                       :to-be nil))))))
+
+      (it "adds system-replace-placeholder transform"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               ;; Should add system-replace-placeholder transform.
+               (expect (member
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
+                       :to-be-truthy))))))
+
+      (it "does not move system-replace-placeholder transform if already present"
+        (with-temp-buffer
+          (find-file project-file)
+          (let* ((other-transform (lambda (callback _fsm) (funcall callback)))
+                 ;; Start with system-replace-placeholder transform already in the list.
+                 (gptel-prompt-transform-functions
+                  (list #'macher--transform-system-replace-placeholder other-transform)))
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               ;; System-replace-placeholder transform should appear exactly once.
+               (expect (cl-count
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
+                       :to-equal 1)
+               ;; It should still be at the front (not moved).
+               (expect (car gptel-prompt-transform-functions)
+                       :to-be #'macher--transform-system-replace-placeholder)
+               ;; Other transform should still be present.
+               (expect (member other-transform gptel-prompt-transform-functions) :to-be-truthy)
+               ;; Setup-tools transform should be at the end.
+               (expect (car (last gptel-prompt-transform-functions))
+                       :to-be #'macher--transform-setup-tools))))))
+
+      (it "preserves system-replace-placeholder position when applying preset multiple times"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            ;; Apply preset once.
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               (let ((first-transforms (copy-sequence gptel-prompt-transform-functions)))
+                 ;; Apply preset again.
+                 (macher--with-preset
+                  'macher-base
+                  (lambda ()
+                    ;; Transforms should be in the same order.
+                    (expect gptel-prompt-transform-functions :to-equal first-transforms)))))))))
+
+      (it "preserves custom non-macher transforms in gptel-prompt-transform-functions"
+        (with-temp-buffer
+          (find-file project-file)
+          (let* ((custom-transform-1 (lambda (callback _fsm) (funcall callback)))
+                 (custom-transform-2 (lambda (callback _fsm) (funcall callback)))
+                 (gptel-prompt-transform-functions (list custom-transform-1 custom-transform-2)))
+            (macher--with-preset
+             'macher-base
+             (lambda ()
+               ;; Both custom transforms should still be present.
+               (expect (member custom-transform-1 gptel-prompt-transform-functions) :to-be-truthy)
+               (expect (member custom-transform-2 gptel-prompt-transform-functions) :to-be-truthy)
+               ;; Macher transforms should also be present.
+               (expect (member #'macher--transform-setup-tools gptel-prompt-transform-functions)
+                       :to-be-truthy)
+               (expect (member
+                        #'macher--transform-system-replace-placeholder
+                        gptel-prompt-transform-functions)
+                       :to-be-truthy)
+               ;; Total count should be 4 (2 custom + 2 macher).
+               (expect (length gptel-prompt-transform-functions) :to-equal 4))))))
+
+      (it "only adds transforms once when applied multiple times"
+        (let* ((orig-prompt-transforms gptel-prompt-transform-functions)
+               (callback-invoked nil))
+          (expect orig-prompt-transforms :not :to-contain 'macher--transform-setup-tools)
+          (expect orig-prompt-transforms
+                  :not
+                  :to-contain 'macher--transform-system-replace-placeholder)
+          (macher--with-preset
+           'macher-base
+           (lambda ()
+             (macher--with-preset
+              'macher-base
+              (lambda ()
+                (setq callback-invoked t)
+                (expect gptel-prompt-transform-functions
+                        :to-equal
+                        (append
+                         orig-prompt-transforms
+                         '(macher--transform-system-replace-placeholder
+                           macher--transform-setup-tools)))))))
+          (expect callback-invoked :to-be t))))
+
+    (describe "preset idempotency"
+      (it "does not duplicate tools when preset applied twice"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-tools nil))
+            (macher--with-preset
+             'macher
+             (lambda ()
+               (let ((first-count (length gptel-tools)))
+                 (macher--with-preset
+                  'macher
+                  (lambda ()
+                    ;; Tool count should not change.
+                    (expect (length gptel-tools) :to-equal first-count)))))))))
+
+      (it "does not duplicate transforms when preset applied twice"
+        (with-temp-buffer
+          (find-file project-file)
+          (let ((gptel-prompt-transform-functions nil))
+            (macher--with-preset
+             'macher
+             (lambda ()
+               (let ((first-count (length gptel-prompt-transform-functions)))
+                 (macher--with-preset
+                  'macher
+                  (lambda ()
+                    ;; Transform count should not change.
+                    (expect (length gptel-prompt-transform-functions)
+                            :to-equal first-count)))))))))))
+
+  (describe "macher--make-tool"
+    :var (original-tools)
+
+    (before-each
+      (setq original-tools gptel--known-tools)
+      (setq gptel--known-tools nil))
+
+    (after-each
+      (setq gptel--known-tools original-tools))
+
+    (it "creates anonymous tool when anon is non-nil"
+      (let ((tool
+             (macher--make-tool
+              t
+              :name "test_tool"
+              :function (lambda (context arg) arg)
+              :description "A test tool"
+              :args '((:name "arg" :type string)))))
+        ;; Tool should be created.
+        (expect (gptel-tool-p tool) :to-be-truthy)
+        (expect (gptel-tool-name tool) :to-equal "test_tool")
+        ;; Tool should NOT be in registry.
+        (expect gptel--known-tools :to-be nil)))
+
+    (it "registers tool when anon is nil"
+      (let ((tool
+             (macher--make-tool
+              nil
+              :name "registered_tool"
+              :function (lambda (context arg) arg)
+              :description "A registered tool"
+              :args '((:name "arg" :type string)))))
+        ;; Tool should be created.
+        (expect (gptel-tool-p tool) :to-be-truthy)
+        ;; Tool should be in registry.
+        (expect (gptel-get-tool (list macher-tool-category "registered_tool")) :to-be-truthy)))
+
+    (it "uses macher-tool-category regardless of provided category"
+      (let ((tool
+             (macher--make-tool
+              t
+              :name "categorized_tool"
+              :function (lambda (context) nil)
+              :description "A tool"
+              :category "other-category")))
+        ;; Category should be overridden.
+        (expect (gptel-tool-category tool) :to-equal macher-tool-category)))
+
+    (it "wraps function to require context as first argument"
+      (let* ((received-args nil)
+             (tool
+              (macher--make-tool
+               t
+               :name "wrapped_tool"
+               :function
+               (lambda (context arg1 arg2)
+                 (setq received-args (list context arg1 arg2))
+                 "result")
+               :description "A wrapped tool"
+               :args '((:name "arg1" :type string) (:name "arg2" :type number))))
+             (tool-fn (gptel-tool-function tool))
+             (context (macher--make-context)))
+        ;; Calling with context should work.
+        (let ((result (funcall tool-fn context "hello" 42)))
+          (expect result :to-equal "result")
+          (expect received-args :to-equal (list context "hello" 42)))))
+
+    (it "errors when called without context"
+      (let* ((tool
+              (macher--make-tool
+               t
+               :name "context_required_tool"
+               :function (lambda (context) "result")
+               :description "A tool requiring context"))
+             (tool-fn (gptel-tool-function tool))
+             (warn-called nil))
+        (spy-on 'warn :and-call-fake (lambda (&rest _args) (setq warn-called t)))
+        ;; Calling without context should error.
+        (expect (funcall tool-fn "not-a-context") :to-throw)
+        (expect warn-called :to-be-truthy)))
+
+    (it "errors when called with nil context"
+      (let* ((tool
+              (macher--make-tool
+               t
+               :name "nil_context_tool"
+               :function (lambda (context) "result")
+               :description "A tool"))
+             (tool-fn (gptel-tool-function tool))
+             (warn-called nil))
+        (spy-on 'warn :and-call-fake (lambda (&rest _args) (setq warn-called t)))
+        ;; Calling with nil should error.
+        (expect (funcall tool-fn nil) :to-throw)
+        (expect warn-called :to-be-truthy))))
+
+  (describe "macher-resolve-tool"
+    :var (original-tools)
+
+    (before-each
+      (setq original-tools gptel--known-tools)
+      (setq gptel--known-tools nil))
+
+    (after-each
+      (setq gptel--known-tools original-tools))
+
+    (it "returns registered tool if available"
+      ;; Install tools first.
+      (macher--install-tools)
+      (let* ((tool-def (car macher-tools))
+             (tool-name (plist-get tool-def :name))
+             (resolved (macher-resolve-tool tool-def))
+             (registry-tool (gptel-get-tool (list macher-tool-category tool-name))))
+        ;; Should return the same tool from registry.
+        (expect resolved :to-be registry-tool)))
+
+    (it "creates anonymous tool if not in registry"
+      (let* ((tool-def (car macher-tools))
+             (tool-name (plist-get tool-def :name))
+             (resolved (macher-resolve-tool tool-def)))
+        ;; Should create a tool.
+        (expect (gptel-tool-p resolved) :to-be-truthy)
+        (expect (gptel-tool-name resolved) :to-equal tool-name)
+        ;; Registry should still be empty.
+        (expect gptel--known-tools :to-be nil)))
+
+    (it "creates tool with correct category"
+      (let* ((tool-def '(:name "test_tool" :function (lambda (context) nil) :description "Test"))
+             (resolved (macher-resolve-tool tool-def)))
+        (expect (gptel-tool-category resolved) :to-equal macher-tool-category))))
+
+  (describe "macher--setup-tools"
+    :var (original-tools)
+
+    (before-each
+      (funcall setup-project)
+      (setq original-tools gptel--known-tools)
+      (setq gptel--known-tools nil))
+
+    (after-each
+      (setq gptel--known-tools original-tools))
+
+    (it "wraps macher tools to inject context"
+      (macher--install-tools)
+      (let* ((context (macher--make-context :workspace `(project . ,project-dir)))
+             (get-context (lambda () context))
+             (read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+             (fsm (gptel-make-fsm))
+             (info (gptel-fsm-info fsm)))
+        ;; Add macher tool to FSM.
+        (setf (gptel-fsm-info fsm) (plist-put info :tools (list read-tool)))
+        ;; Call setup-tools.
+        (macher--setup-tools fsm get-context)
+        ;; Get the processed tool.
+        (let* ((processed-tools (plist-get (gptel-fsm-info fsm) :tools))
+               (processed-tool (car processed-tools)))
+          ;; Category should be marked as processed.
+          (expect (gptel-tool-category processed-tool)
+                  :to-equal (format "%s__processed" macher-tool-category))
+          ;; Tool name should be unchanged.
+          (expect (gptel-tool-name processed-tool) :to-equal "read_file_in_workspace"))))
+
+    (it "preserves non-macher tools unchanged"
+      (let* ((other-tool
+              (gptel-make-tool
+               :name "other_tool"
+               :function (lambda () "test")
+               :description "Other tool"
+               :category "other"))
+             (context (macher--make-context :workspace `(project . ,project-dir)))
+             (get-context (lambda () context))
+             (fsm (gptel-make-fsm))
+             (info (gptel-fsm-info fsm)))
+        ;; Add other tool to FSM.
+        (setf (gptel-fsm-info fsm) (plist-put info :tools (list other-tool)))
+        ;; Call setup-tools.
+        (macher--setup-tools fsm get-context)
+        ;; Get the processed tools.
+        (let* ((processed-tools (plist-get (gptel-fsm-info fsm) :tools))
+               (processed-tool (car processed-tools)))
+          ;; Tool should be unchanged.
+          (expect processed-tool :to-be other-tool))))
+
+    (it "provides same context to all macher tools"
+      (macher--install-tools)
+      (let* ((context (macher--make-context :workspace `(project . ,project-dir)))
+             (get-context-calls 0)
+             (get-context
+              (lambda ()
+                (setq get-context-calls (1+ get-context-calls))
+                context))
+             (read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+             (list-tool (gptel-get-tool (list macher-tool-category "list_directory_in_workspace")))
+             (fsm (gptel-make-fsm))
+             (info (gptel-fsm-info fsm)))
+        ;; Add multiple macher tools.
+        (setf (gptel-fsm-info fsm) (plist-put info :tools (list read-tool list-tool)))
+        (setf (gptel-fsm-info fsm) (plist-put (gptel-fsm-info fsm) :buffer (current-buffer)))
+        ;; Call setup-tools.
+        (macher--setup-tools fsm get-context)
+        ;; Get processed tools and call both.
+        (let* ((processed-tools (plist-get (gptel-fsm-info fsm) :tools)))
+          (dolist (tool processed-tools)
+            ;; Each tool call should invoke get-context.
+            (ignore-errors
+              (funcall (gptel-tool-function tool) ".")))
+          ;; get-context should have been called once per tool invocation.
+          (expect get-context-calls :to-equal 2))))
+
+    (it "handles nil context from get-context"
+      (macher--install-tools)
+      (let* ((get-context (lambda () nil))
+             (read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+             (fsm (gptel-make-fsm))
+             (info (gptel-fsm-info fsm))
+             (warn-called nil))
+        ;; Add tool to FSM.
+        (setf (gptel-fsm-info fsm) (plist-put info :tools (list read-tool)))
+        (setf (gptel-fsm-info fsm) (plist-put (gptel-fsm-info fsm) :buffer (current-buffer)))
+        ;; Call setup-tools.
+        (macher--setup-tools fsm get-context)
+        ;; Get processed tool and try to call it.
+        (let* ((processed-tools (plist-get (gptel-fsm-info fsm) :tools))
+               (processed-tool (car processed-tools)))
+          (spy-on 'warn :and-call-fake (lambda (&rest _args) (setq warn-called t)))
+          ;; Calling should error since context is nil.
+          (expect (funcall (gptel-tool-function processed-tool) ".") :to-throw)
+          (expect warn-called :to-be-truthy)))))
+
+  (describe "macher--context-for-fsm"
+    (before-each
+      (funcall setup-project))
+
+    (it "returns nil when FSM is nil"
+      (expect (macher--context-for-fsm nil) :to-be nil))
+
+    (it "returns nil when FSM has no macher context"
+      (let ((fsm (gptel-make-fsm)))
+        (expect (macher--context-for-fsm fsm) :to-be nil)))
+
+    (it "returns context stored on FSM info"
+      (let* ((context (macher--make-context :workspace `(project . ,project-dir)))
+             (fsm (gptel-make-fsm))
+             (info (gptel-fsm-info fsm)))
+        ;; Store context on FSM.
+        (setf (gptel-fsm-info fsm) (plist-put info :macher--context context))
+        ;; Should return the context.
+        (expect (macher--context-for-fsm fsm) :to-be context)))
+
+    (it "returns nil when FSM info is nil"
+      (let ((fsm (gptel-make-fsm)))
+        ;; Clear the info.
+        (setf (gptel-fsm-info fsm) nil)
+        (expect (macher--context-for-fsm fsm) :to-be nil))))
 
   (describe "macher-patch-buffer"
     (before-each
@@ -4004,221 +4565,6 @@
             (let ((content (buffer-substring-no-properties (point-min) (point-max))))
               ;; The header and prompt will be added, but not another prefix before them.
               (expect content :to-match "^previous content\n### `test` Test prompt")))))))
-
-  (describe "macher--make-tool and macher--tool-context"
-    :var (original-tools)
-
-    (before-each
-      (setq original-tools gptel--known-tools)
-      (setq gptel--known-tools nil))
-
-    (after-each
-      (setq gptel--known-tools original-tools))
-
-    (it "creates macher tool and retrieves context"
-      ;; Ensure gptel--known-tools is empty at the beginning.
-      (expect gptel--known-tools :to-be nil)
-      ;; Create a test context and tool.
-      (let* ((context (macher--make-context))
-             (test-function (lambda (arg1 arg2) (list arg1 arg2)))
-             (tool
-              (macher--make-tool
-               context
-               :name "test_tool"
-               :function test-function
-               :description "A test tool"
-               :args '((:name "arg1" :type string) (:name "arg2" :type number)))))
-        ;; Verify gptel--known-tools is still empty after calling macher--make-tool.
-        (expect gptel--known-tools :to-be nil)
-        ;; Verify macher--tool-context returns the correct context.
-        (let ((retrieved-context (macher--tool-context tool)))
-          (expect retrieved-context :to-be context))
-        ;; Verify the tool function can be called.
-        (let* ((tool-fn (gptel-tool-function tool))
-               (result (funcall tool-fn "hello" 42)))
-          (expect result :to-equal '("hello" 42)))))
-
-    (it "returns nil for regular tools"
-      ;; Create a regular tool using gptel-make-tool (not macher--make-tool).
-      (let ((regular-tool
-             (gptel-make-tool
-              :name "regular_tool"
-              :function (lambda (x) x)
-              :description "A regular tool"
-              :args '((:name "x" :type string)))))
-        ;; Verify macher--tool-context returns nil for this regular tool.
-        (expect (macher--tool-context regular-tool) :to-be nil))))
-
-  (describe "macher--functional-preset"
-    :var (original-presets test-spec-function test-counter gptel-use-tools-original gptel-tools-original)
-
-    (before-each
-      (setq original-presets gptel--known-presets)
-      (setq gptel--known-presets nil)
-      (setq test-counter 0)
-      (setq gptel-use-tools-original gptel-use-tools)
-      (setq gptel-tools-original gptel-tools)
-      ;; Create a test spec function that increments a counter and returns dynamic values.
-      (setq test-spec-function
-            (lambda ()
-              (setq test-counter (1+ test-counter))
-              `(:use-tools
-                ,(if (= test-counter 1)
-                     t
-                   nil)
-                :tools
-                ,(if (= test-counter 1)
-                     '(tool1)
-                   '(tool2))))))
-
-    (after-each
-      (setq gptel--known-presets original-presets)
-      (setq gptel-use-tools gptel-use-tools-original)
-      (setq gptel-tools gptel-tools-original))
-
-    (it "creates a functional preset with dynamic values"
-      (let ((preset-spec
-             (macher--functional-preset
-              test-spec-function
-              :description "Test functional preset"
-              :use-tools nil
-              :tools nil)))
-        ;; Verify the preset spec has the expected structure.
-        (expect (plistp preset-spec) :to-be-truthy)
-        (expect (plist-get preset-spec :description) :to-equal "Test functional preset")
-        (expect (functionp (plist-get preset-spec :pre)) :to-be-truthy)
-        (expect (functionp (plist-get preset-spec :post)) :to-be-truthy)))
-
-    (it "applies dynamic values through :pre and :post functions"
-      (let* ((preset-spec
-              (macher--functional-preset
-               test-spec-function
-               :description "Test functional preset"
-               :use-tools nil
-               :tools nil))
-             (pre-fn (plist-get preset-spec :pre))
-             (post-fn (plist-get preset-spec :post)))
-        ;; Initially, test-counter should be 0.
-        (expect test-counter :to-equal 0)
-
-        ;; Call :pre function - this should call our spec function and return the dynamic spec.
-        (let ((dynamic-spec (funcall pre-fn)))
-          (expect test-counter :to-equal 1)
-          (expect (plist-get dynamic-spec :use-tools) :to-be t)
-          (expect (plist-get dynamic-spec :tools) :to-equal '(tool1)))
-
-        ;; Call :post function - this should apply the values to gptel variables.
-        (funcall post-fn)
-        (expect gptel-use-tools :to-be t)
-        (expect gptel-tools :to-equal '(tool1))))
-
-    (it "works with gptel-with-preset to apply and reset values"
-      (let ((preset-spec
-             (macher--functional-preset
-              test-spec-function
-              :description "Test functional preset"
-              :use-tools nil
-              :tools nil)))
-        ;; Store original values.
-        (let ((original-use-tools gptel-use-tools)
-              (original-tools gptel-tools))
-          ;; Temporarily register the preset.
-          (unwind-protect
-              (progn
-                (apply #'gptel-make-preset 'test-functional-preset preset-spec)
-                ;; Use gptel-with-preset to apply the preset temporarily.
-                (gptel-with-preset 'test-functional-preset
-                  ;; Inside the preset context, values should be applied.
-                  (expect gptel-use-tools :to-be t)
-                  (expect gptel-tools :to-equal '(tool1)))
-                ;; After exiting the preset context, values should be reset.
-                (expect gptel-use-tools :to-equal original-use-tools)
-                (expect gptel-tools :to-equal original-tools))
-            ;; Clean up the temporary preset.
-            (setq gptel--known-presets
-                  (assq-delete-all 'test-functional-preset gptel--known-presets))))))
-
-    (it "prevents spec function from using invalid keys"
-      (let* ((bad-spec-function
-              (lambda ()
-                ;; Return a spec with a key that's not in the baseline.
-                '(:invalid-key "invalid value" :use-tools t)))
-             (preset-spec
-              (macher--functional-preset
-               bad-spec-function
-               :description "Test functional preset"
-               :use-tools nil)))
-        ;; The :pre function should work.
-        (let ((pre-fn (plist-get preset-spec :pre)))
-          (funcall pre-fn))
-        ;; But the :post function should signal an error for the invalid key.
-        (let ((post-fn (plist-get preset-spec :post)))
-          (expect (funcall post-fn) :to-throw))))
-
-    (it "handles multiple calls to pre/post correctly"
-      (let* ((preset-spec
-              (macher--functional-preset
-               test-spec-function
-               :description "Test functional preset"
-               :use-tools nil
-               :tools nil))
-             (pre-fn (plist-get preset-spec :pre))
-             (post-fn (plist-get preset-spec :post)))
-
-        ;; First call cycle.
-        (let ((dynamic-spec1 (funcall pre-fn)))
-          (expect test-counter :to-equal 1)
-          (expect (plist-get dynamic-spec1 :use-tools) :to-be t)
-          (expect (plist-get dynamic-spec1 :tools) :to-equal '(tool1)))
-        (funcall post-fn)
-        (expect gptel-use-tools :to-be t)
-        (expect gptel-tools :to-equal '(tool1))
-
-        ;; Second call cycle with different values.
-        (let ((dynamic-spec2 (funcall pre-fn)))
-          (expect test-counter :to-equal 2)
-          (expect (plist-get dynamic-spec2 :use-tools) :to-be nil)
-          (expect (plist-get dynamic-spec2 :tools) :to-equal '(tool2)))
-        (funcall post-fn)
-        (expect gptel-use-tools :to-be nil)
-        (expect gptel-tools :to-equal '(tool2))))
-
-    (it "handles nil spec function results gracefully"
-      (let* ((nil-spec-function (lambda () nil))
-             (preset-spec
-              (macher--functional-preset
-               nil-spec-function
-               :description "Test preset with nil spec"
-               :use-tools t))
-             (pre-fn (plist-get preset-spec :pre))
-             (post-fn (plist-get preset-spec :post)))
-
-        ;; :pre function should return nil.
-        (let ((dynamic-spec (funcall pre-fn)))
-          (expect dynamic-spec :to-be nil))
-
-        ;; :post function should handle nil gracefully and not change anything.
-        (let ((original-use-tools gptel-use-tools))
-          (funcall post-fn)
-          (expect gptel-use-tools :to-equal original-use-tools))))
-
-    (it "only sets variables that exist and are bound"
-      (let* ((spec-with-nonexistent-var
-              (lambda ()
-                ;; Use a key that won't correspond to an existing gptel variable.
-                '(:nonexistent-var "test value")))
-             (preset-spec
-              (macher--functional-preset
-               spec-with-nonexistent-var
-               :description "Test preset"
-               :nonexistent-var nil))
-             (post-fn (plist-get preset-spec :post)))
-
-        ;; Call pre to set up the spec.
-        (funcall (plist-get preset-spec :pre))
-
-        ;; Post should not error even though the variable doesn't exist.
-        (expect (funcall post-fn) :not :to-throw))))
 
   (describe "macher-action"
     :var ((original-action-buffer-setup-hook macher-action-buffer-setup-hook) project-file-buffer)
@@ -5008,7 +5354,619 @@
                 (when (string-equal "+print('hello world')" line)
                   (setq diff-ended t))
                 (setq line-num (1+ line-num))))
-            (expect diff-ended :to-be t)))))))
+            (expect diff-ended :to-be t))))))
+
+  (describe "macher--system-ensure-placeholder-or-context-string"
+    :var (original-placeholder original-marker-start original-marker-end original-context-fn)
+
+    (before-each
+      (setq original-placeholder macher-context-string-placeholder)
+      (setq original-marker-start macher-context-string-marker-start)
+      (setq original-marker-end macher-context-string-marker-end)
+      (setq original-context-fn macher-context-string-function))
+
+    (after-each
+      (setq macher-context-string-placeholder original-placeholder)
+      (setq macher-context-string-marker-start original-marker-start)
+      (setq macher-context-string-marker-end original-marker-end)
+      (setq macher-context-string-function original-context-fn))
+
+    (describe "string input"
+      (it "appends placeholder to string without placeholder or marker"
+        (let ((result
+               (macher--system-ensure-placeholder-or-context-string
+                "You are a helpful assistant.")))
+          (expect
+           result
+           :to-equal (concat "You are a helpful assistant." macher-context-string-placeholder))))
+
+      (it "does not modify string already containing placeholder"
+        (let ((system (concat "You are a helpful assistant." macher-context-string-placeholder)))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "does not modify string already containing marker-start"
+        (let ((system
+               (concat
+                "You are a helpful assistant."
+                macher-context-string-marker-start
+                "context"
+                macher-context-string-marker-end)))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "appends demarcated context when placeholder is nil"
+        (let ((macher-context-string-placeholder nil)
+              (macher-context-string-function (lambda () "PROJECT CONTEXT"))
+              (system "You are a helpful assistant."))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result
+                    :to-equal
+                    (concat
+                     system
+                     macher-context-string-marker-start
+                     "PROJECT CONTEXT"
+                     macher-context-string-marker-end)))))
+
+      (it "appends empty markers when placeholder is nil and context-fn returns nil"
+        (let ((macher-context-string-placeholder nil)
+              (macher-context-string-function (lambda () nil))
+              (system "You are a helpful assistant."))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result
+                    :to-equal
+                    (concat
+                     system macher-context-string-marker-start macher-context-string-marker-end)))))
+
+      (it "returns string unchanged when placeholder is nil and context-fn is nil"
+        (let ((macher-context-string-placeholder nil)
+              (macher-context-string-function nil)
+              (system "You are a helpful assistant."))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "returns string unchanged when placeholder is nil but marker already present"
+        (let* ((macher-context-string-placeholder nil)
+               (macher-context-string-function (lambda () "NEW CONTEXT"))
+               (system
+                (concat
+                 "You are a helpful assistant."
+                 macher-context-string-marker-start
+                 "EXISTING"
+                 macher-context-string-marker-end)))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "handles empty string"
+        (let ((result (macher--system-ensure-placeholder-or-context-string "")))
+          (expect result :to-equal macher-context-string-placeholder)))
+
+      (it "handles string with placeholder in middle"
+        (let ((system (concat "Start " macher-context-string-placeholder " End")))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "handles string with marker-start in middle"
+        (let ((system
+               (concat
+                "Start "
+                macher-context-string-marker-start
+                "context"
+                macher-context-string-marker-end
+                " End")))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system)))))
+
+    (describe "list input"
+      (it "appends placeholder to first element of list"
+        (let* ((system '("System message" "user message" "assistant message"))
+               (result (macher--system-ensure-placeholder-or-context-string system)))
+          (expect (car result)
+                  :to-equal (concat "System message" macher-context-string-placeholder))
+          (expect (cdr result) :to-equal '("user message" "assistant message"))))
+
+      (it "does not modify list with placeholder in first element"
+        (let* ((first-elem (concat "System message" macher-context-string-placeholder))
+               (system (list first-elem "user message" "assistant message"))
+               (result (macher--system-ensure-placeholder-or-context-string system)))
+          (expect result :to-equal system)))
+
+      (it "does not modify list with marker-start in first element"
+        (let* ((first-elem
+                (concat
+                 "System message"
+                 macher-context-string-marker-start
+                 "context"
+                 macher-context-string-marker-end))
+               (system (list first-elem "user message"))
+               (result (macher--system-ensure-placeholder-or-context-string system)))
+          (expect result :to-equal system)))
+
+      (it "appends demarcated context to first element when placeholder is nil"
+        (let ((macher-context-string-placeholder nil)
+              (macher-context-string-function (lambda () "PROJECT CONTEXT"))
+              (system '("System message" "user message")))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect (car result)
+                    :to-equal
+                    (concat
+                     "System message"
+                     macher-context-string-marker-start
+                     "PROJECT CONTEXT"
+                     macher-context-string-marker-end))
+            (expect (cdr result) :to-equal '("user message")))))
+
+      (it "appends empty markers to first element when placeholder is nil and context-fn returns nil"
+        (let ((macher-context-string-placeholder nil)
+              (macher-context-string-function (lambda () nil))
+              (system '("System message" "user message")))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect (car result)
+                    :to-equal
+                    (concat
+                     "System message"
+                     macher-context-string-marker-start
+                     macher-context-string-marker-end))
+            (expect (cdr result) :to-equal '("user message")))))
+
+      (it "returns list unchanged when placeholder is nil but marker already in first element"
+        (let* ((macher-context-string-placeholder nil)
+               (macher-context-string-function (lambda () "NEW CONTEXT"))
+               (first-elem
+                (concat
+                 "System message"
+                 macher-context-string-marker-start
+                 "EXISTING"
+                 macher-context-string-marker-end))
+               (system (list first-elem "user message")))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "returns list unchanged when both placeholder and context-fn are nil"
+        (let ((macher-context-string-placeholder nil)
+              (macher-context-string-function nil)
+              (system '("System message" "user message")))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "handles single-element list"
+        (let* ((system '("System message"))
+               (result (macher--system-ensure-placeholder-or-context-string system)))
+          (expect (car result)
+                  :to-equal (concat "System message" macher-context-string-placeholder))
+          (expect (cdr result) :to-be nil)))
+
+      (it "does not mutate original list"
+        (let* ((original-first "System message")
+               (system (list original-first "user message"))
+               (result (macher--system-ensure-placeholder-or-context-string system)))
+          (expect (car system) :to-equal original-first)
+          (expect result :not :to-be system))))
+
+    (describe "function input"
+      (it "wraps function that returns string without placeholder"
+        (let* ((fn (lambda () "Dynamic system message"))
+               (result (macher--system-ensure-placeholder-or-context-string fn)))
+          (expect (functionp result) :to-be-truthy)
+          (let ((evaluated (funcall result)))
+            (expect
+             evaluated
+             :to-equal (list (concat "Dynamic system message" macher-context-string-placeholder))))))
+
+      (it "wraps function that returns string with placeholder"
+        (let* ((with-placeholder
+                (concat "Dynamic message" macher-context-string-placeholder "dynamic message end"))
+               (fn (lambda () with-placeholder))
+               (result (macher--system-ensure-placeholder-or-context-string fn)))
+          (expect (functionp result) :to-be-truthy)
+          (let ((evaluated (funcall result)))
+            (expect evaluated :to-equal (list with-placeholder)))))
+
+      (it "wraps function that returns list"
+        (let* ((fn (lambda () '("System" "user")))
+               (result (macher--system-ensure-placeholder-or-context-string fn)))
+          (expect (functionp result) :to-be-truthy)
+          (let ((evaluated (funcall result)))
+            (expect (car evaluated) :to-equal (concat "System" macher-context-string-placeholder))
+            (expect (cdr evaluated) :to-equal '("user")))))
+
+      (it "wrapper handles function returning list with placeholder"
+        (let* ((first-elem (concat "System" macher-context-string-placeholder))
+               (fn (lambda () (list first-elem "user")))
+               (result (macher--system-ensure-placeholder-or-context-string fn)))
+          (expect (functionp result) :to-be-truthy)
+          (let ((evaluated (funcall result)))
+            (expect (car evaluated) :to-equal first-elem))))
+
+      (it "returns original function unchanged when both placeholder and context-fn are nil"
+        (let* ((macher-context-string-placeholder nil)
+               (macher-context-string-function nil)
+               (fn (lambda () "Dynamic system message"))
+               (result (macher--system-ensure-placeholder-or-context-string fn)))
+          (expect result :to-be fn))))
+
+    (describe "idempotency"
+      (it "is idempotent for strings"
+        (let* ((system "You are a helpful assistant.")
+               (result1 (macher--system-ensure-placeholder-or-context-string system))
+               (result2 (macher--system-ensure-placeholder-or-context-string result1)))
+          (expect result1 :to-equal result2)))
+
+      (it "is idempotent for lists"
+        (let* ((system '("System message" "user"))
+               (result1 (macher--system-ensure-placeholder-or-context-string system))
+               (result2 (macher--system-ensure-placeholder-or-context-string result1)))
+          (expect result1 :to-equal result2)))))
+
+  (describe "macher--system-replace-placeholder"
+    :var (original-placeholder original-marker-start original-marker-end original-context-fn)
+
+    (before-each
+      (setq original-placeholder macher-context-string-placeholder)
+      (setq original-marker-start macher-context-string-marker-start)
+      (setq original-marker-end macher-context-string-marker-end)
+      (setq original-context-fn macher-context-string-function))
+
+    (after-each
+      (setq macher-context-string-placeholder original-placeholder)
+      (setq macher-context-string-marker-start original-marker-start)
+      (setq macher-context-string-marker-end original-marker-end)
+      (setq macher-context-string-function original-context-fn))
+
+    (describe "string input"
+      (it "replaces placeholder with demarcated context string"
+        (let* ((macher-context-string-function (lambda () "WORKSPACE CONTEXT HERE"))
+               (system (concat "You are helpful." macher-context-string-placeholder))
+               (result (macher--system-replace-placeholder system)))
+          (expect result :to-match "You are helpful.")
+          (expect result :to-match (regexp-quote macher-context-string-marker-start))
+          (expect result :to-match "WORKSPACE CONTEXT HERE")
+          (expect result :to-match (regexp-quote macher-context-string-marker-end))
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
+
+      (it "replaces placeholder with empty markers when context function returns nil"
+        (let* ((macher-context-string-function (lambda () nil))
+               (system (concat "You are helpful." macher-context-string-placeholder))
+               (result (macher--system-replace-placeholder system)))
+          (expect result
+                  :to-equal
+                  (concat
+                   "You are helpful."
+                   macher-context-string-marker-start
+                   macher-context-string-marker-end))
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
+
+      (it "replaces placeholder with empty markers when context function is nil"
+        (let* ((macher-context-string-function nil)
+               (system (concat "You are helpful." macher-context-string-placeholder))
+               (result (macher--system-replace-placeholder system)))
+          (expect result
+                  :to-equal
+                  (concat
+                   "You are helpful."
+                   macher-context-string-marker-start
+                   macher-context-string-marker-end))))
+
+      (it "returns string unchanged when placeholder is nil"
+        (let* ((macher-context-string-placeholder nil)
+               (macher-context-string-function (lambda () "context"))
+               (system "You are helpful."))
+          (let ((result (macher--system-replace-placeholder system)))
+            (expect result :to-equal system))))
+
+      (it "returns string unchanged when no placeholder present"
+        (let* ((macher-context-string-function (lambda () "context"))
+               (system "You are helpful."))
+          (let ((result (macher--system-replace-placeholder system)))
+            (expect result :to-equal system))))
+
+      (it "replaces multiple placeholders"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system
+                (concat
+                 "Start"
+                 macher-context-string-placeholder
+                 "Middle"
+                 macher-context-string-placeholder
+                 "End"))
+               (result (macher--system-replace-placeholder system)))
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))
+          ;; Both placeholders should be replaced.
+          (let ((marker-count 0))
+            (with-temp-buffer
+              (insert result)
+              (goto-char (point-min))
+              (while (search-forward macher-context-string-marker-start nil t)
+                (setq marker-count (1+ marker-count))))
+            (expect marker-count :to-equal 2))))
+
+      (it "handles placeholder at beginning of string"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system (concat macher-context-string-placeholder "Rest of message"))
+               (result (macher--system-replace-placeholder system)))
+          ;; Result should contain CTX and "Rest of message" (with possible newlines between).
+          (expect result :to-match "CTX")
+          (expect result :to-match "Rest of message")
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
+
+      (it "handles placeholder at end of string"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system (concat "Message" macher-context-string-placeholder))
+               (result (macher--system-replace-placeholder system)))
+          ;; Result should contain both "Message" and "CTX".
+          (expect result :to-match "Message")
+          (expect result :to-match "CTX")
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
+
+      (it "handles empty string"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system "")
+               (result (macher--system-replace-placeholder system)))
+          (expect result :to-equal "")))
+
+      (it "evaluates context function in correct buffer"
+        (let* ((captured-buffer nil)
+               (macher-context-string-function
+                (lambda ()
+                  (setq captured-buffer (current-buffer))
+                  "CTX"))
+               (system (concat "Message" macher-context-string-placeholder)))
+          (with-temp-buffer
+            (let ((test-buffer (current-buffer)))
+              (macher--system-replace-placeholder system test-buffer)
+              (expect captured-buffer :to-be test-buffer))))))
+
+    (describe "list input"
+      (it "replaces placeholder in first element only"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system
+                (list (concat "System" macher-context-string-placeholder) "user" "assistant"))
+               (result (macher--system-replace-placeholder system)))
+          (expect (car result) :to-match "CTX")
+          (expect (car result) :not :to-match (regexp-quote macher-context-string-placeholder))
+          (expect (nth 1 result) :to-equal "user")
+          (expect (nth 2 result) :to-equal "assistant")))
+
+      (it "does not mutate original list"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (original-first (concat "System" macher-context-string-placeholder))
+               (system (list original-first "user"))
+               (result (macher--system-replace-placeholder system)))
+          (expect (car system) :to-equal original-first)
+          (expect result :not :to-be system)))
+
+      (it "handles single-element list"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system (list (concat "System" macher-context-string-placeholder)))
+               (result (macher--system-replace-placeholder system)))
+          (expect (car result) :to-match "CTX")
+          (expect (cdr result) :to-be nil)))
+
+      (it "returns list unchanged when first element has no placeholder"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system '("System message" "user"))
+               (result (macher--system-replace-placeholder system)))
+          (expect (car result) :to-equal "System message")
+          (expect (cdr result) :to-equal '("user")))))
+
+    (describe "function input"
+      (it "evaluates function and processes result"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (fn (lambda () (concat "Dynamic" macher-context-string-placeholder)))
+               (result (macher--system-replace-placeholder fn))
+               (result-system (car result)))
+          (expect (length result) :to-be 1)
+          (expect result-system :to-match "Dynamic")
+          (expect result-system :to-match "CTX")
+          (expect result-system :not :to-match (regexp-quote macher-context-string-placeholder))))
+
+      (it "handles function returning list"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (fn (lambda () (list (concat "System" macher-context-string-placeholder) "user"))))
+          (let ((result (macher--system-replace-placeholder fn)))
+            (expect (listp result) :to-be-truthy)
+            (expect (car result) :to-match "CTX")
+            (expect (nth 1 result) :to-equal "user")))))
+
+    (describe "idempotency and double-injection prevention"
+      (it "calling twice produces same result as calling once"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (system (concat "Message" macher-context-string-placeholder))
+               (result1 (macher--system-replace-placeholder system))
+               (result2 (macher--system-replace-placeholder result1)))
+          ;; Second call should return unchanged since no placeholder.
+          (expect result1 :to-equal result2)))
+
+      (it "does not inject into already-injected content"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (already-injected
+                (concat
+                 "Message"
+                 macher-context-string-marker-start
+                 "OLD CTX"
+                 macher-context-string-marker-end))
+               (result (macher--system-replace-placeholder already-injected)))
+          ;; Should be unchanged since no placeholder present.
+          (expect result :to-equal already-injected)))
+
+      (it "handles mixed placeholder and already-injected content"
+        (let* ((macher-context-string-function (lambda () "NEW CTX"))
+               (system
+                (concat
+                 "Start"
+                 macher-context-string-marker-start
+                 "OLD"
+                 macher-context-string-marker-end
+                 macher-context-string-placeholder
+                 "End"))
+               (result (macher--system-replace-placeholder system)))
+          ;; Should replace placeholder but preserve existing injection.
+          (expect result :to-match "OLD")
+          (expect result :to-match "NEW CTX")
+          (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
+
+      (it "is safe to call in a loop"
+        (let* ((call-count 0)
+               (macher-context-string-function
+                (lambda ()
+                  (setq call-count (1+ call-count))
+                  (format "CTX-%d" call-count)))
+               (system (concat "Message" macher-context-string-placeholder))
+               (result system))
+          ;; Call multiple times.
+          (dotimes (_ 5)
+            (setq result (macher--system-replace-placeholder result)))
+          ;; Context function is called each time we invoke replace-placeholder.
+          ;; But only the first call actually has a placeholder to replace.
+          ;; Subsequent calls find no placeholder, so the result stays the same.
+          (expect call-count :to-equal 5)
+          ;; Result should contain only CTX-1 (from first replacement).
+          (expect result :to-match "CTX-1")
+          ;; Should NOT contain any later context strings.
+          (expect result :not :to-match "CTX-2")
+          (expect result :not :to-match "CTX-5")))))
+
+  (describe "macher--transform-system-replace-placeholder"
+    :var (original-placeholder original-context-fn)
+
+    (before-each
+      (setq original-placeholder macher-context-string-placeholder)
+      (setq original-context-fn macher-context-string-function))
+
+    (after-each
+      (setq macher-context-string-placeholder original-placeholder)
+      (setq macher-context-string-function original-context-fn))
+
+    (it "replaces placeholder in gptel--system-message"
+      (let* ((macher-context-string-function (lambda () "INJECTED CONTEXT"))
+             (gptel--system-message (concat "You are helpful." macher-context-string-placeholder))
+             (callback-called nil)
+             (callback (lambda () (setq callback-called t)))
+             (fsm (gptel-make-fsm)))
+        (with-temp-buffer
+          (let ((test-buffer (current-buffer)))
+            (setf (gptel-fsm-info fsm) (list :buffer test-buffer))
+            (macher--transform-system-replace-placeholder callback fsm)
+            (expect callback-called :to-be t)
+            (expect gptel--system-message :to-match "INJECTED CONTEXT")
+            (expect gptel--system-message
+                    :not
+                    :to-match (regexp-quote macher-context-string-placeholder))))))
+
+    (it "always calls callback even when no replacement needed"
+      (let* ((macher-context-string-function (lambda () "CTX"))
+             (gptel--system-message "No placeholder here")
+             (callback-called nil)
+             (callback (lambda () (setq callback-called t)))
+             (fsm (gptel-make-fsm)))
+        (with-temp-buffer
+          (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
+          (macher--transform-system-replace-placeholder callback fsm)
+          (expect callback-called :to-be t)
+          (expect gptel--system-message :to-equal "No placeholder here"))))
+
+    (it "handles nil buffer gracefully"
+      (let* ((gptel--system-message "Test message")
+             (callback-called nil)
+             (callback (lambda () (setq callback-called t)))
+             (fsm (gptel-make-fsm)))
+        (setf (gptel-fsm-info fsm) (list :buffer nil))
+        (macher--transform-system-replace-placeholder callback fsm)
+        (expect callback-called :to-be t)))
+
+    (it "handles dead buffer gracefully"
+      (let* ((gptel--system-message "Test message")
+             (callback-called nil)
+             (callback (lambda () (setq callback-called t)))
+             (fsm (gptel-make-fsm))
+             (dead-buffer (generate-new-buffer "test")))
+        (kill-buffer dead-buffer)
+        (setf (gptel-fsm-info fsm) (list :buffer dead-buffer))
+        (macher--transform-system-replace-placeholder callback fsm)
+        (expect callback-called :to-be t)))
+
+    (it "handles nil fsm info gracefully"
+      (let* ((gptel--system-message "Test message")
+             (callback-called nil)
+             (callback (lambda () (setq callback-called t)))
+             (fsm (gptel-make-fsm)))
+        (setf (gptel-fsm-info fsm) nil)
+        (macher--transform-system-replace-placeholder callback fsm)
+        (expect callback-called :to-be t)))
+
+    (it "evaluates context function in request buffer not transform buffer"
+      (let* ((captured-buffer nil)
+             (macher-context-string-function
+              (lambda ()
+                (setq captured-buffer (current-buffer))
+                "CTX"))
+             (gptel--system-message (concat "Message" macher-context-string-placeholder))
+             (callback (lambda ()))
+             (fsm (gptel-make-fsm)))
+        (with-temp-buffer
+          (let ((request-buffer (current-buffer)))
+            (setf (gptel-fsm-info fsm) (list :buffer request-buffer))
+            ;; Call from a different buffer (simulating transform buffer).
+            (with-temp-buffer
+              (macher--transform-system-replace-placeholder callback fsm))
+            (expect captured-buffer :to-be request-buffer)))))
+
+    (it "modifies gptel--system-message in transform buffer"
+      (let* ((macher-context-string-function (lambda () "CTX"))
+             (gptel--system-message (concat "Original" macher-context-string-placeholder))
+             (callback (lambda ()))
+             (fsm (gptel-make-fsm)))
+        (with-temp-buffer
+          (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
+          (macher--transform-system-replace-placeholder callback fsm)
+          ;; gptel--system-message should be modified.
+          (expect gptel--system-message :to-match "CTX"))))
+
+    (describe "called multiple times"
+      (it "is safe to call multiple times"
+        (let* ((call-count 0)
+               (macher-context-string-function
+                (lambda ()
+                  (setq call-count (1+ call-count))
+                  "CTX"))
+               (gptel--system-message (concat "Message" macher-context-string-placeholder))
+               (callback (lambda ()))
+               (fsm (gptel-make-fsm)))
+          (with-temp-buffer
+            (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
+            ;; Call multiple times.
+            (dotimes (_ 3)
+              (macher--transform-system-replace-placeholder callback fsm))
+            (expect call-count :to-be 3)
+            ;; Context function called once per transform call, but replacement only happens
+            ;; when placeholder is present.
+            (expect gptel--system-message :to-match "CTX")
+            (expect gptel--system-message
+                    :not
+                    :to-match (regexp-quote macher-context-string-placeholder)))))
+
+      (it "does not accumulate context strings when called multiple times"
+        (let* ((macher-context-string-function (lambda () "CTX"))
+               (gptel--system-message (concat "Message" macher-context-string-placeholder))
+               (callback (lambda ()))
+               (fsm (gptel-make-fsm)))
+          (with-temp-buffer
+            (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
+            ;; Call multiple times.
+            (macher--transform-system-replace-placeholder callback fsm)
+            (let ((first-result gptel--system-message))
+              (macher--transform-system-replace-placeholder callback fsm)
+              (let ((second-result gptel--system-message))
+                ;; Results should be identical.
+                (expect first-result :to-equal second-result)
+                ;; Should only have one context string marker.
+                (let ((marker-count 0))
+                  (with-temp-buffer
+                    (insert second-result)
+                    (goto-char (point-min))
+                    (while (search-forward macher-context-string-marker-start nil t)
+                      (setq marker-count (1+ marker-count))))
+                  (expect marker-count :to-equal 1))))))))))
 
 (provide 'test-unit)
 ;;; test-unit.el ends here

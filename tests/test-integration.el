@@ -612,57 +612,6 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
         (when (file-exists-p temp-file)
           (delete-file temp-file)))))
 
-  (it "prepares context files for workspace operations"
-    (funcall setup-backend '("Test response"))
-    (funcall setup-project
-             "context"
-             '(("src/main.el" . "main content") ("src/context.el" . "context content")))
-    (let ((callback-called nil)
-          (response-received nil)
-          (context-file (expand-file-name "src/context.el" project-dir)))
-      (with-temp-buffer
-        (set-visited-file-name project-file)
-        ;; Add the context file to gptel context (but not the main file).
-        (gptel-add-file context-file)
-
-        ;; Mock the context contents creation to verify it's called.
-        (spy-on #'macher--load-gptel-context-files :and-call-through)
-
-        (macher-test--send
-         'macher-ro "Test prompt"
-         (macher-test--make-once-only-callback
-          (lambda (exit-code fsm)
-            (setq callback-called t)
-            (setq response-received (not exit-code)))))
-
-        ;; Wait for the async response.
-        (let ((timeout 0))
-          (while (and (not callback-called) (< timeout 100))
-            (sleep-for 0.1)
-            (setq timeout (1+ timeout))))
-
-        (expect callback-called :to-be-truthy)
-        (expect response-received :to-be-truthy)
-
-        ;; Verify that implementation contents were created for the context file.
-        (expect #'macher--load-gptel-context-files :to-have-been-called-times 1)
-        (let ((args (spy-calls-args-for #'macher--load-gptel-context-files 0)))
-          (expect (length args) :to-be 2)
-          (let ((contexts (car args))
-                (macher-context (elt args 1)))
-            ;; Verify that the gptel context was passed it, like with the standard
-            ;; 'gptel-context-string-function'.
-            (expect contexts :to-equal `((,context-file)))
-            ;; Verify that the gptel context file was loaded into the macher context.
-            (let ((contents (macher-context-contents macher-context)))
-              (expect (length contents) :to-be 1)
-              (let* ((entry (car contents))
-                     (stored-path (car entry))
-                     (content-pair (cdr entry)))
-                (expect (expand-file-name stored-path) :to-equal (expand-file-name context-file))
-                (expect (car content-pair) :to-equal "context content")
-                (expect (cdr content-pair) :to-equal "context content"))))))))
-
   (describe "read_file_in_workspace"
     (before-each
       (funcall setup-project "read-tool" '(("test-file.txt" . "line1\nline2\nline3\nline4"))))
@@ -1595,28 +1544,23 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                          (delete-file input-schema-file)))))))))))))
 
   (describe "context string generation"
-
-    (it "includes workspace info when nothing is in context"
+    (it "includes workspace info in system prompt"
       (funcall setup-backend '("Test response"))
       (funcall setup-project
-               "no-context"
+               "context-string"
                '(("README.md" . "# Test Project\n\nSimple test project.\n")
                  ("src/main.el" . "Main content")
                  ("src/util.el" . "Utility functions content")
                  ("test/test-main.el" . "Test file content")))
       (let ((response-received nil)
-            (callback-called nil)
-            ;; Explicitly make sure the context shows up in a system message.
-            (gptel-use-context 'system))
-
-        (gptel-context-remove-all)
+            (callback-called nil))
 
         (with-temp-buffer
           ;; Open the main project file but don't add anything to context.
           (set-visited-file-name project-file)
 
           (macher-test--send
-           'macher-notools "Test prompt with no context"
+           'macher-system "Test prompt with no context"
            (macher-test--make-once-only-callback
             (lambda (exit-code fsm)
               (setq callback-called t)
@@ -1646,62 +1590,162 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (let ((system-content
                      (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
                 ;; Check for workspace description.
-                (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
-                ;; Check that all files are listed as available for editing since nothing is in context.
-                (expect "Files available for editing:" :to-appear-once-in system-content)
-                ;; Check that files appear in the correct structural relationship to the header.
-                (expect
-                 system-content
-                 :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    README\\.md")
-                (expect
-                 system-content
-                 :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/main\\.el")
-                (expect
-                 system-content
-                 :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/util\\.el")
-                (expect
-                 system-content
-                 :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    test/test-main\\.el")
-                ;; Should not have an "already provided" section since nothing is in context.
-                (expect system-content :not :to-match "Files already provided above")
+                (expect "The user is currently working on a project named:"
+                        :to-appear-once-in system-content)
+                ;; Check that files are listed.
+                (expect (format "Files in the \"%s\" project:" (file-name-nondirectory project-dir))
+                        :to-appear-once-in system-content)
+                ;; Check that files appear in the listing.
+                (expect system-content :to-match "    README\\.md")
+                (expect system-content :to-match "    src/main\\.el")
+                (expect system-content :to-match "    src/util\\.el")
+                (expect system-content :to-match "    test/test-main\\.el")
                 ;; Check that it mentions the project name in the description.
-                (expect (format "which is named `%s`" (file-name-nondirectory project-dir))
+                (expect (format "project named: \"%s\"" (file-name-nondirectory project-dir))
                         :to-appear-once-in system-content)))))))
 
-    (it "includes workspace info when both files and buffers are in context"
+    (it "does not duplicate macher context string when macher-system applied multiple times"
+      ;; This test verifies that applying @macher-system multiple times (e.g. in nested presets or
+      ;; repeated applications) does not result in duplicate workspace context strings in the system
+      ;; prompt.
       (funcall setup-backend '("Test response"))
+      (funcall setup-project "multi-apply" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil))
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+
+          ;; Apply macher-system multiple times by nesting gptel-with-preset calls.
+          (macher--with-preset
+           'macher-system
+           (lambda ()
+             (macher--with-preset
+              'macher-system
+              (lambda ()
+                (macher--with-preset
+                 'macher-system
+                 (lambda ()
+                   (macher-test--send
+                    'macher-system "Test prompt with multiple preset applications"
+                    (macher-test--make-once-only-callback
+                     (lambda (exit-code _fsm)
+                       (setq callback-called t)
+                       (setq response-received (not exit-code)))))))))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate that the macher context string appears exactly once.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (system-messages
+                    (cl-remove-if-not
+                     (lambda (msg) (string= (plist-get msg :role) "system")) messages)))
+              (expect (> (length system-messages) 0) :to-be-truthy)
+
+              (let ((system-content
+                     (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
+                ;; The workspace context marker should appear exactly once.
+                (expect macher-context-string-marker-start :to-appear-once-in system-content)
+                ;; The workspace description should appear exactly once.
+                (expect "The user is currently working on a project named:"
+                        :to-appear-once-in system-content)
+                ;; The file listing header should appear exactly once.
+                (expect (format "Files in the \"%s\" project:" (file-name-nondirectory project-dir))
+                        :to-appear-once-in system-content))))))))
+
+  (describe "gptel context preservation"
+    ;; These tests verify that macher's system prompt transformation does not interfere with gptel's
+    ;; context system. When files or buffers are added to gptel context via `gptel-add' or
+    ;; `gptel-add-file', their contents should appear in the outgoing request alongside macher's
+    ;; workspace context.
+    (it "preserves gptel file context alongside macher workspace context"
+      (funcall setup-backend '("I see both contexts"))
       (funcall setup-project
-               "mixed"
-               '(("src/main.el" . "main content")
-                 ("src/context.el" . "context content")
-                 ("src/buffer.el" . "Buffer file content")
-                 ("docs/README.md" . "# Test Project\n\nThis is a test project.\n")))
-      (let ((response-received nil)
-            (callback-called nil)
-            (buffer-buffer nil)
-            ;; Explicitly make sure the context shows up in a system message.
+               "gptel-context-file"
+               '(("src/main.el" . "main content here")
+                 ("src/context-file.el" . "GPTEL_CONTEXT_FILE_CONTENT")))
+      (let ((callback-called nil)
+            (response-received nil)
+            (context-file (expand-file-name "src/context-file.el" project-dir))
             (gptel-use-context 'system))
 
         (gptel-context-remove-all)
 
-        ;; Open buffer for context.
-        (setq buffer-buffer (find-file-noselect (expand-file-name "src/buffer.el" project-dir)))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          ;; Add a file to gptel context.
+          (gptel-add-file context-file)
+
+          (macher-test--send
+           'macher-system "Test prompt with gptel file context"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate that the request contains both gptel context and macher workspace context.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (all-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) messages " ")))
+              ;; gptel context file content should appear in the request.
+              (expect all-content :to-match "GPTEL_CONTEXT_FILE_CONTENT")
+              ;; macher workspace context should also appear.
+              (expect all-content
+                      :to-match "The user is currently working on a project named:"))))))
+
+    (it "preserves gptel buffer context alongside macher workspace context"
+      (funcall setup-backend '("I see the buffer context"))
+      (funcall setup-project
+               "gptel-context-buffer"
+               '(("src/main.el" . "main content")
+                 ("src/buffer-file.el" . "BUFFER_FILE_ORIGINAL_CONTENT")))
+      (let ((callback-called nil)
+            (response-received nil)
+            (buffer-file (expand-file-name "src/buffer-file.el" project-dir))
+            (context-buffer nil)
+            (gptel-use-context 'system))
+
+        (gptel-context-remove-all)
 
         (unwind-protect
             (progn
+              ;; Open the buffer and add it to gptel context.
+              (setq context-buffer (find-file-noselect buffer-file))
+              (with-current-buffer context-buffer
+                ;; Modify the buffer to have different content than on disk.
+                (erase-buffer)
+                (insert "MODIFIED_BUFFER_CONTENT_FOR_CONTEXT")
+                (gptel-add))
+
               (with-temp-buffer
-                ;; Open the main project file.
                 (set-visited-file-name project-file)
-                ;; Set up context - add file to context.
-                (gptel-add-file (expand-file-name "src/context.el" project-dir))
-                ;; Add buffer to context.
-                (with-current-buffer buffer-buffer
-                  (gptel-add))
 
                 (macher-test--send
-                 'macher-notools "Test prompt with mixed context"
+                 'macher-system "Test prompt with gptel buffer context"
                  (macher-test--make-once-only-callback
-                  (lambda (exit-code fsm)
+                  (lambda (exit-code _fsm)
                     (setq callback-called t)
                     (setq response-received (not exit-code)))))
 
@@ -1714,194 +1758,537 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                 (expect callback-called :to-be-truthy)
                 (expect response-received :to-be-truthy)
 
-                ;; Validate that the request contains expected content.
+                ;; Validate that the request contains the buffer context.
                 (let ((requests (funcall received-requests)))
                   (expect (> (length requests) 0) :to-be-truthy)
                   (let* ((request (car requests))
                          (messages (plist-get request :messages))
-                         (system-messages
-                          (cl-remove-if-not
-                           (lambda (msg) (string= (plist-get msg :role) "system")) messages)))
-                    (expect messages :to-be-truthy)
-                    (expect (> (length system-messages) 0) :to-be-truthy)
+                         (all-content
+                          (mapconcat (lambda (msg) (or (plist-get msg :content) "")) messages " ")))
+                    ;; Buffer content (modified version) should appear.
+                    (expect all-content :to-match "MODIFIED_BUFFER_CONTENT_FOR_CONTEXT")
+                    ;; Original disk content should NOT appear.
+                    (expect all-content :not :to-match "BUFFER_FILE_ORIGINAL_CONTENT")
+                    ;; macher workspace context should also appear.
+                    (expect all-content
+                            :to-match "The user is currently working on a project named:")
 
-                    ;; Verify that context appears in system message.
-                    (let ((system-content
-                           (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
-                      ;; Check for workspace description.
-                      (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
-                      ;; Check that files in context are in the "already provided" section.
-                      (expect "Files already provided above" :to-appear-once-in system-content)
-                      (expect system-content
-                              :to-match "Files already provided above.*\n    src/context\\.el")
-                      ;; Check that other files are in the "available for editing" section with proper structure.
-                      (expect "Other files available for editing:"
-                              :to-appear-once-in system-content)
-                      (expect
-                       system-content
-                       :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    src/buffer\\.el")
-                      (expect
-                       system-content
-                       :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    docs/README\\.md")
-                      (expect
-                       system-content
-                       :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    src/main\\.el")
-                      ;; Check that buffer content appears in context (since buffer was added).
-                      (expect "Buffer file content" :to-appear-once-in system-content)
-                      ;; Check that it mentions the project name in the description.
-                      (expect (format "which is named `%s`" (file-name-nondirectory project-dir))
-                              :to-appear-once-in system-content))))))
+                    ;; The gptel context should appear at the beginning.
+                    (let ((macher-pos
+                           (string-match "The user is currently working on a project" all-content))
+                          (gptel-pos
+                           (string-match "MODIFIED_BUFFER_CONTENT_FOR_CONTEXT" all-content)))
+                      (expect macher-pos :to-be-truthy)
+                      (expect gptel-pos :to-be-truthy)
+                      (expect (< gptel-pos macher-pos) :to-be-truthy))))))
           ;; Clean up the buffer.
-          (when (buffer-live-p buffer-buffer)
-            (kill-buffer buffer-buffer)))))
+          (when (buffer-live-p context-buffer)
+            (with-current-buffer context-buffer
+              (set-buffer-modified-p nil))
+            (kill-buffer context-buffer)))))
 
-
-    (it "includes project info when context has files"
-      (funcall setup-backend '("Test response"))
+    (it "preserves gptel context with macher tools preset"
+      ;; Using full macher preset (with tools) should still preserve gptel context.
+      (funcall setup-backend '("Tools are available and context preserved"))
       (funcall setup-project
-               "files"
-               '(("README.md" . "# Test Project\n\nSimple test project.\n")
-                 ("src/main.el" . "Main file content")
-                 ("test/test-file.el" . "Test file content")))
-      (let ((response-received nil)
-            (callback-called nil)
-            ;; Explicitly make sure the context shows up in a system message.
+               "gptel-context-with-tools"
+               '(("src/main.el" . "main content")
+                 ("src/important.el" . "IMPORTANT_GPTEL_CONTEXT_CONTENT")))
+      (let ((callback-called nil)
+            (response-received nil)
+            (context-file (expand-file-name "src/important.el" project-dir))
             (gptel-use-context 'system))
 
         (gptel-context-remove-all)
 
         (with-temp-buffer
-          ;; Add the main file to gptel context.
-          (set-visited-file-name (expand-file-name "src/main.el" project-dir))
-          (gptel-add-file (expand-file-name "src/main.el" project-dir))
-          (with-temp-buffer
-            ;; Now open another project file for the test.
-            (set-visited-file-name project-file)
+          (set-visited-file-name project-file)
+          ;; Add the file to gptel context.
+          (gptel-add-file context-file)
 
-            (macher-test--send
-             'macher-ro "Test prompt with file context"
-             (macher-test--make-once-only-callback
-              (lambda (error context)
-                (setq callback-called t)
-                (setq response-received (not error)))))
+          ;; Use the full macher preset which includes tools.
+          (macher-test--send
+           'macher "Test prompt with tools and gptel context"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
 
-            ;; Wait for the async response.
-            (let ((timeout 0))
-              (while (and (not callback-called) (< timeout 100))
-                (sleep-for 0.1)
-                (setq timeout (1+ timeout))))
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
 
-            (expect callback-called :to-be-truthy)
-            (expect response-received :to-be-truthy)
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
 
-            ;; Validate that the request contains expected content.
-            (let ((requests (funcall received-requests)))
-              (expect (> (length requests) 0) :to-be-truthy)
-              (let* ((request (car requests))
-                     (messages (plist-get request :messages))
-                     (system-messages
-                      (cl-remove-if-not
-                       (lambda (msg) (string= (plist-get msg :role) "system")) messages)))
-                (expect messages :to-be-truthy)
-                (expect (> (length system-messages) 0) :to-be-truthy)
+          ;; Validate that gptel context is preserved even with tools.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (tools (plist-get request :tools))
+                   (all-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) messages " ")))
+              ;; gptel context file content should appear.
+              (expect all-content :to-match "IMPORTANT_GPTEL_CONTEXT_CONTENT")
+              ;; macher workspace context should appear.
+              (expect all-content :to-match "The user is currently working on a project named:")
+              ;; Tools should be present.
+              (expect tools :to-be-truthy)
+              (expect (> (length tools) 0) :to-be-truthy))))))
 
-                ;; Verify that context appears in system message.
-                (let ((system-content
-                       (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
-                  ;; Check for workspace description.
-                  (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
-                  ;; Check that files are properly separated between context and available.
-                  (expect "Files already provided above" :to-appear-once-in system-content)
-                  (expect system-content
-                          :to-match "Files already provided above.*\n    src/main\\.el")
-                  (expect "Other files available for editing:" :to-appear-once-in system-content)
-                  (expect
-                   system-content
-                   :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    README\\.md")
-                  (expect
-                   system-content
-                   :to-match "Other files available for editing:\n\\(    [^\n]*\n\\)*    test/test-file\\.el")
-                  ;; Check that file content appears in context.
-                  (expect "Main file content" :to-appear-once-in system-content)
-                  ;; Check that it mentions the project name in the description.
-                  (expect (format "which is named `%s`" (file-name-nondirectory project-dir))
-                          :to-appear-once-in system-content))))))))
-
-    (it "includes workspace info when only buffers are in context"
-      (funcall setup-backend '("Test response"))
+    (it "preserves multiple gptel context files"
+      (funcall setup-backend '("I see all the files"))
       (funcall setup-project
-               "buffers"
-               '(("first.el" . "first content")
-                 ("src/second.el" . "second content")
-                 ("src/third.el" . "third content")))
-      (let ((response-received nil)
-            (callback-called nil)
-            ;; Explicitly make sure the context shows up in a system message.
-            (gptel-use-context 'system)
-            (context-buffer nil))
+               "gptel-multi-context"
+               '(("src/main.el" . "main content")
+                 ("src/first.el" . "FIRST_CONTEXT_FILE_CONTENT")
+                 ("src/second.el" . "SECOND_CONTEXT_FILE_CONTENT")
+                 ("docs/readme.md" . "THIRD_CONTEXT_FILE_IN_DOCS")))
+      (let ((callback-called nil)
+            (response-received nil)
+            (first-file (expand-file-name "src/first.el" project-dir))
+            (second-file (expand-file-name "src/second.el" project-dir))
+            (third-file (expand-file-name "docs/readme.md" project-dir))
+            (gptel-use-context 'system))
 
         (gptel-context-remove-all)
 
-        (unwind-protect
-            (progn
-              ;; Add context from another buffer.
-              (setq context-buffer
-                    (find-file-noselect (expand-file-name "src/second.el" project-dir)))
-              (with-current-buffer context-buffer
-                (gptel-add))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          ;; Add multiple files to gptel context.
+          (gptel-add-file first-file)
+          (gptel-add-file second-file)
+          (gptel-add-file third-file)
 
+          (macher-test--send
+           'macher-system "Test prompt with multiple gptel context files"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate all context files appear.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (all-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) messages " ")))
+              ;; All three gptel context files should appear.
+              (expect all-content :to-match "FIRST_CONTEXT_FILE_CONTENT")
+              (expect all-content :to-match "SECOND_CONTEXT_FILE_CONTENT")
+              (expect all-content :to-match "THIRD_CONTEXT_FILE_IN_DOCS")
+              ;; macher workspace context should also appear.
+              (expect all-content
+                      :to-match "The user is currently working on a project named:"))))))
+
+    (it "preserves gptel context when context is placed in user message"
+      ;; Test with gptel-use-context set to 'user instead of 'system.
+      (funcall setup-backend '("Context in user message works"))
+      (funcall setup-project
+               "gptel-context-user"
+               '(("src/main.el" . "main content")
+                 ("src/user-context.el" . "USER_MESSAGE_CONTEXT_CONTENT")))
+      (let ((callback-called nil)
+            (response-received nil)
+            (context-file (expand-file-name "src/user-context.el" project-dir))
+            (gptel-use-context 'user))
+
+        (gptel-context-remove-all)
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          ;; Add file to gptel context.
+          (gptel-add-file context-file)
+
+          (macher-test--send
+           'macher-system "Test prompt with user-placed context"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate context appears in user message.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (user-messages
+                    (cl-remove-if-not
+                     (lambda (msg) (string= (plist-get msg :role) "user")) messages))
+                   (user-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) user-messages " ")))
+              ;; gptel context should appear in user messages.
+              (expect user-content :to-match "USER_MESSAGE_CONTEXT_CONTENT"))))))
+
+    (it "does not duplicate context when macher placeholder is present"
+      ;; When user has a custom system prompt with the macher placeholder, context should appear
+      ;; exactly once.
+      (funcall setup-backend '("No duplication"))
+      (funcall setup-project
+               "gptel-context-no-dup"
+               '(("src/main.el" . "main content")
+                 ("src/context.el" . "CONTEXT_SHOULD_APPEAR_ONCE")))
+      (let ((callback-called nil)
+            (response-received nil)
+            (context-file (expand-file-name "src/context.el" project-dir))
+            (gptel-use-context 'system))
+
+        (gptel-context-remove-all)
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          ;; Add file to gptel context.
+          (gptel-add-file context-file)
+
+          (macher-test--send
+           'macher-system "Check for duplication"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate context appears exactly once.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (all-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) messages " "))
+                   (match-count 0))
+              ;; Count occurrences of the context content.
               (with-temp-buffer
-                ;; Now open another project file.
-                (set-visited-file-name project-file)
-                (macher-test--send
-                 'macher-notools "Test prompt with buffer context"
-                 (macher-test--make-once-only-callback
-                  (lambda (error context)
-                    (setq callback-called t)
-                    (setq response-received (not error)))))
+                (insert all-content)
+                (goto-char (point-min))
+                (while (search-forward "CONTEXT_SHOULD_APPEAR_ONCE" nil t)
+                  (setq match-count (1+ match-count))))
+              ;; Context should appear exactly once.
+              (expect match-count :to-equal 1)))))))
 
-                ;; Wait for the async response.
-                (let ((timeout 0))
-                  (while (and (not callback-called) (< timeout 100))
-                    (sleep-for 0.1)
-                    (setq timeout (1+ timeout))))
+  (describe "non-string system prompt directives"
+    ;; These tests verify that macher correctly handles gptel directives that are functions or
+    ;; lists (few-shot templates), not just simple strings.  The system prompt transformation should
+    ;; work correctly with all directive formats supported by gptel.
 
-                (expect callback-called :to-be-truthy)
-                (expect response-received :to-be-truthy)
+    (it "handles function directive that returns a string"
+      ;; When gptel--system-message is a function returning a string, macher should evaluate it and
+      ;; inject the workspace context into the result.
+      (funcall setup-backend '("Function directive works"))
+      (funcall setup-project "fn-directive-string" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil)
+            ;; Create a function directive that returns a string.
+            (gptel--system-message (lambda () "DYNAMIC_FUNCTION_DIRECTIVE_CONTENT")))
 
-                ;; Validate that the request contains expected content.
-                (let ((requests (funcall received-requests)))
-                  (expect (> (length requests) 0) :to-be-truthy)
-                  (let* ((request (car requests))
-                         (messages (plist-get request :messages))
-                         (system-messages
-                          (cl-remove-if-not
-                           (lambda (msg) (string= (plist-get msg :role) "system")) messages)))
-                    (expect messages :to-be-truthy)
-                    (expect (> (length system-messages) 0) :to-be-truthy)
+        (with-temp-buffer
+          (set-visited-file-name project-file)
 
-                    ;; Run all expected checks.
-                    (let ((system-content
-                           (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
-                      ;; Check for workspace description.
-                      (expect "^WORKSPACE CONTEXT" :to-appear-once-in system-content)
-                      ;; Check that all files are listed (buffer context doesn't affect file listing).
-                      (expect "Files available for editing:" :to-appear-once-in system-content)
-                      (expect
-                       system-content
-                       :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    first\\.el")
-                      (expect
-                       system-content
-                       :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/second\\.el")
-                      (expect
-                       system-content
-                       :to-match "Files available for editing:\n\\(    [^\n]*\n\\)*    src/third\\.el")
-                      (expect "second content" :to-appear-once-in system-content)
-                      ;; Check that it mentions the project name in the description.
-                      (expect (format "which is named `%s`" (file-name-nondirectory project-dir))
-                              :to-appear-once-in system-content))))))
-          (when context-buffer
-            (kill-buffer context-buffer))))))
+          (macher-test--send
+           'macher-system "Test with function directive"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate both function directive content and macher context appear.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (system-messages
+                    (cl-remove-if-not
+                     (lambda (msg) (string= (plist-get msg :role) "system")) messages))
+                   (system-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) system-messages
+                               " ")))
+              ;; The function's return value should be in the system message.
+              (expect system-content :to-match "DYNAMIC_FUNCTION_DIRECTIVE_CONTENT")
+              ;; macher workspace context should also appear.
+              (expect system-content
+                      :to-match "The user is currently working on a project named:"))))))
+
+    (it "handles function directive that returns a list"
+      ;; When gptel--system-message is a function returning a list (few-shot template), macher
+      ;; should inject workspace context into the first element.
+      (funcall setup-backend '("Function returning list works"))
+      (funcall setup-project "fn-directive-list" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil)
+            ;; Create a function directive that returns a list (few-shot template).
+            (gptel--system-message
+             (lambda ()
+               '("FEW_SHOT_SYSTEM_FROM_FUNCTION"
+                 "Example user message"
+                 "Example assistant response"))))
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+
+          (macher-test--send
+           'macher-system "Test with function returning list"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate the list directive is handled correctly.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (all-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) messages " ")))
+              ;; The system message from the list should appear.
+              (expect all-content :to-match "FEW_SHOT_SYSTEM_FROM_FUNCTION")
+              ;; macher workspace context should appear.
+              (expect all-content :to-match "The user is currently working on a project named:")
+              ;; The few-shot examples should also be present.
+              (expect all-content :to-match "Example user message")
+              (expect all-content :to-match "Example assistant response"))))))
+
+    (it "handles list directive (few-shot template)"
+      ;; When gptel--system-message is a list, macher should inject workspace context into the
+      ;; first element only.
+      (funcall setup-backend '("List directive works"))
+      (funcall setup-project "list-directive" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil)
+            ;; Create a list directive (few-shot template).
+            (gptel--system-message
+             '("LIST_BASED_SYSTEM_PROMPT"
+               "User example for few-shot"
+               "Assistant example response")))
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+
+          (macher-test--send
+           'macher-system "Test with list directive"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate the list directive is handled correctly.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (all-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) messages " ")))
+              ;; The first element (system message) should appear with macher context.
+              (expect all-content :to-match "LIST_BASED_SYSTEM_PROMPT")
+              (expect all-content :to-match "The user is currently working on a project named:")
+              ;; The few-shot examples should be present.
+              (expect all-content :to-match "User example for few-shot")
+              (expect all-content :to-match "Assistant example response"))))))
+
+    (it "handles function directive with dynamic buffer-local content"
+      ;; Function directives can access buffer-local variables. Verify macher doesn't break this.
+      (funcall setup-backend '("Dynamic content works"))
+      (funcall setup-project "fn-directive-dynamic" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil))
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          ;; Set up a buffer-local variable that the function will access.
+          (setq-local my-dynamic-value "BUFFER_LOCAL_DYNAMIC_VALUE")
+          ;; Create a function directive that reads from the buffer.
+          (setq-local gptel--system-message
+                      (lambda () (format "System with dynamic: %s" my-dynamic-value)))
+
+          (macher-test--send
+           'macher-system "Test with dynamic function directive"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate dynamic content was captured.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (system-messages
+                    (cl-remove-if-not
+                     (lambda (msg) (string= (plist-get msg :role) "system")) messages))
+                   (system-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) system-messages
+                               " ")))
+              ;; Dynamic buffer-local value should appear.
+              (expect system-content :to-match "BUFFER_LOCAL_DYNAMIC_VALUE")
+              ;; macher workspace context should also appear.
+              (expect system-content
+                      :to-match "The user is currently working on a project named:"))))))
+
+    (it "handles list directive with placeholder already present"
+      ;; When the list directive's first element already contains the macher placeholder, it should
+      ;; be replaced without duplication.
+      (funcall setup-backend '("Placeholder in list works"))
+      (funcall setup-project "list-with-placeholder" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil)
+            ;; Create a list directive with placeholder in the first element.
+            (gptel--system-message
+             (list
+              (concat
+               "SYSTEM_WITH_PLACEHOLDER" macher-context-string-placeholder "END_MARKER")
+              "Few-shot user" "Few-shot assistant")))
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+
+          (macher-test--send
+           'macher-system "Test list with placeholder"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate placeholder was replaced correctly.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (system-messages
+                    (cl-remove-if-not
+                     (lambda (msg) (string= (plist-get msg :role) "system")) messages))
+                   (system-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) system-messages
+                               " ")))
+              ;; Content before placeholder should appear.
+              (expect system-content :to-match "SYSTEM_WITH_PLACEHOLDER")
+              ;; Content after placeholder should appear.
+              (expect system-content :to-match "END_MARKER")
+              ;; Placeholder should be replaced with actual context.
+              (expect system-content
+                      :not
+                      :to-match (regexp-quote macher-context-string-placeholder))
+              ;; macher workspace context should appear between them.
+              (expect system-content :to-match "The user is currently working on a project named:")
+              ;; Context marker should appear exactly once.
+              (expect macher-context-string-marker-start :to-appear-once-in system-content))))))
+
+    (it "handles function directive with nested function call"
+      ;; A function directive that itself calls another function should work correctly.
+      (funcall setup-backend '("Nested function works"))
+      (funcall setup-project "fn-directive-nested" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil)
+            ;; Create a nested function directive.
+            (gptel--system-message (lambda () (lambda () "INNER_RESULT"))))
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+
+          (macher-test--send
+           'macher-system "Test with nested function directive"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate nested function result appears.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (system-messages
+                    (cl-remove-if-not
+                     (lambda (msg) (string= (plist-get msg :role) "system")) messages))
+                   (system-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) system-messages
+                               " ")))
+              ;; The nested function result should appear.
+              (expect system-content :to-match "INNER_RESULT")
+              ;; macher workspace context should also appear.
+              (expect system-content
+                      :to-match "The user is currently working on a project named:")))))))
 
   (describe "default before-action handler"
     :var*
@@ -3139,6 +3526,210 @@ Sets `test-patch-content' to the generated patch content for additional assertio
               (expect patch :not :to-match "diff --git")
               (expect patch :not :to-match "@@")
               (expect patch :not :to-match "^[+-]")))))))
+
+  (describe "macher context sharing"
+    (it "shares single context when multiple tools are invoked together"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "file1.txt" :content "content1")))
+                   (:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "file2.txt" :content "content2")))])
+                 "Created both files"))
+      (funcall setup-project "context-sharing-multi-tool")
+      (let ((callback-called nil)
+            (exit-code nil)
+            (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Create two files"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          ;; Both files should be in the same context.
+          (let ((context (macher--context-for-fsm fsm)))
+            (expect context :to-be-truthy)
+            (expect (macher-context-dirty-p context) :to-be-truthy)
+            ;; Both file edits should be tracked in the same context.
+            (let ((contents (macher-context-contents context)))
+              (expect (length contents) :to-be 2))))))
+
+    (it "does not create context when no macher tools are invoked"
+      (funcall setup-backend '("Simple response with no tools"))
+      (funcall setup-project "no-tools-no-context")
+      (let ((callback-called nil)
+            (exit-code nil)
+            (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher-system "Just chat with me"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          ;; Context should NOT have been created (lazy initialization).
+          (expect (macher--context-for-fsm fsm) :to-be nil))))
+
+    (it "does not create context when tools are present but not invoked"
+      ;; Backend responds without using any tools.
+      (funcall setup-backend '("I could use tools but chose not to"))
+      (funcall setup-project "tools-not-used")
+      (let ((callback-called nil)
+            (exit-code nil)
+            (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          ;; Use macher preset which includes tools.
+          (macher-test--send
+           'macher "Do something"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          ;; Context should NOT have been created since tools weren't invoked.
+          (expect (macher--context-for-fsm fsm) :to-be nil))))
+
+    (it "shares context between read and write tools for correct file state"
+      ;; First tool writes a file, second tool reads it back.  The read should see the written
+      ;; content, proving they share context.
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "shared-test.txt" :content "written by tool")))])
+                 (:tool-calls
+                  [(:function
+                    (:name "read_file_in_workspace" :arguments (:path "shared-test.txt")))])
+                 "Read the file I just wrote"))
+      (funcall setup-project "context-sharing-read-write")
+      (let ((callback-called nil)
+            (exit-code nil)
+            (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Write then read a file"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          ;; The key test: read tool should return the content written by write tool.  This proves
+          ;; they share the same macher-context.
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool")))
+            ;; Should have 3 requests: initial, after write, after read.
+            (expect (length requests) :to-be 3)
+            ;; First request has no tool response.
+            (expect (nth 0 tool-messages) :to-be nil)
+            ;; Second request has write tool response (nil for success).
+            (expect (nth 1 tool-messages) :to-equal '("nil"))
+            ;; Third request contains read tool response with the written content.  This is the
+            ;; critical assertion - read saw what write created.  The response might also include
+            ;; the previous write response, so check membership.
+            (expect (member "written by tool" (nth 2 tool-messages)) :to-be-truthy)))))
+
+    (it "shares context for sequential edits to same file"
+      ;; Two sequential edits to the same file should both apply.
+      ;; Second edit references text created by first edit - proves sharing.
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "edit_file_in_workspace"
+                     :arguments
+                     (:path "edit-test.txt" :old_text "original" :new_text "first-edit")))])
+                 (:tool-calls
+                  [(:function
+                    (:name
+                     "edit_file_in_workspace"
+                     :arguments
+                     (:path "edit-test.txt" :old_text "first-edit" :new_text "second-edit")))])
+                 "Both edits complete"))
+      (funcall setup-project "context-sharing-edits" '(("edit-test.txt" . "original content")))
+      (let ((callback-called nil)
+            (exit-code nil)
+            (fsm nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Make two edits"
+           (macher-test--make-once-only-callback
+            (lambda (cb-exit-code cb-fsm)
+              (setq callback-called t)
+              (setq exit-code cb-exit-code)
+              (setq fsm cb-fsm))))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+          (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+          ;; Both edits should have been applied to the same context.  The second edit only succeeds
+          ;; if it can find "first-edit" (created by first edit).
+          (let ((context (macher--context-for-fsm fsm)))
+            (expect context :to-be-truthy)
+            (let* ((file-path (expand-file-name "edit-test.txt" project-dir))
+                   (contents (macher-context--contents-for-file file-path context)))
+              ;; Original content.
+              (expect (car contents) :to-equal "original content")
+              ;; Final content after both edits - proves both applied to shared context.
+              (expect (cdr contents) :to-equal "second-edit content")))))))
 
   (describe "macher-process-request"
     :var
