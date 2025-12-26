@@ -47,7 +47,48 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
 
+      - name: Check GitHub Models availability
+        id: check-github-models
+        continue-on-error: true
+        run: |
+          # Test if GitHub Models API is accessible.
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "https://models.github.ai/inference/chat/completions")
+
+          if [ "$HTTP_CODE" = "429" ] || [ "$HTTP_CODE" = "503" ] || [ "$HTTP_CODE" = "500" ]; then
+            echo "GitHub Models API returned $HTTP_CODE, will fall back to Ollama"
+            echo "available=false" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            echo "GitHub Models API is available (HTTP $HTTP_CODE)"
+            echo "available=true" >> $GITHUB_OUTPUT
+          fi
+
+      # Note this also starts the ollama server.
+      - name: Install Ollama
+        if: steps.check-github-models.outputs.available == 'false'
+        uses: ai-action/setup-ollama@v1
+
+      # See https://github.com/ai-action/setup-ollama/issues/40.
+      - name: Cache Ollama
+        if: steps.check-github-models.outputs.available == 'false'
+        id: cache-artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama
+          key: ${{ runner.os }}-ollama
+
+      - name: Pull Ollama model
+        if: steps.check-github-models.outputs.available == 'false'
+        run: |
+          MODEL_NAME=$(grep -o 'ollama-model "[^"]*"' tests/test-functional.el | cut -d'"' -f2)
+          ollama pull "$MODEL_NAME"
+
       - name: Run tests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Disable GitHub Models in tests if the API is not available.
+          MACHER_DISABLE_GITHUB_MODELS: ${{ steps.check-github-models.outputs.available == 'false' && 'true' || 'false' }}
         run: make test
