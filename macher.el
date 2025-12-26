@@ -3293,20 +3293,18 @@ otherwise returns (nil . nil)."
                         (gptel--strip-mode-suffix major-mode)
                       (error
                        (format-mode-line mode-name)))))
-              (format (concat
-                       "The request was sent from the %s file `%s` in the workspace. "
-                       "If the request text appears as a comment or placeholder in the file, "
-                       "replace it with the actual implementation. ")
-                      lang relpath))))))
-    (format (concat
-             "TASK: Implement the following request using workspace tools.\n\n"
-             "INSTRUCTIONS:\n"
-             "1. Read and understand the implementation request below\n"
-             "2. Use the workspace tools to edit files as needed\n"
-             "3. Create working, complete code that fulfills the request\n\n"
-             "%s"
-             "\n\nIMPLEMENTATION REQUEST:\n\n%s")
-            source-description input)))
+              (concat
+               (format "The request was sent from the %s file `%s` in the workspace. " lang relpath)
+               "If the request text appears as a comment or placeholder in the file, "
+               "replace it with the actual implementation. "))))))
+    (concat
+     "TASK: Implement the following request using workspace tools.\n\n"
+     "INSTRUCTIONS:\n"
+     "1. Read and understand the implementation request below\n"
+     "2. Use the workspace tools to edit files as needed\n"
+     "3. Create working, complete code that fulfills the request\n\n"
+     source-description
+     (format "\n\nIMPLEMENTATION REQUEST:\n\n%s" input))))
 
 (defun macher--revise-prompt (input _is-selected &optional patch-buffer)
   "Generate a prompt for revising based on INPUT (revision instructions).
