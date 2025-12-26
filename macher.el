@@ -2002,16 +2002,11 @@ Returns the processed content as a string."
                   1))
                (formatted-lines
                 (cl-loop
-                 for
-                 line
-                 in
-                 lines-to-number
-                 for
-                 line-num
-                 from
-                 actual-start-line
-                 collect
-                 (format (concat "%" (number-to-string line-num-width) "d\t%s") line-num line)))
+                 for line in lines-to-number for line-num from actual-start-line collect
+                 (format "%s%d\t%s"
+                         (make-string
+                          (- line-num-width (length (number-to-string line-num))) ?\s)
+                         line-num line)))
                (result (string-join formatted-lines "\n")))
           ;; Add the final trailing newline if we excluded the final empty line
           (if should-exclude-final-empty
