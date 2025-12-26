@@ -28,4 +28,19 @@ jobs:
           RECIPE: (macher :fetcher github :repo "kmontag/macher")
           # set this to false (or remove it) if the package isn't on MELPA:
           # EXIST_OK: true
-        run: echo $GITHUB_REF && make -C ~/melpazoid
+        run: |
+          echo $GITHUB_REF
+          # Capture output while still showing it in real-time.
+          make -C ~/melpazoid 2>&1 | tee ~/melpazoid-output.txt
+      # melpazoid doesn't currently seem to provide a way to fail the build on warnings, so we check
+      # the output manually to make sure it includes a particular header/footer with no warnings in
+      # between.
+      - name: Check for warnings
+        run: |
+          # Check if output contains the expected success pattern (sha256 followed by "⸺ Package and license:").
+          # If this pattern is not found, it likely means there were warnings in the output.
+          if ! grep -Pzo 'sha256:[a-f0-9]+\n\n⸺ Package and license:' ~/melpazoid-output.txt > /dev/null; then
+            echo "::error::Melpazoid reported warnings or the expected output pattern was not found."
+            echo "::error::If there don't seem to be any warnings in the output above, it's possible the expected output format of melpazoid has changed. If so, update the expected pattern in this workflow file."
+            exit 1
+          fi
