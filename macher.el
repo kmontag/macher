@@ -512,8 +512,13 @@ preset (or are using one of the other built-in presets), this will be
 replaced with the current result of the `macher-context-string-function'
 in your system prompt.
 
-Set this to nil to disable modification of the outgoing system prompt,
-even when \"@macher-base\" is applied."
+Setting this to nil will disable request-time modification of the
+outgoing system prompt.  Note, though, that in that case
+\"@macher-system\" etc. will still insert the _current_ result of
+`macher-context-string-function' (if not already present) directly into
+the system prompt when applied.  If you want to disable macher's
+interaction with the system prompt entirely, you can set both this and
+`macher-context-string-function' to nil."
   :type '(choice (string :tag "Placeholder string") (const :tag "Disabled" nil))
   :group 'macher-workspace)
 
@@ -549,7 +554,11 @@ As long as `macher-preset-base' is applied, any instances of the
 `macher-context-string-placeholder' in the system prompt will be
 replaced with the result of this function.
 
-Set this to nil to disable workspace context injection."
+Set this to nil to disable workspace context injection.  Note that in
+that case, \"@macher-system\" etc. will still insert the
+`macher-context-string-placeholder' into the raw system prompt.  If you
+want to disable macher's interaction with the system prompt entirely,
+you can set both this and `macher-context-string-placeholder' to nil."
   :type '(function :tag "Workspace string function")
   :group 'macher-workspace)
 
@@ -3548,41 +3557,50 @@ SYSTEM can be a string, a function, or a list:
 If `macher-context-string-placeholder' is nil, simply appends the
 current result of `macher-context-string-function' (if no start marker
 already present), i.e. goes straight to the \"@macher-system-commit\"
-state."
-  (cl-etypecase system
-    (string
-     (cond
-      ;; Already has marker-start, nothing to do.
-      ((string-match-p (regexp-quote macher-context-string-marker-start) system)
-       system)
-      ;; Placeholder is set and not already in string, append it.
-      ((and macher-context-string-placeholder
-            (not (string-match-p (regexp-quote macher-context-string-placeholder) system)))
-       (concat system macher-context-string-placeholder))
-      ;; Placeholder is nil, append demarcated context directly.
-      ((not macher-context-string-placeholder)
-       (let ((context-string
-              (when macher-context-string-function
-                (funcall macher-context-string-function))))
-         (if context-string
-             (concat
-              system
-              macher-context-string-marker-start
-              context-string
-              macher-context-string-marker-end)
-           system)))
-      (t
-       system)))
-    (function
-     ;; Note - it'd be nice if we didn't have to actually wrap the function if we already know it
-     ;; contains the context string. As-is, this will overwrite functional user directives with a
-     ;; lambda - this is functionally fine, but may look weird in gptel's directives UI.
-     (lambda ()
-       ;; By definition this lambda is being called in whatever buffer functional system prompts are
-       ;; supposed to be run.  So it should be fine not to worry about changing buffers or anything
-       ;; before resolving the system message.
-       (macher--system-ensure-placeholder-or-context-string (macher--parse-directive system))))
-    (list (cons (macher--system-ensure-placeholder-or-context-string (car system)) (cdr system)))))
+state.
+
+If both `macher-context-string-placeholder' AND
+`macher-context-string-function' are nil, does nothing."
+  ;; No placeholder to append or context function to call. Treat this as a special case, bail
+  ;; immediately.
+  (if (not (or macher-context-string-function macher-context-string-placeholder))
+      system
+    (cl-etypecase system
+      (string
+       (cond
+        ;; Already has marker-start, nothing to do.
+        ((string-match-p (regexp-quote macher-context-string-marker-start) system)
+         system)
+        ;; Placeholder is set and not already in string, append it.
+        ((and macher-context-string-placeholder
+              (not (string-match-p (regexp-quote macher-context-string-placeholder) system)))
+         (concat system macher-context-string-placeholder))
+        ;; Placeholder is nil, append demarcated context directly.
+        ((not macher-context-string-placeholder)
+         ;; Note the `macher-context-string-function' can't be nil at this point, due to the first
+         ;; bail check.  Also note that even if the context string is nil, we render this block it
+         ;; for parity with the `macher--system-replace-placeholder' result, i.e. treat this exactly
+         ;; as if we appended an "anonymous" placeholder at the end and then committed it.  This seems
+         ;; like the most consistent way to handle things.
+         (let ((context-string (funcall macher-context-string-function)))
+           (concat
+            system
+            macher-context-string-marker-start
+            context-string
+            macher-context-string-marker-end)))
+        (t
+         system)))
+      (function
+       ;; Note - it'd be nice if we didn't have to actually wrap the function if we already know it
+       ;; contains the context string. As-is, this will overwrite functional user directives with a
+       ;; lambda - this is functionally fine, but may look weird in gptel's directives UI.
+       (lambda ()
+         ;; By definition this lambda is being called in whatever buffer functional system prompts are
+         ;; supposed to be run.  So it should be fine not to worry about changing buffers or anything
+         ;; before resolving the system message.
+         (macher--system-ensure-placeholder-or-context-string (macher--parse-directive system))))
+      (list
+       (cons (macher--system-ensure-placeholder-or-context-string (car system)) (cdr system))))))
 
 (defun macher--system-replace-placeholder (system &optional buffer)
   "Inject macher context into the SYSTEM prompt.
