@@ -2998,19 +2998,20 @@
           (expect result :to-match "subdir/file3.md")
           ;; Should list files in the workspace.
           (expect result
-                  :to-match (format "Files in the %s workspace:" (file-name-nondirectory temp-dir)))
-          ;; Should contain project location.
-          (expect result :to-match "The project is located at:")))
+                  :to-match
+                  (regexp-quote
+                   (format "Files in the \"%s\" project:" (file-name-nondirectory temp-dir))))))
 
       (it "generates context string for single-file workspace"
         (let* ((macher--workspace (cons 'file file1))
                (result (macher--context-string)))
           (expect (stringp result) :to-be-truthy)
           ;; Should contain workspace information.
-          (expect result :to-match "The user is currently working on a project named: `file1.txt`")
+          (expect result
+                  :to-match "The user is currently working on a project named: \"file1.txt\"")
           (message "reus %s" result)
           ;; Should contain only the single file.
-          (expect result :to-match "Files in the file1.txt workspace:\n[ ]+file1.txt")
+          (expect result :to-match "Files in the \"file1.txt\" project:\n[ ]+file1.txt")
           ;; Should not contain other files.
           (expect result :not :to-match "file2.el")
           (expect result :not :to-match "file3.md")))
@@ -3031,14 +3032,15 @@
 
           ;; Verify the result structure.
           (expect (stringp result) :to-be-truthy)
-          (expect result :to-match "The user is currently working on a project named:")
+          (expect result
+                  :to-match "The user is currently working on a project named: \"test-project\"")
 
           ;; Both files should be listed.
           (expect result :to-match "    test\\.txt")
           (expect result :to-match "    subdir/test\\.txt")
 
           ;; Should contain workspace file listing.
-          (expect result :to-match "Files in the test-project workspace:"))))
+          (expect result :to-match "Files in the \"test-project\" project:"))))
 
     (describe "with max-files limit"
       :var (temp-dir workspace all-files original-max-files)
