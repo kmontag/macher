@@ -3551,11 +3551,28 @@ already present), i.e. goes straight to the \"@macher-system-commit\"
 state."
   (cl-etypecase system
     (string
-     (if (and macher-context-string-placeholder
-              (not (string-match-p (regexp-quote macher-context-string-placeholder) system))
-              (not (string-match-p (regexp-quote macher-context-string-marker-start) system)))
-         (concat system macher-context-string-placeholder)
-       system))
+     (cond
+      ;; Already has marker-start, nothing to do.
+      ((string-match-p (regexp-quote macher-context-string-marker-start) system)
+       system)
+      ;; Placeholder is set and not already in string, append it.
+      ((and macher-context-string-placeholder
+            (not (string-match-p (regexp-quote macher-context-string-placeholder) system)))
+       (concat system macher-context-string-placeholder))
+      ;; Placeholder is nil, append demarcated context directly.
+      ((not macher-context-string-placeholder)
+       (let ((context-string
+              (when macher-context-string-function
+                (funcall macher-context-string-function))))
+         (if context-string
+             (concat
+              system
+              macher-context-string-marker-start
+              context-string
+              macher-context-string-marker-end)
+           system)))
+      (t
+       system)))
     (function
      ;; Note - it'd be nice if we didn't have to actually wrap the function if we already know it
      ;; contains the context string. As-is, this will overwrite functional user directives with a
@@ -3565,13 +3582,7 @@ state."
        ;; supposed to be run.  So it should be fine not to worry about changing buffers or anything
        ;; before resolving the system message.
        (macher--system-ensure-placeholder-or-context-string (macher--parse-directive system))))
-    (list
-     (let ((first-elem (car system)))
-       (if (and macher-context-string-placeholder
-                (not (string-match-p (regexp-quote macher-context-string-placeholder) first-elem))
-                (not (string-match-p (regexp-quote macher-context-string-marker-start) first-elem)))
-           (cons (concat first-elem macher-context-string-placeholder) (cdr system))
-         system)))))
+    (list (cons (macher--system-ensure-placeholder-or-context-string (car system)) (cdr system)))))
 
 (defun macher--system-replace-placeholder (system &optional buffer)
   "Inject macher context into the SYSTEM prompt.
