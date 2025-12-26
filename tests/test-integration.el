@@ -1553,11 +1553,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                  ("src/util.el" . "Utility functions content")
                  ("test/test-main.el" . "Test file content")))
       (let ((response-received nil)
-            (callback-called nil)
-            ;; Explicitly make sure the context shows up in a system message.
-            (gptel-use-context 'system))
-
-        (gptel-context-remove-all)
+            (callback-called nil))
 
         (with-temp-buffer
           ;; Open the main project file but don't add anything to context.
@@ -1608,69 +1604,64 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                 (expect (format "project named: `%s`" (file-name-nondirectory project-dir))
                         :to-appear-once-in system-content))))))))
 
-    (it "does not duplicate macher context string when macher-system applied multiple times"
-      ;; This test verifies that applying @macher-system multiple times (e.g. in nested presets or
-      ;; repeated applications) does not result in duplicate workspace context strings in the system
-      ;; prompt.
-      (funcall setup-backend '("Test response"))
-      (funcall setup-project
-               "multi-apply"
-               '(("src/main.el" . "main content")))
-      (let ((callback-called nil)
-            (response-received nil)
-            (gptel-use-context 'system))
+  (it "does not duplicate macher context string when macher-system applied multiple times"
+    ;; This test verifies that applying @macher-system multiple times (e.g. in nested presets or
+    ;; repeated applications) does not result in duplicate workspace context strings in the system
+    ;; prompt.
+    (funcall setup-backend '("Test response"))
+    (funcall setup-project "multi-apply" '(("src/main.el" . "main content")))
+    (let ((callback-called nil)
+          (response-received nil))
 
-        (gptel-context-remove-all)
+      (with-temp-buffer
+        (set-visited-file-name project-file)
 
-        (with-temp-buffer
-          (set-visited-file-name project-file)
+        ;; Apply macher-system multiple times by nesting gptel-with-preset calls.
+        (macher--with-preset
+         'macher-system
+         (lambda ()
+           (macher--with-preset
+            'macher-system
+            (lambda ()
+              (macher--with-preset
+               'macher-system
+               (lambda ()
+                 (macher-test--send
+                  'macher-system "Test prompt with multiple preset applications"
+                  (macher-test--make-once-only-callback
+                   (lambda (exit-code _fsm)
+                     (setq callback-called t)
+                     (setq response-received (not exit-code)))))))))))
 
-          ;; Apply macher-system multiple times by nesting gptel-with-preset calls.
-          (macher--with-preset
-           'macher-system
-           (lambda ()
-             (macher--with-preset
-              'macher-system
-              (lambda ()
-                (macher--with-preset
-                 'macher-system
-                 (lambda ()
-                   (macher-test--send
-                    'macher-system "Test prompt with multiple preset applications"
-                    (macher-test--make-once-only-callback
-                     (lambda (exit-code _fsm)
-                       (setq callback-called t)
-                       (setq response-received (not exit-code)))))))))))
+        ;; Wait for the async response.
+        (let ((timeout 0))
+          (while (and (not callback-called) (< timeout 100))
+            (sleep-for 0.1)
+            (setq timeout (1+ timeout))))
 
-          ;; Wait for the async response.
-          (let ((timeout 0))
-            (while (and (not callback-called) (< timeout 100))
-              (sleep-for 0.1)
-              (setq timeout (1+ timeout))))
+        (expect callback-called :to-be-truthy)
+        (expect response-received :to-be-truthy)
 
-          (expect callback-called :to-be-truthy)
-          (expect response-received :to-be-truthy)
+        ;; Validate that the macher context string appears exactly once.
+        (let ((requests (funcall received-requests)))
+          (expect (> (length requests) 0) :to-be-truthy)
+          (let* ((request (car requests))
+                 (messages (plist-get request :messages))
+                 (system-messages
+                  (cl-remove-if-not
+                   (lambda (msg) (string= (plist-get msg :role) "system")) messages)))
+            (expect (> (length system-messages) 0) :to-be-truthy)
 
-          ;; Validate that the macher context string appears exactly once.
-          (let ((requests (funcall received-requests)))
-            (expect (> (length requests) 0) :to-be-truthy)
-            (let* ((request (car requests))
-                   (messages (plist-get request :messages))
-                   (system-messages
-                    (cl-remove-if-not
-                     (lambda (msg) (string= (plist-get msg :role) "system")) messages)))
-              (expect (> (length system-messages) 0) :to-be-truthy)
-
-              (let ((system-content
-                     (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
-                ;; The workspace context marker should appear exactly once.
-                (expect macher-context-string-marker-start :to-appear-once-in system-content)
-                ;; The workspace description should appear exactly once.
-                (expect "The user is currently working on a project named:"
-                        :to-appear-once-in system-content)
-                ;; The file listing header should appear exactly once.
-                (expect (format "Files in the %s workspace:" (file-name-nondirectory project-dir))
-                        :to-appear-once-in system-content)))))))
+            (let ((system-content
+                   (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
+              ;; The workspace context marker should appear exactly once.
+              (expect macher-context-string-marker-start :to-appear-once-in system-content)
+              ;; The workspace description should appear exactly once.
+              (expect "The user is currently working on a project named:"
+                      :to-appear-once-in system-content)
+              ;; The file listing header should appear exactly once.
+              (expect (format "Files in the %s workspace:" (file-name-nondirectory project-dir))
+                      :to-appear-once-in system-content)))))))
 
   (describe "gptel context preservation"
     ;; These tests verify that macher's system prompt transformation does not interfere with gptel's
