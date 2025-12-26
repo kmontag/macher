@@ -13,7 +13,7 @@
 (source "melpa")
 
 (depends-on "emacs" "30.1")
-(depends-on "gptel" "0.9.8.5")
+(depends-on "gptel" "0.9.9.3")
 
 (development
  (depends-on "buttercup")
