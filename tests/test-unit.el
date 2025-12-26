@@ -5408,12 +5408,15 @@
                      "PROJECT CONTEXT"
                      macher-context-string-marker-end)))))
 
-      (it "returns string unchanged when placeholder is nil and context-fn returns nil"
+      (it "appends empty markers when placeholder is nil and context-fn returns nil"
         (let ((macher-context-string-placeholder nil)
               (macher-context-string-function (lambda () nil))
               (system "You are a helpful assistant."))
           (let ((result (macher--system-ensure-placeholder-or-context-string system)))
-            (expect result :to-equal system))))
+            (expect result
+                    :to-equal
+                    (concat
+                     system macher-context-string-marker-start macher-context-string-marker-end)))))
 
       (it "returns string unchanged when placeholder is nil and context-fn is nil"
         (let ((macher-context-string-placeholder nil)
@@ -5493,12 +5496,18 @@
                      macher-context-string-marker-end))
             (expect (cdr result) :to-equal '("user message")))))
 
-      (it "returns list unchanged when placeholder is nil and context-fn returns nil"
+      (it "appends empty markers to first element when placeholder is nil and context-fn returns nil"
         (let ((macher-context-string-placeholder nil)
               (macher-context-string-function (lambda () nil))
               (system '("System message" "user message")))
           (let ((result (macher--system-ensure-placeholder-or-context-string system)))
-            (expect result :to-equal system))))
+            (expect (car result)
+                    :to-equal
+                    (concat
+                     "System message"
+                     macher-context-string-marker-start
+                     macher-context-string-marker-end))
+            (expect (cdr result) :to-equal '("user message")))))
 
       (it "returns list unchanged when placeholder is nil but marker already in first element"
         (let* ((macher-context-string-placeholder nil)
@@ -5510,6 +5519,13 @@
                  "EXISTING"
                  macher-context-string-marker-end))
                (system (list first-elem "user message")))
+          (let ((result (macher--system-ensure-placeholder-or-context-string system)))
+            (expect result :to-equal system))))
+
+      (it "returns list unchanged when both placeholder and context-fn are nil"
+        (let ((macher-context-string-placeholder nil)
+              (macher-context-string-function nil)
+              (system '("System message" "user message")))
           (let ((result (macher--system-ensure-placeholder-or-context-string system)))
             (expect result :to-equal system))))
 
@@ -5560,7 +5576,14 @@
                (result (macher--system-ensure-placeholder-or-context-string fn)))
           (expect (functionp result) :to-be-truthy)
           (let ((evaluated (funcall result)))
-            (expect (car evaluated) :to-equal first-elem)))))
+            (expect (car evaluated) :to-equal first-elem))))
+
+      (it "returns original function unchanged when both placeholder and context-fn are nil"
+        (let* ((macher-context-string-placeholder nil)
+               (macher-context-string-function nil)
+               (fn (lambda () "Dynamic system message"))
+               (result (macher--system-ensure-placeholder-or-context-string fn)))
+          (expect result :to-be fn))))
 
     (describe "idempotency"
       (it "is idempotent for strings"
