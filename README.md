@@ -82,25 +82,25 @@ Example configuration with elpaca + `use-package` integration:
 
 After calling `(macher-install)`, you can use macher presets in any gptel request or buffer:
 
-- **`@macher`**: Full editing capabilities. Adds workspace context plus tools to read, search, and
-  edit files. Changes are captured in memory and displayed as a patch.
+- **`@macher`**: Full editing capabilities. Adds tools to read, search, and edit files. Changes are
+  captured in memory and displayed as a patch. Also inherits `@macher-system`.
 
-- **`@macher-ro`**: Read-only access. Adds workspace context plus tools to read and search files,
-  but no editing tools.
+- **`@macher-ro`**: Read-only access. Adds tools to read and search files,
+  but no editing tools. Also inherits `@macher-system`.
 
-- **`@macher-system`**: Context only. Adds workspace context without any tools. Useful when you
-  want the LLM to understand your project structure but don't need file access.
+- **`@macher-tools`**: Tools only. Enables all macher tools without modifying the system prompt.
 
-- **`@macher-tools`**: Tools only. Enables all macher tools without adding workspace context to the
-  system prompt. Useful if you want to manage context yourself.
-
-- **`@macher-base`**: Utility preset that enables macher tool infrastructure. Macher tools will fail
-  unless this is applied. This gets applied automatically when using other macher presets, but you
-  may want to apply it globally via `macher-enable`.
+- **`@macher-system`**: Ensure system prompt includes workspace context (project name and files
+  list). Useful when you want the LLM to understand your project structure but don't need file
+  access. See `macher-context-string-placeholder` and `macher-context-string-function`.
 
 - **`@macher-system-commit`**: Commits the current workspace context into the system prompt,
   replacing the dynamic placeholder with a static snapshot. Useful to avoid cache churn in long
   conversations.
+
+- **`@macher-base`**: Utility preset that enables macher tool infrastructure. This gets applied
+  automatically when using other macher presets, but you may want to apply it globally via
+  `macher-enable`, if you want to use macher tools and/or dynamic context in more generic contexts.
 
 https://github.com/user-attachments/assets/9b3e0734-5907-4e01-a356-6f9066d7b844
 
