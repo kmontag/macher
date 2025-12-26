@@ -1995,6 +1995,301 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Context should appear exactly once.
               (expect match-count :to-equal 1)))))))
 
+  (describe "non-string system prompt directives"
+    ;; These tests verify that macher correctly handles gptel directives that are functions or
+    ;; lists (few-shot templates), not just simple strings.  The system prompt transformation should
+    ;; work correctly with all directive formats supported by gptel.
+
+    (it "handles function directive that returns a string"
+      ;; When gptel--system-message is a function returning a string, macher should evaluate it and
+      ;; inject the workspace context into the result.
+      (funcall setup-backend '("Function directive works"))
+      (funcall setup-project "fn-directive-string" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil)
+            ;; Create a function directive that returns a string.
+            (gptel--system-message (lambda () "DYNAMIC_FUNCTION_DIRECTIVE_CONTENT")))
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+
+          (macher-test--send
+           'macher-system "Test with function directive"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate both function directive content and macher context appear.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (system-messages
+                    (cl-remove-if-not
+                     (lambda (msg) (string= (plist-get msg :role) "system")) messages))
+                   (system-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) system-messages
+                               " ")))
+              ;; The function's return value should be in the system message.
+              (expect system-content :to-match "DYNAMIC_FUNCTION_DIRECTIVE_CONTENT")
+              ;; macher workspace context should also appear.
+              (expect system-content
+                      :to-match "The user is currently working on a project named:"))))))
+
+    (it "handles function directive that returns a list"
+      ;; When gptel--system-message is a function returning a list (few-shot template), macher
+      ;; should inject workspace context into the first element.
+      (funcall setup-backend '("Function returning list works"))
+      (funcall setup-project "fn-directive-list" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil)
+            ;; Create a function directive that returns a list (few-shot template).
+            (gptel--system-message
+             (lambda ()
+               '("FEW_SHOT_SYSTEM_FROM_FUNCTION"
+                 "Example user message"
+                 "Example assistant response"))))
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+
+          (macher-test--send
+           'macher-system "Test with function returning list"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate the list directive is handled correctly.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (all-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) messages " ")))
+              ;; The system message from the list should appear.
+              (expect all-content :to-match "FEW_SHOT_SYSTEM_FROM_FUNCTION")
+              ;; macher workspace context should appear.
+              (expect all-content :to-match "The user is currently working on a project named:")
+              ;; The few-shot examples should also be present.
+              (expect all-content :to-match "Example user message")
+              (expect all-content :to-match "Example assistant response"))))))
+
+    (it "handles list directive (few-shot template)"
+      ;; When gptel--system-message is a list, macher should inject workspace context into the
+      ;; first element only.
+      (funcall setup-backend '("List directive works"))
+      (funcall setup-project "list-directive" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil)
+            ;; Create a list directive (few-shot template).
+            (gptel--system-message
+             '("LIST_BASED_SYSTEM_PROMPT"
+               "User example for few-shot"
+               "Assistant example response")))
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+
+          (macher-test--send
+           'macher-system "Test with list directive"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate the list directive is handled correctly.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (all-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) messages " ")))
+              ;; The first element (system message) should appear with macher context.
+              (expect all-content :to-match "LIST_BASED_SYSTEM_PROMPT")
+              (expect all-content :to-match "The user is currently working on a project named:")
+              ;; The few-shot examples should be present.
+              (expect all-content :to-match "User example for few-shot")
+              (expect all-content :to-match "Assistant example response"))))))
+
+    (it "handles function directive with dynamic buffer-local content"
+      ;; Function directives can access buffer-local variables. Verify macher doesn't break this.
+      (funcall setup-backend '("Dynamic content works"))
+      (funcall setup-project "fn-directive-dynamic" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil))
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          ;; Set up a buffer-local variable that the function will access.
+          (setq-local my-dynamic-value "BUFFER_LOCAL_DYNAMIC_VALUE")
+          ;; Create a function directive that reads from the buffer.
+          (setq-local gptel--system-message
+                      (lambda () (format "System with dynamic: %s" my-dynamic-value)))
+
+          (macher-test--send
+           'macher-system "Test with dynamic function directive"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate dynamic content was captured.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (system-messages
+                    (cl-remove-if-not
+                     (lambda (msg) (string= (plist-get msg :role) "system")) messages))
+                   (system-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) system-messages
+                               " ")))
+              ;; Dynamic buffer-local value should appear.
+              (expect system-content :to-match "BUFFER_LOCAL_DYNAMIC_VALUE")
+              ;; macher workspace context should also appear.
+              (expect system-content
+                      :to-match "The user is currently working on a project named:"))))))
+
+    (it "handles list directive with placeholder already present"
+      ;; When the list directive's first element already contains the macher placeholder, it should
+      ;; be replaced without duplication.
+      (funcall setup-backend '("Placeholder in list works"))
+      (funcall setup-project "list-with-placeholder" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil)
+            ;; Create a list directive with placeholder in the first element.
+            (gptel--system-message
+             (list
+              (concat
+               "SYSTEM_WITH_PLACEHOLDER" macher-context-string-placeholder "END_MARKER")
+              "Few-shot user" "Few-shot assistant")))
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+
+          (macher-test--send
+           'macher-system "Test list with placeholder"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate placeholder was replaced correctly.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (system-messages
+                    (cl-remove-if-not
+                     (lambda (msg) (string= (plist-get msg :role) "system")) messages))
+                   (system-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) system-messages
+                               " ")))
+              ;; Content before placeholder should appear.
+              (expect system-content :to-match "SYSTEM_WITH_PLACEHOLDER")
+              ;; Content after placeholder should appear.
+              (expect system-content :to-match "END_MARKER")
+              ;; Placeholder should be replaced with actual context.
+              (expect system-content
+                      :not
+                      :to-match (regexp-quote macher-context-string-placeholder))
+              ;; macher workspace context should appear between them.
+              (expect system-content :to-match "The user is currently working on a project named:")
+              ;; Context marker should appear exactly once.
+              (expect macher-context-string-marker-start :to-appear-once-in system-content))))))
+
+    (it "handles function directive with nested function call"
+      ;; A function directive that itself calls another function should work correctly.
+      (funcall setup-backend '("Nested function works"))
+      (funcall setup-project "fn-directive-nested" '(("src/main.el" . "main content")))
+      (let ((callback-called nil)
+            (response-received nil)
+            ;; Create a nested function directive.
+            (gptel--system-message (lambda () (lambda () "INNER_RESULT"))))
+
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+
+          (macher-test--send
+           'macher-system "Test with nested function directive"
+           (macher-test--make-once-only-callback
+            (lambda (exit-code _fsm)
+              (setq callback-called t)
+              (setq response-received (not exit-code)))))
+
+          ;; Wait for the async response.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+          (expect response-received :to-be-truthy)
+
+          ;; Validate nested function result appears.
+          (let ((requests (funcall received-requests)))
+            (expect (> (length requests) 0) :to-be-truthy)
+            (let* ((request (car requests))
+                   (messages (plist-get request :messages))
+                   (system-messages
+                    (cl-remove-if-not
+                     (lambda (msg) (string= (plist-get msg :role) "system")) messages))
+                   (system-content
+                    (mapconcat (lambda (msg) (or (plist-get msg :content) "")) system-messages
+                               " ")))
+              ;; The nested function result should appear.
+              (expect system-content :to-match "INNER_RESULT")
+              ;; macher workspace context should also appear.
+              (expect system-content
+                      :to-match "The user is currently working on a project named:")))))))
+
   (describe "default before-action handler"
     :var*
     (callback-called
