@@ -1716,7 +1716,16 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                     (expect all-content :not :to-match "BUFFER_FILE_ORIGINAL_CONTENT")
                     ;; macher workspace context should also appear.
                     (expect all-content
-                            :to-match "The user is currently working on a project named:")))))
+                            :to-match "The user is currently working on a project named:")
+
+                    ;; The gptel context should appear at the beginning.
+                    (let ((macher-pos
+                           (string-match "The user is currently working on a project" all-content))
+                          (gptel-pos
+                           (string-match "MODIFIED_BUFFER_CONTENT_FOR_CONTEXT" all-content)))
+                      (expect macher-pos :to-be-truthy)
+                      (expect gptel-pos :to-be-truthy)
+                      (expect (< gptel-pos macher-pos) :to-be-truthy))))))
           ;; Clean up the buffer.
           (when (buffer-live-p context-buffer)
             (with-current-buffer context-buffer
@@ -1876,9 +1885,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                    (user-content
                     (mapconcat (lambda (msg) (or (plist-get msg :content) "")) user-messages " ")))
               ;; gptel context should appear in user messages.
-              (expect user-content :to-match "USER_MESSAGE_CONTEXT_CONTENT")))
-          ;; TODO: Make sure the gptel context appears _after_ the macher context.
-          )))
+              (expect user-content :to-match "USER_MESSAGE_CONTEXT_CONTENT"))))))
 
     (it "does not duplicate context when macher placeholder is present"
       ;; When user has a custom system prompt with the macher placeholder, context should appear
