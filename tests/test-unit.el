@@ -5601,18 +5601,28 @@
           (expect result :to-match (regexp-quote macher-context-string-marker-end))
           (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
 
-      (it "removes placeholder when context function returns nil"
+      (it "replaces placeholder with empty markers when context function returns nil"
         (let* ((macher-context-string-function (lambda () nil))
                (system (concat "You are helpful." macher-context-string-placeholder))
                (result (macher--system-replace-placeholder system)))
-          (expect result :to-equal "You are helpful.")
+          (expect result
+                  :to-equal
+                  (concat
+                   "You are helpful."
+                   macher-context-string-marker-start
+                   macher-context-string-marker-end))
           (expect result :not :to-match (regexp-quote macher-context-string-placeholder))))
 
-      (it "removes placeholder when context function is nil"
+      (it "replaces placeholder with empty markers when context function is nil"
         (let* ((macher-context-string-function nil)
                (system (concat "You are helpful." macher-context-string-placeholder))
                (result (macher--system-replace-placeholder system)))
-          (expect result :to-equal "You are helpful.")))
+          (expect result
+                  :to-equal
+                  (concat
+                   "You are helpful."
+                   macher-context-string-marker-start
+                   macher-context-string-marker-end))))
 
       (it "returns string unchanged when placeholder is nil"
         (let* ((macher-context-string-placeholder nil)

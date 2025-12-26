@@ -3596,8 +3596,14 @@ If BUFFER is non-nil, switch to it while generating the context string
 and while evaluating function directives.  Otherwise, just use the
 current buffer.
 
-If the `macher-context-string-function' is or returns nil, simply
-removes the placeholder from the system prompt.
+If `macher-context-string-placeholder' is nil, returns SYSTEM unchanged.
+
+If the `macher-context-string-function' is or returns nil, replaces the
+placeholder with empty markers (i.e. start marker immediately followed
+by end marker).  This is for consistency on repeated applications of
+things like \"@macher-system\" and \"@macher-system-commit\" - we don't
+want to just remove the placeholder entirely, as it could end up getting
+appended again later, which would be surprising.
 
 SYSTEM can be a string, a function, or a list:
 
@@ -3619,36 +3625,34 @@ This function should be called in the prompt transform buffer for a
 gptel request.  That's where dynamic directives are evaluated in
 built-in contexts like `gptel-context--wrap-in-buffer' (though note
 `macher-request' seems to evaluate them in the request buffer)."
-  (cl-etypecase system
-    (string
-     (let* ((context-string
-             (with-current-buffer (or buffer (current-buffer))
-               (when macher-context-string-function
-                 (funcall macher-context-string-function))))
-            (demarcated-context-string
-             (when context-string
+  (if (not macher-context-string-placeholder)
+      system
+    (cl-etypecase system
+      (string
+       (let* ((context-string
+               (with-current-buffer (or buffer (current-buffer))
+                 (when macher-context-string-function
+                   (funcall macher-context-string-function))))
+              (demarcated-context-string
                (concat
                 macher-context-string-marker-start
-                context-string
-                macher-context-string-marker-end))))
-       (if (and macher-context-string-placeholder
-                (string-match-p (regexp-quote macher-context-string-placeholder) system))
-           (replace-regexp-in-string (regexp-quote macher-context-string-placeholder)
-                                     (or demarcated-context-string "")
-                                     system
-                                     t
-                                     t)
-         system)))
-    (function
-     ;; Should hopefully be ok to call this in the current buffer i.e. prompt buffer. Note though
-     ;; that the `gptel--transform-add-context' ultimately calls `gptel--parse-directive' in the
-     ;; :data buffer from the FSM's info struct - but it seems like that's the same as the prompt
-     ;; buffer?
-     ;;
-     ;; This resolves functional directives to strings or lists.
-     (let ((parsed (macher--parse-directive system)))
-       (macher--system-replace-placeholder parsed buffer)))
-    (list (cons (macher--system-replace-placeholder (car system) buffer) (cdr system)))))
+                (or context-string "")
+                macher-context-string-marker-end)))
+         (if (string-match-p (regexp-quote macher-context-string-placeholder) system)
+             (replace-regexp-in-string
+              (regexp-quote macher-context-string-placeholder) demarcated-context-string system
+              t t)
+           system)))
+      (function
+       ;; Should hopefully be ok to call this in the current buffer i.e. prompt buffer. Note though
+       ;; that the `gptel--transform-add-context' ultimately calls `gptel--parse-directive' in the
+       ;; :data buffer from the FSM's info struct - but it seems like that's the same as the prompt
+       ;; buffer?
+       ;;
+       ;; This resolves functional directives to strings or lists.
+       (let ((parsed (macher--parse-directive system)))
+         (macher--system-replace-placeholder parsed buffer)))
+      (list (cons (macher--system-replace-placeholder (car system) buffer) (cdr system))))))
 
 (defun macher--transform-system-replace-placeholder (callback fsm)
   "A prompt transform to inject the macher context string in the system prompt.
