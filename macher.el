@@ -3579,7 +3579,7 @@ state."
 Replaces any instances of the `macher-context-string-placeholder' with
 the current result of `macher-context-string-function', surrounded by
 `macher-context-string-marker-start' and
-`macher-context-string-marker-end'.
+`macher-context-string-marker-end'.  Returns the result.
 
 If BUFFER is non-nil, switch to it while generating the context string
 and while evaluating function directives.  Otherwise, just use the
@@ -3593,7 +3593,7 @@ SYSTEM can be a string, a function, or a list:
 - String: The most common case.  We search for the placeholder and
   replace it with the demarcated context string.
 
-- Function: A dynamic directive.  We call `gptel--parse-directive' to
+- Function: A dynamic directive.  We call `macher--parse-directive' to
   evaluate it and get the actual string, then recursively process the
   result.  This is useful for system messages that need to adapt based
   on buffer state or other dynamic factors.
