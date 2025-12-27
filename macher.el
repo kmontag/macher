@@ -3,7 +3,7 @@
 ;; Copyright (C) 2025 Kevin Montag
 
 ;; Author: Kevin Montag
-;; Version: 0.5.0
+;; Version: 0.5.1
 ;; Package-Requires: ((emacs "30.1") (gptel "0.9.9.3"))
 ;; Keywords: convenience, gptel, llm
 ;; URL: https://github.com/kmontag/macher
@@ -26,28 +26,33 @@
 ;; This file is NOT part of GNU Emacs.
 
 ;;; Commentary:
+;;
 ;; macher is a project-aware LLM editing toolset built on gptel.
 ;;
 ;; Key features:
 ;; - gptel presets that add read/edit tools and workspace context to requests
-;; - View proposed changes as reviewable patches (potentially spanning multiple files)
-;; - Quick workflow via `macher-implement', `macher-revise', and `macher-discuss'
+;; - View proposed changes as reviewable patches (potentially spanning multiple
+;;   files)
+;; - Quick workflow via `macher-implement', `macher-revise', and
+;;   `macher-discuss'
 ;;
-;; Conceptually, when you send a macher request, the LLM receives tools to read/search/edit files in
-;; your "workspace" (typically the current project).  Changes are captured in memory and displayed
-;; as patches, never written directly to disk.
+;; Conceptually, when you send a macher request, the LLM receives tools to
+;; read/search/edit files in your "workspace" (typically the current project).
+;; Changes are captured in memory and displayed as patches, never written
+;; directly to disk.
 ;;
-;; Setup: Call `macher-install' to register presets and tools with gptel.  Optionally call
-;; `macher-enable' to apply base infrastructure globally, allowing use of macher tools and dynamic
-;; context in any gptel buffer.
+;; Setup: Call `macher-install' to register presets and tools with gptel.
+;; Optionally call `macher-enable' to apply base infrastructure globally,
+;; allowing use of macher tools and dynamic context in any gptel buffer.
 ;;
-;; Usage: The action commands (`macher-implement', `macher-revise', `macher-discuss') provide a
-;; quick workflow in dedicated buffers.  Alternatively, use macher presets in any gptel request:
+;; Usage: The action commands (`macher-implement', `macher-revise',
+;; `macher-discuss') provide a quick workflow in dedicated buffers.
+;; Alternatively, use macher presets in any gptel request:
 ;;
 ;;   @macher set up eslint with sensible defaults
 ;;
-;; Available presets: `@macher' (full editing), `@macher-ro' (read-only), `@macher-system' (context
-;; only), and others - see `macher-presets-alist'.
+;; Available presets: `@macher' (full editing), `@macher-ro' (read-only),
+;; `@macher-system' (context only), and others - see `macher-presets-alist'.
 
 ;;; Code:
 
@@ -247,7 +252,7 @@ This function is used by the default actions in the
 
 (define-obsolete-function-alias
   'macher-action-from-region-or-input
-  'macher--action-from-region-or-input
+  #'macher--action-from-region-or-input
   "0.5.0"
   "Removed from public API.
 
@@ -1494,9 +1499,7 @@ before running the `macher-action-buffer-setup-hook'."
      (macher--action-buffer-setup-basic))
     ;; nil: no automatic setup
     ((pred null))
-    (_
-     (user-error
-      (format "Unrecognized action buffer UI configuration: %s" macher-action-buffer-ui)))))
+    (_ (user-error "Unrecognized action buffer UI configuration: %s" macher-action-buffer-ui))))
 
 (defun macher--before-action (execution)
   "Default function for before-action processing.
@@ -1606,9 +1609,7 @@ before running the `macher-patch-buffer-setup-hook'."
      (macher--patch-buffer-setup-diff))
     ;; nil: no automatic setup.
     ((pred null))
-    (_
-     (user-error
-      (format "Unrecognized patch buffer UI configuration: %s" macher-patch-buffer-ui)))))
+    (_ (user-error "Unrecognized patch buffer UI configuration: %s" macher-patch-buffer-ui))))
 
 (defun macher--patch-ready ()
   "Set up the patch buffer with appropriate modes and settings.
@@ -2001,16 +2002,11 @@ Returns the processed content as a string."
                   1))
                (formatted-lines
                 (cl-loop
-                 for
-                 line
-                 in
-                 lines-to-number
-                 for
-                 line-num
-                 from
-                 actual-start-line
-                 collect
-                 (format (concat "%" (number-to-string line-num-width) "d\t%s") line-num line)))
+                 for line in lines-to-number for line-num from actual-start-line collect
+                 (format "%s%d\t%s"
+                         (make-string
+                          (- line-num-width (length (number-to-string line-num))) ?\s)
+                         line-num line)))
                (result (string-join formatted-lines "\n")))
           ;; Add the final trailing newline if we excluded the final empty line
           (if should-exclude-final-empty
@@ -2048,7 +2044,7 @@ file.  Also updates the context's :contents alist."
          (new-content (cdr contents)))
     ;; Check if the file exists for editing.
     (if (not new-content)
-        (error (format "File '%s' not found in workspace" path))
+        (error "File '%s' not found in workspace" path)
       ;; Set the dirty flag to indicate changes are being made if requested.
       (when set-dirty-p
         (setf (macher-context-dirty-p context) t))
@@ -2140,7 +2136,7 @@ Signals an error if the directory is not found in the workspace."
       (let ((contents (cdr existing-entry)))
         ;; Has new-content, so it's a file.
         (when (cdr contents)
-          (error (format "Path '%s' is a file, not a directory" path)))))
+          (error "Path '%s' is a file, not a directory" path))))
 
     ;; Check if the directory exists on disk OR has files in the context.
     ;; A directory is considered to exist if:
@@ -2160,7 +2156,7 @@ Signals an error if the directory is not found in the workspace."
                      (file-name-as-directory full-path) (file-name-as-directory file-dir))))))
             context-contents)))
       (unless (or (file-directory-p full-path) directory-has-context-files-p)
-        (error (format "Directory '%s' not found in workspace" path))))
+        (error "Directory '%s' not found in workspace" path)))
 
     ;; Helper function to check if a file is deleted in the context.
     (cl-labels
@@ -2492,7 +2488,7 @@ indicate changes."
     ;; Check if destination already exists.
     (let ((dest-contents (macher-context--contents-for-file dest-full-path context)))
       (when (cdr dest-contents)
-        (error (format "Destination '%s' already exists" destination-path))))
+        (error "Destination '%s' already exists" destination-path)))
     ;; Use the helper function to move the file.
     (macher--with-workspace-file context source-path
                                  (lambda (source-full-path source-new-content)
@@ -3297,20 +3293,18 @@ otherwise returns (nil . nil)."
                         (gptel--strip-mode-suffix major-mode)
                       (error
                        (format-mode-line mode-name)))))
-              (format (concat
-                       "The request was sent from the %s file `%s` in the workspace. "
-                       "If the request text appears as a comment or placeholder in the file, "
-                       "replace it with the actual implementation. ")
-                      lang relpath))))))
-    (format (concat
-             "TASK: Implement the following request using workspace tools.\n\n"
-             "INSTRUCTIONS:\n"
-             "1. Read and understand the implementation request below\n"
-             "2. Use the workspace tools to edit files as needed\n"
-             "3. Create working, complete code that fulfills the request\n\n"
-             "%s"
-             "\n\nIMPLEMENTATION REQUEST:\n\n%s")
-            source-description input)))
+              (concat
+               (format "The request was sent from the %s file `%s` in the workspace. " lang relpath)
+               "If the request text appears as a comment or placeholder in the file, "
+               "replace it with the actual implementation. "))))))
+    (concat
+     "TASK: Implement the following request using workspace tools.\n\n"
+     "INSTRUCTIONS:\n"
+     "1. Read and understand the implementation request below\n"
+     "2. Use the workspace tools to edit files as needed\n"
+     "3. Create working, complete code that fulfills the request\n\n"
+     source-description
+     (format "\n\nIMPLEMENTATION REQUEST:\n\n%s" input))))
 
 (defun macher--revise-prompt (input _is-selected &optional patch-buffer)
   "Generate a prompt for revising based on INPUT (revision instructions).
@@ -3324,24 +3318,22 @@ patch buffer) are included in the generated prompt."
                 (buffer-substring-no-properties (point-min) (point-max)))
             ;; Doesn't make sense to call this without a patch.
             (user-error "No patch buffer found for revision"))))
-    (format (concat
-             "TASK: Revise your previous implementation based on new feedback.\n\n"
-             "WHAT YOU NEED TO DO:\n"
-             "1. Read the revision instructions below (if any)\n"
-             "2. Review your previous patch and its original prompt\n"
-             "3. Understand what needs to be changed or improved\n"
-             "4. Create a NEW implementation that addresses the feedback\n"
-             "5. Use the workspace editing tools to make the changes\n\n"
-             "%s"
-             "\n\n"
-             "==================================\n"
-             "YOUR PREVIOUS WORK (for reference)\n"
-             "==================================\n\n"
-             "%s")
-            (if (and input (not (string-empty-p input)))
-                (format "REVISION INSTRUCTIONS:\n%s\n\n" input)
-              "")
-            patch-content)))
+    (concat
+     "TASK: Revise your previous implementation based on new feedback.\n\n"
+     "WHAT YOU NEED TO DO:\n"
+     "1. Read the revision instructions below (if any)\n"
+     "2. Review your previous patch and its original prompt\n"
+     "3. Understand what needs to be changed or improved\n"
+     "4. Create a NEW implementation that addresses the feedback\n"
+     "5. Use the workspace editing tools to make the changes\n\n"
+     (if (and input (not (string-empty-p input)))
+         (format "REVISION INSTRUCTIONS:\n%s\n\n" input)
+       "")
+     "\n\n"
+     "==================================\n"
+     "YOUR PREVIOUS WORK (for reference)\n"
+     "==================================\n\n"
+     patch-content)))
 
 (defun macher--discuss-prompt (input _is-selected)
   "Generate a prompt for discussion based on INPUT.
@@ -3388,15 +3380,14 @@ CALLBACK must be called when preparation is complete."
     (goto-char (point-max))
     (when prompt
       (insert
-       (concat
-        ;; Don't add any stray newlines, they can break the diff-mode parsing.
-        "# -----------------------------\n"
-        (format "# PROMPT for patch ID %s:\n" patch-id)
-        "# -----------------------------\n"
-        ;; Add comment prefix to each line of the prompt.
-        (replace-regexp-in-string "^" "# " prompt)
-        ;; A trailing newline at the end appears to be okay.
-        "\n")))
+       ;; Don't add any stray newlines, they can break the diff-mode parsing.
+       "# -----------------------------\n"
+       (format "# PROMPT for patch ID %s:\n" patch-id)
+       "# -----------------------------\n"
+       ;; Add comment prefix to each line of the prompt.
+       (replace-regexp-in-string "^" "# " prompt)
+       ;; A trailing newline at the end appears to be okay.
+       "\n"))
 
     ;; Note: The original prompt is no longer stored in the context structure.
     ;; If prompt tracking is needed, it should be added to the context structure.
@@ -4187,7 +4178,7 @@ implements one possible workflow."
              (assoc action macher-actions-alist)
            action)))
     (unless action-config
-      (user-error (format "Unrecognized action: %s" action)))
+      (user-error "Unrecognized action: %s" action))
 
     (let* ((action-function-or-plist (cdr action-config))
            (action-plist
