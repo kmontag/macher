@@ -51,10 +51,12 @@ jobs:
         id: check-github-models
         continue-on-error: true
         run: |
-          # Test if GitHub Models API is accessible.
+          # Test if GitHub Models API is accessible by sending a minimal request.
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Content-Type: application/json" \
+            -d '{"messages":[{"role":"user","content":"test"}],"model":"gpt-4o-mini","max_tokens":1}' \
             "https://models.github.ai/inference/chat/completions")
 
           if [ "$HTTP_CODE" = "429" ] || [ "$HTTP_CODE" = "503" ] || [ "$HTTP_CODE" = "500" ]; then
@@ -90,5 +92,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Disable GitHub Models in tests if the API is not available.
-          MACHER_DISABLE_GITHUB_MODELS: ${{ steps.check-github-models.outputs.available == 'false' && 'true' || 'false' }}
+          MACHER_DISABLE_GITHUB_MODELS: ${{ steps.check-github-models.outputs.available == 'false' && '1' || 'null' }}
         run: make test
