@@ -46,7 +46,7 @@
 ;;      (message response))))
 
 ;; Enable gptel logging for CI debugging.
-(setopt gptel-log-level 'info)
+(setopt gptel-log-level 'debug)
 
 (describe "functional tests"
   :var*
