@@ -56,8 +56,8 @@
    (use-github-models (and (getenv "GITHUB_ACTIONS") (not (getenv "MACHER_DISABLE_GITHUB_MODELS"))))
 
    ;; GitHub Models configuration.
-   (github-models-host "models.github.ai")
-   (github-models-endpoint "/inference/chat/completions")
+   (github-models-host "models.inference.ai.azure.com")
+   (github-models-endpoint "/chat/completions?api-version=2024-05-01-preview")
    (github-models-model "gpt-4o-mini")
 
    ;; Ollama configuration.
