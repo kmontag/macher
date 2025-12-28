@@ -45,8 +45,9 @@
 ;;    (when (stringp response)
 ;;      (message response))))
 
-;; Enable gptel logging for CI debugging.
-(setopt gptel-log-level 'debug)
+;; Logs will be printed by `with-macher-test-gptel' if enabled.
+;;
+;; (setopt gptel-log-level 'info)
 
 (describe "functional tests"
   :var*
@@ -56,8 +57,8 @@
    (use-github-models (and (getenv "GITHUB_ACTIONS") (not (getenv "MACHER_DISABLE_GITHUB_MODELS"))))
 
    ;; GitHub Models configuration.
-   (github-models-host "models.inference.ai.azure.com")
-   (github-models-endpoint "/chat/completions?api-version=2024-05-01-preview")
+   (github-models-host "models.github.ai")
+   (github-models-endpoint "/inference/chat/completions")
    (github-models-model "gpt-4o-mini")
 
    ;; Ollama configuration.
@@ -256,9 +257,6 @@ CALLBACK-TEST is a function that verifies the result."
     (if use-github-models
         ;; CI: Use GitHub Models API (faster, requires internet and token).
         (progn
-          (message "functional tests: Using GitHub Models API (host=%s, model=%s)"
-                   github-models-host
-                   github-models-model)
           (setq gptel-model github-models-model)
           (setq gptel-backend
                 (gptel-make-openai
@@ -270,7 +268,6 @@ CALLBACK-TEST is a function that verifies the result."
                  :models `(,gptel-model)
                  :request-params '(:temperature 0))))
       ;; Local: Use Ollama (works offline).
-      (message "functional tests: Using Ollama (host=%s, model=%s)" ollama-host ollama-model)
       (setq gptel-model ollama-model)
       (setq gptel-backend
             (gptel-make-ollama
@@ -302,16 +299,10 @@ CALLBACK-TEST is a function that verifies the result."
     (setq gptel-directives original-gptel-directives)
     (setq gptel-backend original-gptel-backend)
 
-    ;; Print gptel log output for debugging CI failures.
-    (if (get-buffer "*gptel-log*")
-        (with-current-buffer "*gptel-log*"
-          (let ((log-contents (buffer-string)))
-            (if (string-empty-p log-contents)
-                (message "gptel log: (empty)")
-              (message "gptel log output:\n\n%s" log-contents)))
-          ;; Clear the log buffer for the next test.
-          (erase-buffer))
-      (message "gptel log: (no log buffer created)")))
+    ;; If debugging output was enabled (otherwise the buffer won't exist), print it.
+    (when (get-buffer "*gptel-log*")
+      (with-current-buffer "*gptel-log*"
+        (message "gptel log output:\n\n%s" (buffer-string)))))
 
   (after-all
     ;; Restore original global settings.
