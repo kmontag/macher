@@ -54,21 +54,39 @@ jobs:
         continue-on-error: true
         run: |
           # Test if GitHub Models API is accessible by sending a minimal request.
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+          RESPONSE=$(mktemp)
+          HTTP_CODE=$(curl -s -o "$RESPONSE" -w "%{http_code}" \
             -X POST \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d '{"messages":[{"role":"user","content":"test"}],"model":"gpt-4o-mini","max_tokens":1}' \
             "https://models.github.ai/inference/chat/completions")
 
+          echo "HTTP status code: $HTTP_CODE"
+          echo "Response body:"
+          cat "$RESPONSE"
+
+          # Check for error status codes.
           if [ "$HTTP_CODE" = "429" ] || [ "$HTTP_CODE" = "503" ] || [ "$HTTP_CODE" = "500" ]; then
             echo "GitHub Models API returned $HTTP_CODE, will fall back to Ollama"
+            rm "$RESPONSE"
             echo "available=false" >> $GITHUB_OUTPUT
             exit 0
-          else
-            echo "GitHub Models API is available (HTTP $HTTP_CODE)"
-            echo "available=true" >> $GITHUB_OUTPUT
           fi
+
+          # Verify the response is valid JSON and contains expected fields.
+          if ! jq -e '.choices[0].message' "$RESPONSE" > /dev/null 2>&1; then
+            echo "GitHub Models API response is not valid or doesn't contain expected fields"
+            echo "Response:"
+            cat "$RESPONSE"
+            rm "$RESPONSE"
+            echo "available=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          rm "$RESPONSE"
+          echo "GitHub Models API is available and returning valid responses (HTTP $HTTP_CODE)"
+          echo "available=true" >> $GITHUB_OUTPUT
 
       # Note this also starts the ollama server.
       - name: Install Ollama
