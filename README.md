@@ -24,12 +24,11 @@ as you like. Or you can use the built-in action commands for a quick and easy wo
 
 ## Installation and configuration
 
-Example configuration with elpaca + `use-package` integration:
+macher is available on [MELPA](https://melpa.org/#/macher). Example
+configuration with `use-package`:
 
 ```elisp
 (use-package macher
-  :ensure (:host github :repo "kmontag/macher")
-
   :custom
   ;; The org UI has structured navigation and nice content folding.
   (macher-action-buffer-ui 'org)
