@@ -54,7 +54,10 @@
   (
    ;; Whether to use GitHub Models API (in CI) or Ollama (locally).
    ;; Can be disabled via MACHER_DISABLE_GITHUB_MODELS env var if GitHub Models API is unavailable.
-   (use-github-models (and (getenv "GITHUB_ACTIONS") (not (getenv "MACHER_DISABLE_GITHUB_MODELS"))))
+   (use-github-models
+    (and (getenv "GITHUB_ACTIONS")
+         (let ((disable-var (getenv "MACHER_DISABLE_GITHUB_MODELS")))
+           (not (and disable-var (not (string-empty-p disable-var)))))))
 
    ;; GitHub Models configuration.
    (github-models-host "models.github.ai")
