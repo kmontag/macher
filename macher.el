@@ -1410,17 +1410,20 @@ Returns a workspace information string to be added to the request."
       (with-temp-buffer
         (insert
          (format "The user is currently working on a project named: \"%s\"\n" workspace-name))
-        (insert (format "Files in the \"%s\" project:" workspace-name))
-        (dolist (file-path files-for-listing)
-          (let ((rel-path (file-relative-name file-path (macher--workspace-root workspace))))
-            (insert (format "\n    %s" rel-path))))
-        ;; Add a note if files were truncated due to the limit.
-        (when macher-context-string-max-files
-          (let* ((total-files (length workspace-files))
-                 (listed-files (length files-for-listing))
-                 (truncated-files (- total-files listed-files)))
-            (when (> truncated-files 0)
-              (insert (format "\n    ... and %d more files" truncated-files)))))
+        (if workspace-files
+            (progn
+              (insert (format "Files in the \"%s\" project:" workspace-name))
+              (dolist (file-path files-for-listing)
+                (let ((rel-path (file-relative-name file-path (macher--workspace-root workspace))))
+                  (insert (format "\n    %s" rel-path))))
+              ;; Add a note if files were truncated due to the limit.
+              (when macher-context-string-max-files
+                (let* ((total-files (length workspace-files))
+                       (listed-files (length files-for-listing))
+                       (truncated-files (- total-files listed-files)))
+                  (when (> truncated-files 0)
+                    (insert (format "\n    ... and %d more files" truncated-files))))))
+          (insert (format "There are no files in the \"%s\" project.")))
         (buffer-string)))))
 
 (defun macher--workspace-hash (workspace &optional length)
