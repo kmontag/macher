@@ -2998,7 +2998,7 @@
                (result (macher--context-string)))
           (expect (stringp result) :to-be-truthy)
           ;; Should contain workspace information.
-          (expect result :to-match "The user is currently working on a project named:")
+          (expect "The user is currently working on a project named:" :to-appear-once-in result)
           ;; Should contain our test files with full relative paths.
           (expect result :to-match "file1.txt")
           (expect result :to-match "file2.el")
@@ -3007,7 +3007,9 @@
           (expect result
                   :to-match
                   (regexp-quote
-                   (format "Files in the \"%s\" project:" (file-name-nondirectory temp-dir))))))
+                   (format "Files in the \"%s\" project:" (file-name-nondirectory temp-dir))))
+          ;; Should only contain the description text once.
+          (expect "Files in the" :to-appear-once-in result)))
 
       (it "generates context string for single-file workspace"
         (let* ((macher--workspace (cons 'file file1))
