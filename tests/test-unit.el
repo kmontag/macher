@@ -2965,6 +2965,13 @@
         (expect files :to-contain "subdir/file3.md"))))
 
   (describe "macher--context-string"
+    (it "returns nil when workspace is nil"
+      (let ((macher-workspace-functions nil))
+        ;; Sanity check.
+        (expect (macher-workspace) :to-be nil)
+        ;; Make sure the context string doesn't render.
+        (expect (macher--context-string) :to-be nil)))
+
     (describe "main functionality"
       :var (temp-dir file1 file2 subdir file3 project-file)
 
