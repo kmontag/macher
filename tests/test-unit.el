@@ -2965,6 +2965,13 @@
         (expect files :to-contain "subdir/file3.md"))))
 
   (describe "macher--context-string"
+    (it "returns nil when workspace is nil"
+      (let ((macher-workspace-functions nil))
+        ;; Sanity check.
+        (expect (macher-workspace) :to-be nil)
+        ;; Make sure the context string doesn't render.
+        (expect (macher--context-string) :to-be nil)))
+
     (describe "main functionality"
       :var (temp-dir file1 file2 subdir file3 project-file)
 
@@ -2991,7 +2998,7 @@
                (result (macher--context-string)))
           (expect (stringp result) :to-be-truthy)
           ;; Should contain workspace information.
-          (expect result :to-match "The user is currently working on a project named:")
+          (expect "The user is currently working on a project named:" :to-appear-once-in result)
           ;; Should contain our test files with full relative paths.
           (expect result :to-match "file1.txt")
           (expect result :to-match "file2.el")
@@ -3000,7 +3007,9 @@
           (expect result
                   :to-match
                   (regexp-quote
-                   (format "Files in the \"%s\" project:" (file-name-nondirectory temp-dir))))))
+                   (format "Files in the \"%s\" project:" (file-name-nondirectory temp-dir))))
+          ;; Should only contain the description text once.
+          (expect "Files in the" :to-appear-once-in result)))
 
       (it "generates context string for single-file workspace"
         (let* ((macher--workspace (cons 'file file1))
@@ -3041,6 +3050,28 @@
 
           ;; Should contain workspace file listing.
           (expect result :to-match "Files in the \"test-project\" project:"))))
+
+    (it "handles project workspace with no files"
+      (let* ((empty-workspace '(project . "/test/empty-project/"))
+             result)
+        ;; Mock workspace functions to return empty file list.
+        (spy-on 'macher--workspace-root :and-return-value "/test/empty-project/")
+        (spy-on 'macher--workspace-name :and-return-value "empty-project")
+        (spy-on 'macher--workspace-files :and-return-value nil)
+
+        ;; Set the test workspace.
+        (with-temp-buffer
+          (setq-local macher--workspace empty-workspace)
+          (setq result (macher--context-string)))
+
+        ;; Verify the result structure.
+        (expect (stringp result) :to-be-truthy)
+        (expect result
+                :to-match "The user is currently working on a project named: \"empty-project\"")
+        ;; Should indicate there are no files.
+        (expect "There are no files in the \"empty-project\" project." :to-appear-once-in result)
+        ;; Should NOT contain the file listing header (which ends with a colon).
+        (expect result :not :to-match "Files in the .* project:")))
 
     (describe "with max-files limit"
       :var (temp-dir workspace all-files original-max-files)

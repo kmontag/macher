@@ -1663,6 +1663,51 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                 (expect (format "Files in the \"%s\" project:" (file-name-nondirectory project-dir))
                         :to-appear-once-in system-content))))))))
 
+  (it "handles nil workspace without error"
+    ;; When there's no project and no file buffer, workspace should be nil and context string
+    ;; should return nil without error.
+    (funcall setup-backend '("Test response"))
+    (let ((callback-called nil)
+          (response-received nil)
+          (non-project-dir (make-temp-file "macher-non-project" t)))
+      (with-temp-buffer
+        (setq default-directory non-project-dir)
+        ;; Sanity check there's no workspace.
+        (expect (macher-workspace) :to-be nil)
+        (macher-test--send
+         'macher-system "Test prompt with nil workspace"
+         (macher-test--make-once-only-callback
+          (lambda (exit-code _fsm)
+            (setq callback-called t)
+            (setq response-received (not exit-code)))))
+
+        ;; Wait for the async response.
+        (let ((timeout 0))
+          (while (and (not callback-called) (< timeout 100))
+            (sleep-for 0.1)
+            (setq timeout (1+ timeout))))
+
+        (expect callback-called :to-be-truthy)
+        (expect response-received :to-be-truthy)
+
+        ;; Validate that the request was sent successfully without errors.
+        (let ((requests (funcall received-requests)))
+          (expect (> (length requests) 0) :to-be-truthy)
+          ;; The request should have been sent even though workspace is nil.
+          (let* ((request (car requests))
+                 (messages (plist-get request :messages))
+                 (system-messages
+                  (cl-remove-if-not
+                   (lambda (msg) (string= (plist-get msg :role) "system")) messages))
+                 (system-content
+                  (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
+            (expect messages :to-be-truthy)
+            (expect (> (length messages) 0) :to-be-truthy)
+            ;; Should contain the empty context markers with nothing in between.
+            (expect (concat macher-context-string-marker-start macher-context-string-marker-end)
+                    :to-appear-once-in system-content))))
+      (delete-directory non-project-dir t)))
+
   (describe "gptel context preservation"
     ;; These tests verify that macher's system prompt transformation does not interfere with gptel's
     ;; context system. When files or buffers are added to gptel context via `gptel-add' or
