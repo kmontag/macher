@@ -1695,9 +1695,17 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           (expect (> (length requests) 0) :to-be-truthy)
           ;; The request should have been sent even though workspace is nil.
           (let* ((request (car requests))
-                 (messages (plist-get request :messages)))
+                 (messages (plist-get request :messages))
+                 (system-messages
+                  (cl-remove-if-not
+                   (lambda (msg) (string= (plist-get msg :role) "system")) messages))
+                 (system-content
+                  (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
             (expect messages :to-be-truthy)
-            (expect (> (length messages) 0) :to-be-truthy))))
+            (expect (> (length messages) 0) :to-be-truthy)
+            ;; Should contain the empty context markers with nothing in between.
+            (expect (concat macher-context-string-marker-start macher-context-string-marker-end)
+                    :to-appear-once-in system-content))))
       (delete-directory non-project-dir t)))
 
   (describe "gptel context preservation"
