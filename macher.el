@@ -1423,7 +1423,7 @@ Returns a workspace information string to be added to the request."
                        (truncated-files (- total-files listed-files)))
                   (when (> truncated-files 0)
                     (insert (format "\n    ... and %d more files" truncated-files))))))
-          (insert (format "There are no files in the \"%s\" project.")))
+          (insert (format "There are no files in the \"%s\" project." workspace-name)))
         (buffer-string)))))
 
 (defun macher--workspace-hash (workspace &optional length)

@@ -3051,6 +3051,28 @@
           ;; Should contain workspace file listing.
           (expect result :to-match "Files in the \"test-project\" project:"))))
 
+    (it "handles project workspace with no files"
+      (let* ((empty-workspace '(project . "/test/empty-project/"))
+             result)
+        ;; Mock workspace functions to return empty file list.
+        (spy-on 'macher--workspace-root :and-return-value "/test/empty-project/")
+        (spy-on 'macher--workspace-name :and-return-value "empty-project")
+        (spy-on 'macher--workspace-files :and-return-value nil)
+
+        ;; Set the test workspace.
+        (with-temp-buffer
+          (setq-local macher--workspace empty-workspace)
+          (setq result (macher--context-string)))
+
+        ;; Verify the result structure.
+        (expect (stringp result) :to-be-truthy)
+        (expect result
+                :to-match "The user is currently working on a project named: \"empty-project\"")
+        ;; Should indicate there are no files.
+        (expect "There are no files in the \"empty-project\" project." :to-appear-once-in result)
+        ;; Should NOT contain the file listing header (which ends with a colon).
+        (expect result :not :to-match "Files in the .* project:")))
+
     (describe "with max-files limit"
       :var (temp-dir workspace all-files original-max-files)
 
