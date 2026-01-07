@@ -1396,34 +1396,32 @@ Returns a list of absolute file paths."
   "Generate workspace information string for the current workspace.
 
 Returns a workspace information string to be added to the request."
-  (let* ((workspace (macher-workspace))
-         (workspace-name (macher--workspace-name workspace))
-         (workspace-files (macher--workspace-files workspace)))
+  (when-let ((workspace (macher-workspace)))
+    (let* ((workspace-name (macher--workspace-name workspace))
+           (workspace-files (macher--workspace-files workspace))
+           ;; This might get trimmed if there are too many files.
+           (files-for-listing workspace-files))
 
-    ;; Generate workspace description.
-    (when workspace-files
-      (let ((files-for-listing workspace-files))
+      ;; Trim the files list if there's a limit.
+      (when macher-context-string-max-files
+        (when (> (length files-for-listing) macher-context-string-max-files)
+          (setq files-for-listing (seq-take files-for-listing macher-context-string-max-files))))
 
-        ;; Trim the files list if there's a limit.
+      (with-temp-buffer
+        (insert
+         (format "The user is currently working on a project named: \"%s\"\n" workspace-name))
+        (insert (format "Files in the \"%s\" project:" workspace-name))
+        (dolist (file-path files-for-listing)
+          (let ((rel-path (file-relative-name file-path (macher--workspace-root workspace))))
+            (insert (format "\n    %s" rel-path))))
+        ;; Add a note if files were truncated due to the limit.
         (when macher-context-string-max-files
-          (when (> (length files-for-listing) macher-context-string-max-files)
-            (setq files-for-listing (seq-take files-for-listing macher-context-string-max-files))))
-
-        (with-temp-buffer
-          (insert
-           (format "The user is currently working on a project named: \"%s\"\n" workspace-name))
-          (insert (format "Files in the \"%s\" project:" workspace-name))
-          (dolist (file-path files-for-listing)
-            (let ((rel-path (file-relative-name file-path (macher--workspace-root workspace))))
-              (insert (format "\n    %s" rel-path))))
-          ;; Add a note if files were truncated due to the limit.
-          (when macher-context-string-max-files
-            (let* ((total-files (length workspace-files))
-                   (listed-files (length files-for-listing))
-                   (truncated-files (- total-files listed-files)))
-              (when (> truncated-files 0)
-                (insert (format "\n    ... and %d more files" truncated-files)))))
-          (buffer-string))))))
+          (let* ((total-files (length workspace-files))
+                 (listed-files (length files-for-listing))
+                 (truncated-files (- total-files listed-files)))
+            (when (> truncated-files 0)
+              (insert (format "\n    ... and %d more files" truncated-files)))))
+        (buffer-string)))))
 
 (defun macher--workspace-hash (workspace &optional length)
   "Generate a unique hash for WORKSPACE.
