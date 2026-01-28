@@ -1081,6 +1081,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect (regexp-quote
                        (concat
                         "diff --git a/test-file.txt b/test-file.txt\n"
+                        "deleted file mode 100644\n"
                         "--- a/test-file.txt\n"
                         "+++ /dev/null\n"
                         "@@ -1,1 +0,0 @@\n"
@@ -1201,6 +1202,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect (regexp-quote
                        (concat
                         "diff --git a/created-file.txt b/created-file.txt\n"
+                        "new file mode 100644\n"
                         "--- /dev/null\n"
                         "+++ b/created-file.txt\n"
                         "@@ -0,0 +1,1 @@\n"
@@ -1404,6 +1406,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect (regexp-quote
                        (concat
                         "diff --git a/moved-file.txt b/moved-file.txt\n"
+                        "new file mode 100644\n"
                         "--- /dev/null\n"
                         "+++ b/moved-file.txt\n"
                         "@@ -0,0 +1,1 @@\n"
@@ -1414,6 +1417,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect (regexp-quote
                        (concat
                         "diff --git a/source-file.txt b/source-file.txt\n"
+                        "deleted file mode 100644\n"
                         "--- a/source-file.txt\n"
                         "+++ /dev/null\n"
                         "@@ -1,1 +0,0 @@\n"
@@ -3518,6 +3522,7 @@ Sets `test-patch-content' to the generated patch content for additional assertio
               (expect (regexp-quote
                        (concat
                         "diff --git a/created.txt b/created.txt\n"
+                        "new file mode 100644\n"
                         "--- /dev/null\n"
                         "+++ b/created.txt\n"
                         "@@ -0,0 +1,1 @@\n"
