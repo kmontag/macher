@@ -3668,7 +3668,7 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                   (expect (file-exists-p deleted-file) :not :to-be-truthy))
 
                 ;; Verify directory contains exactly the expected files.
-                (let* ((all-files (directory-files project-dir nil "^[^.]"))
+                (let* ((all-files (directory-files project-dir nil "\\`[^.]"))
                        (sorted-files (sort all-files #'string<)))
                   (expect sorted-files :to-equal '("created.txt" "modified.txt")))))
 
