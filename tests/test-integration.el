@@ -3636,10 +3636,10 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                       nil
                       nil
                       nil
-                       ;; The -E flag causes empty files to be deleted. Note this means we're not
-                       ;; quite testing that the patch contains a "true" deletion, but this flag is
-                       ;; needed for consistent behavior between GNU patch and e.g. MacOS patch
-                       ;; (which doesn't delete any files by default).
+                      ;; The -E flag causes empty files to be deleted. Note this means we're not
+                      ;; quite testing that the patch contains a "true" deletion, but this flag is
+                      ;; needed for consistent behavior between GNU patch and e.g. MacOS patch
+                      ;; (which doesn't delete any files by default).
                       "-E"
                       "-p1"
                       "-d"
