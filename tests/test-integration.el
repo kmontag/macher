@@ -1081,6 +1081,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect (regexp-quote
                        (concat
                         "diff --git a/test-file.txt b/test-file.txt\n"
+                        "deleted file mode 100644\n"
                         "--- a/test-file.txt\n"
                         "+++ /dev/null\n"
                         "@@ -1,1 +0,0 @@\n"
@@ -1201,6 +1202,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect (regexp-quote
                        (concat
                         "diff --git a/created-file.txt b/created-file.txt\n"
+                        "new file mode 100644\n"
                         "--- /dev/null\n"
                         "+++ b/created-file.txt\n"
                         "@@ -0,0 +1,1 @@\n"
@@ -1404,6 +1406,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect (regexp-quote
                        (concat
                         "diff --git a/moved-file.txt b/moved-file.txt\n"
+                        "new file mode 100644\n"
                         "--- /dev/null\n"
                         "+++ b/moved-file.txt\n"
                         "@@ -0,0 +1,1 @@\n"
@@ -1414,6 +1417,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect (regexp-quote
                        (concat
                         "diff --git a/source-file.txt b/source-file.txt\n"
+                        "deleted file mode 100644\n"
                         "--- a/source-file.txt\n"
                         "+++ /dev/null\n"
                         "@@ -1,1 +0,0 @@\n"
@@ -3518,6 +3522,7 @@ Sets `test-patch-content' to the generated patch content for additional assertio
               (expect (regexp-quote
                        (concat
                         "diff --git a/created.txt b/created.txt\n"
+                        "new file mode 100644\n"
                         "--- /dev/null\n"
                         "+++ b/created.txt\n"
                         "@@ -0,0 +1,1 @@\n"
@@ -3571,6 +3576,105 @@ Sets `test-patch-content' to the generated patch content for additional assertio
               (expect patch :not :to-match "diff --git")
               (expect patch :not :to-match "@@")
               (expect patch :not :to-match "^[+-]")))))))
+
+  (describe "patch application"
+    (it "applies generated patches with mixed operations using the patch command"
+      (funcall setup-backend
+               `((:tool-calls
+                  [(:function
+                    (:name
+                     "edit_file_in_workspace"
+                     :arguments
+                     (:path
+                      "modified.txt"
+                      :old_text "original content\n"
+                      :new_text "modified content\n")))
+                   (:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "created.txt" :content "new file content\n")))
+                   (:function (:name "delete_file_in_workspace" :arguments (:path "deleted.txt")))])
+                 "Made all requested changes"))
+      (funcall setup-project
+               "patch-apply-test"
+               '(("modified.txt" . "original content\n") ("deleted.txt" . "content to delete\n")))
+
+      (let ((callback-called nil)
+            (exit-code nil)
+            (fsm nil)
+            (patch-file (make-temp-file "macher-patch" nil ".patch")))
+        (unwind-protect
+            (with-temp-buffer
+              (set-visited-file-name project-file)
+              (macher-test--send
+               'macher "Make mixed file changes"
+               (macher-test--make-once-only-callback
+                (lambda (cb-exit-code cb-fsm)
+                  (setq callback-called t)
+                  (setq exit-code cb-exit-code)
+                  (setq fsm cb-fsm))))
+
+              ;; Wait for the async response.
+              (let ((timeout 0))
+                (while (and (not callback-called) (< timeout 100))
+                  (sleep-for 0.1)
+                  (setq timeout (1+ timeout))))
+
+              (expect callback-called :to-be-truthy)
+              (expect exit-code :to-be nil)
+              (expect (gptel-fsm-state fsm) :to-be 'DONE)
+
+              ;; Save the patch to a file.
+              (with-current-buffer (macher-patch-buffer)
+                (write-region (point-min) (point-max) patch-file))
+
+              ;; Apply patch directly to the project directory using the patch command.
+              ;; Use -E to remove empty files (for deletions).
+              (let ((patch-exit-code
+                     (call-process
+                      "patch"
+                      nil
+                      nil
+                      nil
+                      ;; The -E flag causes empty files to be deleted. Note this means we're not
+                      ;; quite testing that the patch contains a "true" deletion, but this flag is
+                      ;; needed for consistent behavior between GNU patch and e.g. MacOS patch
+                      ;; (which doesn't delete any files by default).
+                      "-E"
+                      "-p1"
+                      "-d"
+                      project-dir
+                      "-i"
+                      patch-file)))
+                ;; Verify patch applied successfully.
+                (expect patch-exit-code :to-equal 0)
+
+                ;; Verify modified file has new content.
+                (let ((modified-file (expand-file-name "modified.txt" project-dir)))
+                  (expect (file-exists-p modified-file) :to-be-truthy)
+                  (with-temp-buffer
+                    (insert-file-contents modified-file)
+                    (expect (buffer-string) :to-equal "modified content\n")))
+
+                ;; Verify created file exists with correct content.
+                (let ((created-file (expand-file-name "created.txt" project-dir)))
+                  (expect (file-exists-p created-file) :to-be-truthy)
+                  (with-temp-buffer
+                    (insert-file-contents created-file)
+                    (expect (buffer-string) :to-equal "new file content\n")))
+
+                ;; Verify deleted file no longer exists.
+                (let ((deleted-file (expand-file-name "deleted.txt" project-dir)))
+                  (expect (file-exists-p deleted-file) :not :to-be-truthy))
+
+                ;; Verify directory contains exactly the expected files.
+                (let* ((all-files (directory-files project-dir nil "\\`[^.]"))
+                       (sorted-files (sort all-files #'string<)))
+                  (expect sorted-files :to-equal '("created.txt" "modified.txt")))))
+
+          ;; Cleanup.
+          (when (file-exists-p patch-file)
+            (delete-file patch-file))))))
 
   (describe "macher context sharing"
     (it "shares single context when multiple tools are invoked together"
