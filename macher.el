@@ -3156,6 +3156,15 @@ CONTEXT is the `macher-context' object.  Returns the generated diff text."
               ;; Add the standard git diff header, which allows diff-mode to create new files.
               (insert (format "diff --git a/%s b/%s\n" rel-path rel-path))
 
+              ;; Add file mode lines for new or deleted files.
+              (cond
+               ;; New file: orig-content is nil, new-content is non-nil.
+               ((and (not orig-content) new-content)
+                (insert "new file mode 100644\n"))
+               ;; Deleted file: orig-content is non-nil, new-content is nil.
+               ((and orig-content (not new-content))
+                (insert "deleted file mode 100644\n")))
+
               ;; Use diff to generate a unified patch with the correct file path.
               (when (or orig-content new-content)
                 (call-process "diff"
