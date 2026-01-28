@@ -5387,6 +5387,111 @@
                 (setq line-num (1+ line-num))))
             (expect diff-ended :to-be t))))))
 
+  (describe "macher--generate-patch-diff"
+    :var (context workspace temp-dir)
+
+    (before-each
+      (setq temp-dir (make-temp-file "macher-test-patch" t))
+      ;; Create a .project marker file so it's recognized as a valid project.
+      (write-region "" nil (expand-file-name ".project" temp-dir))
+      (setq workspace `(project . ,temp-dir))
+      (setq context (macher--make-context :workspace workspace)))
+
+    (after-each
+      (when (and temp-dir (file-exists-p temp-dir))
+        (delete-directory temp-dir t)))
+
+    (describe "file mode lines"
+      (it "does not include mode lines for modified files"
+        (let* ((file-path (expand-file-name "modified.txt" temp-dir))
+               (normalized-path (macher--normalize-path file-path)))
+          ;; Create a file and set up context as if it was modified.
+          (with-temp-buffer
+            (insert "original content")
+            (write-region (point-min) (point-max) file-path))
+          ;; Load the file into context.
+          (macher-context--contents-for-file file-path context)
+          ;; Modify it.
+          (macher-context--set-new-content-for-file file-path "modified content" context)
+          ;; Generate the patch.
+          (let ((patch (macher--generate-patch-diff context)))
+            ;; Should have the diff header.
+            (expect patch :to-match "diff --git a/modified.txt b/modified.txt")
+            ;; Should NOT have new file mode line.
+            (expect patch :not :to-match "new file mode")
+            ;; Should NOT have deleted file mode line.
+            (expect patch :not :to-match "deleted file mode"))))
+
+      (it "includes new file mode line for created files"
+        (let* ((file-path (expand-file-name "created.txt" temp-dir))
+               (normalized-path (macher--normalize-path file-path)))
+          ;; Set up context as if we're creating a new file.
+          (macher-context--set-new-content-for-file file-path "new file content" context)
+          ;; Generate the patch.
+          (let ((patch (macher--generate-patch-diff context)))
+            ;; Should have the diff header.
+            (expect patch :to-match "diff --git a/created.txt b/created.txt")
+            ;; Should have new file mode line immediately after the diff header.
+            (expect patch
+                    :to-match "diff --git a/created.txt b/created.txt\nnew file mode 100644\n")
+            ;; Should NOT have deleted file mode line.
+            (expect patch :not :to-match "deleted file mode"))))
+
+      (it "includes deleted file mode line for deleted files"
+        (let* ((file-path (expand-file-name "deleted.txt" temp-dir))
+               (normalized-path (macher--normalize-path file-path)))
+          ;; Create a file.
+          (with-temp-buffer
+            (insert "original content")
+            (write-region (point-min) (point-max) file-path))
+          ;; Load the file into context.
+          (macher-context--contents-for-file file-path context)
+          ;; Delete it.
+          (macher-context--set-new-content-for-file file-path nil context)
+          ;; Generate the patch.
+          (let ((patch (macher--generate-patch-diff context)))
+            ;; Should have the diff header.
+            (expect patch :to-match "diff --git a/deleted.txt b/deleted.txt")
+            ;; Should have deleted file mode line immediately after the diff header.
+            (expect patch
+                    :to-match "diff --git a/deleted.txt b/deleted.txt\ndeleted file mode 100644\n")
+            ;; Should NOT have new file mode line.
+            (expect patch :not :to-match "new file mode"))))
+
+      (it "handles multiple files with different operations"
+        (let* ((modified-path (expand-file-name "modified.txt" temp-dir))
+               (created-path (expand-file-name "created.txt" temp-dir))
+               (deleted-path (expand-file-name "deleted.txt" temp-dir)))
+          ;; Set up modified file.
+          (with-temp-buffer
+            (insert "original content")
+            (write-region (point-min) (point-max) modified-path))
+          (macher-context--contents-for-file modified-path context)
+          (macher-context--set-new-content-for-file modified-path "modified content" context)
+          ;; Set up created file.
+          (macher-context--set-new-content-for-file created-path "new file" context)
+          ;; Set up deleted file.
+          (with-temp-buffer
+            (insert "to be deleted")
+            (write-region (point-min) (point-max) deleted-path))
+          (macher-context--contents-for-file deleted-path context)
+          (macher-context--set-new-content-for-file deleted-path nil context)
+          ;; Generate the patch.
+          (let ((patch (macher--generate-patch-diff context)))
+            ;; Should have all three diff headers (files are sorted alphabetically).
+            (expect patch :to-match "diff --git a/created.txt b/created.txt")
+            (expect patch :to-match "diff --git a/deleted.txt b/deleted.txt")
+            (expect patch :to-match "diff --git a/modified.txt b/modified.txt")
+            ;; Created file should have new file mode.
+            (expect patch
+                    :to-match "diff --git a/created.txt b/created.txt\nnew file mode 100644\n")
+            ;; Deleted file should have deleted file mode.
+            (expect patch
+                    :to-match "diff --git a/deleted.txt b/deleted.txt\ndeleted file mode 100644\n")
+            ;; Modified file should NOT have any mode line.
+            ;; Check by ensuring the modified.txt header is NOT followed by a mode line.
+            (expect patch :to-match "diff --git a/modified.txt b/modified.txt\n---"))))))
+
   (describe "macher--system-ensure-placeholder-or-context-string"
     :var (original-placeholder original-marker-start original-marker-end original-context-fn)
 
