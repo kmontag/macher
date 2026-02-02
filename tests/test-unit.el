@@ -5163,7 +5163,9 @@
         (js-mode)
         (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
         (expect (macher--revise-prompt "Fix it" nil nil)
-                :to-throw 'user-error '("No patch buffer found for revision")))))
+                :to-throw
+                'user-error
+                '("No patch buffer found for revision")))))
 
   (describe "macher--resolve-workspace-path"
     :var
