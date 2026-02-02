@@ -503,44 +503,21 @@ This hook runs after the callback provided to `macher-action' (if any)."
 
 ;;;; Context
 
-(defcustom macher-source-description #'macher--source-description-default
-  "Get a description of the source and the user's current focus.
+(defcustom macher-focus-description #'macher--focus-description-default
+  "Function to generate a description of your current location in the code.
 
 This will be evaluated when generating prompts for built-in actions, or
-when calling function `macher-source-description' directly.  It can be a
+when calling function `macher-focus-description' directly.  It can be a
 sexp form or a function.
 
-The result should be a string providing contextual information about the
-current buffer (for example the file being visited) and the user's
-focus (for example the position of point and/or the selected region).
+The result should be a string describing the user's focus - the file,
+cursor location, selection, etc.  This is included in prompts for
+built-in actions and can be yanked into any conversation to point the
+LLM at a specific place in your code.
 
-By default, this uses `macher--source-description-default' which generates
-structured source information including:
+By default, this uses `macher--focus-description-default'.
 
-- File path (relative to workspace root)
-- Programming language
-- Cursor position (line and column) or selected region
-- Context text (text before cursor or selected text)
-
-The information is formatted as XML-like tags for easy parsing.
-
-You can customize this to provide alternative context, for example:
-
-  (setq macher-source-description
-        \\='(format \"Working in %s at line %d\"
-                 (buffer-name)
-                 (line-number-at-pos)))
-
-Or use a custom function:
-
-  (defun my-source-description ()
-    (format \"File: %s\\nTime: %s\"
-            (buffer-file-name)
-            (current-time-string)))
-
-  (setq macher-source-description #\\='my-source-description)
-
-Call `macher-source-description' interactively to yank this value."
+Call `macher-focus-description' interactively to yank this value."
   :type '(choice (function :tag "Function to call") (sexp :tag "Form to evaluate"))
   :group 'macher-actions)
 
@@ -3318,11 +3295,12 @@ otherwise returns (nil . nil)."
           content-pair)))))
 
 ;;; Default Prompt Functions
-(defun macher--source-description-default ()
-  "Build structured source information for the current buffer and cursor/selection.
+(defun macher--focus-description-default ()
+  "Default implementation of focus description.
 
-Returns a string containing XML-tagged source information, or nil if
-there's no relevant source info to include."
+Returns a string with XML-tagged information about the current buffer,
+including file path, language, cursor position or selection, and relevant
+context text."
   (let* ((workspace (macher-workspace))
          (filename (buffer-file-name))
          (dirname dired-directory)
@@ -3376,10 +3354,10 @@ there's no relevant source info to include."
 
 The prompt is slightly different depending on whether the content
 IS-SELECTED (vs being entered manually)."
-  (let ((source-description (macher-source-description)))
+  (let ((focus-description (macher-focus-description)))
     (concat
-     (when source-description
-       (format "Current focus:\n\n%s\n" source-description))
+     (when focus-description
+       (format "Current focus:\n\n%s\n" focus-description))
      (if is-selected
          "Implementation request (from selected text):"
        "Implementation request:")
@@ -3396,10 +3374,10 @@ patch buffer) are included in the generated prompt."
               (with-current-buffer patch-buffer
                 (buffer-substring-no-properties (point-min) (point-max)))
             (user-error "No patch buffer found for revision")))
-         (source-description (macher-source-description)))
+         (focus-description (macher-focus-description)))
     (concat
-     (when source-description
-       (format "Current focus:\n\n%s\n" source-description))
+     (when focus-description
+       (format "Current focus:\n\n%s\n" focus-description))
      (format "Your previous work:\n\n%s" patch-content)
      (if (and input (not (string-empty-p input)))
          ":\n\n"
@@ -4392,19 +4370,19 @@ associated with the current workspace."
 ;;; Convenience methods for built-in actions.
 
 ;;;###autoload
-(defun macher-source-description (&optional interactive)
-  "Get a description of the source and the user's focus.
+(defun macher-focus-description (&optional interactive)
+  "Get a description of your current location in the code.
 
-This simply evaluates the form (or calls the function) of variable
-`macher-source-description', and returns the result.
+Evaluates the form (or calls the function) in variable
+`macher-focus-description' and returns the result.
 
-If called interactively (which sets INTERACTIVE), also yanks the value
-to the kill ring."
+If called interactively (which sets INTERACTIVE), yanks the value to
+the kill ring."
   (interactive (list "p"))
   (let ((result
-         (if (functionp macher-source-description)
-             (funcall macher-source-description)
-           (eval macher-source-description))))
+         (if (functionp macher-focus-description)
+             (funcall macher-focus-description)
+           (eval macher-focus-description))))
     (when interactive
       (kill-new result)
       (message "Source description copied to kill ring"))
