@@ -103,7 +103,8 @@ All built-in presets can safely be repeatedly applied.
 
 Actions are convenience commands that use macher presets with a specific workflow:
 
-- A prompt is captured based on the current selection/cursor position.
+- A description of your current location in the code is generated (see `macher-focus-description`).
+- A prompt is captured based on the current selection or manual input.
 - The prompt is sent in a dedicated actions buffer, with a macher preset applied.
 
 The built-in actions are:
@@ -126,11 +127,21 @@ The built-in actions are:
 
 - **`macher-action`**: Run any action from the `macher-actions-alist`.
 - **`macher-abort`**: Cancel running action requests for the current workspace.
+- **`macher-focus-description`**: Get a description of your current code location. When called
+  interactively, yanks the description to the kill ring. Useful for manually pasting context into
+  conversations.
 
 The actions buffer UI can be customized with `macher-action-buffer-ui` (see
 [Customization](#customization)).
 
 You can define custom actions in `macher-actions-alist`.
+
+#### Focus description
+
+When you run an action, macher automatically generates a description of your current location in the
+code - the file you're in, your cursor position or selection, and relevant context. This is
+controlled by `macher-focus-description`, which can be customized to change how this information is
+formatted or what details are included.
 
 ### Workspace context
 
@@ -215,6 +226,7 @@ You can see customizable variables/sub-groups with `M-x customize-group RET mach
 | Variable                          | Description                                                         |
 | --------------------------------- | ------------------------------------------------------------------- |
 | `macher-actions-alist`            | Defines available actions (implement, revise, discuss, etc.)        |
+| `macher-focus-description`        | Function to generate description of current code location           |
 | `macher-action-buffer-ui`         | UI style for action buffers: `'default`, `'org`, `'basic`, or `nil` |
 | `macher-action-buffer-setup-hook` | Hook run when creating action buffers                               |
 | `macher-action-dispatch-hook`     | Hook run when invoking an action                                    |
