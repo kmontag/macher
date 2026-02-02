@@ -3302,6 +3302,10 @@ Returns a string with XML-tagged information about the current buffer,
 including file path, language, cursor position or selection, and relevant
 context text."
   (let* ((workspace (macher-workspace))
+         (workspace-root
+          (if workspace
+              (macher--workspace-root workspace)
+            default-directory))
          (filename (buffer-file-name))
          (dirname dired-directory)
          (parts nil))
@@ -3315,8 +3319,7 @@ context text."
                  (format-mode-line mode-name))))
              (has-selection (use-region-p)))
         ;; File and language.
-        (push
-         (format "file: %s" (file-relative-name filename (macher--workspace-root workspace))) parts)
+        (push (format "file: %s" (file-relative-name filename workspace-root)) parts)
         (push (format "language: %s" lang) parts)
 
         (if has-selection
@@ -3341,8 +3344,7 @@ context text."
               (push (format "text before cursor:\n%s" text-before-cursor) parts))))))
      ;; Dired directory.
      (dirname
-      (push (format "directory: %s" (file-relative-name dirname (macher--workspace-root workspace)))
-            parts))
+      (push (format "directory: %s" (file-relative-name dirname workspace-root)) parts))
      ;; Non-file buffer.
      (t
       (push (format "buffer: %s" (buffer-name)) parts)))

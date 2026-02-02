@@ -5008,7 +5008,16 @@
         (with-temp-buffer
           (setq-local macher--workspace (cons 'file temp-dir))
           (let ((result (macher--focus-description-default)))
-            (expect result :to-match "directory:"))))))
+            (expect result :to-match "directory:")))))
+
+    (it "handles file buffers with no workspace"
+      (spy-on 'macher-workspace :and-return-value nil)
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (let ((result (macher--focus-description-default)))
+          (expect result :to-match "file:")
+          (expect result :to-match "language: js")))))
 
   (describe "macher-focus-description"
     (it "returns result from function when variable is a function"
