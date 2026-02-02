@@ -3378,13 +3378,10 @@ patch buffer) are included in the generated prompt."
     (concat
      (when focus-description
        (format "Current focus:\n\n%s\n" focus-description))
-     (format "Your previous work:\n\n%s" patch-content)
      (if (and input (not (string-empty-p input)))
-         ":\n\n"
-       ".\n\n")
-     (when (and input (not (string-empty-p input)))
-       (concat input "\n\n"))
-     "Previous work for reference:\n\n" patch-content)))
+         (format "Revise your previous work based on these instructions:\n\n%s\n\n" input)
+       "Revise your previous work.\n\n")
+     "Your previous work:\n\n```\n" patch-content "\n```")))
 
 (defun macher--discuss-prompt (input _is-selected)
   "Generate a prompt for discussion based on INPUT.

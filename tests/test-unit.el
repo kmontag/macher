@@ -5080,6 +5080,82 @@
           ;; Restore the original function.
           (fset 'gptel--strip-mode-suffix original-function)))))
 
+  (describe "macher--revise-prompt"
+    :var (temp-file temp-patch-buffer)
+
+    (before-each
+      (setq temp-file (make-temp-file "macher-test" nil ".js"))
+      (with-temp-buffer
+        (insert "// Test JavaScript file\nfunction test() {}\n")
+        (write-region (point-min) (point-max) temp-file))
+      ;; Create a mock patch buffer.
+      (setq temp-patch-buffer (generate-new-buffer " *macher-test-patch*"))
+      (with-current-buffer temp-patch-buffer
+        (insert "diff --git a/test.js b/test.js\n")
+        (insert "--- a/test.js\n")
+        (insert "+++ b/test.js\n")
+        (insert "@@ -1,2 +1,3 @@\n")
+        (insert " // Test file\n")
+        (insert " function test() {\n")
+        (insert "+  return 42;\n")
+        (insert " }\n")))
+
+    (after-each
+      (when (file-exists-p temp-file)
+        (delete-file temp-file))
+      (when (buffer-live-p temp-patch-buffer)
+        (kill-buffer temp-patch-buffer)))
+
+    (it "includes revision instructions when provided"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((prompt (macher--revise-prompt "Fix the indentation" nil temp-patch-buffer)))
+          (expect prompt :to-match "Revise your previous work based on these instructions:")
+          (expect prompt :to-match "Fix the indentation")
+          (expect prompt :to-match "Your previous work:")
+          (expect prompt :to-match "```")
+          (expect prompt :to-match "diff --git"))))
+
+    (it "handles empty revision instructions"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((prompt (macher--revise-prompt "" nil temp-patch-buffer)))
+          (expect prompt :to-match "Revise your previous work\\.")
+          (expect prompt :not :to-match "instructions:")
+          (expect prompt :to-match "Your previous work:")
+          (expect prompt :to-match "```"))))
+
+    (it "handles nil revision instructions"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((prompt (macher--revise-prompt nil nil temp-patch-buffer)))
+          (expect prompt :to-match "Revise your previous work\\.")
+          (expect prompt :to-match "Your previous work:")
+          (expect prompt :to-match "```"))))
+
+    (it "includes focus description"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((prompt (macher--revise-prompt "Improve error handling" nil temp-patch-buffer)))
+          (expect prompt :to-match "Current focus:")
+          (expect prompt :to-match "<source>"))))
+
+    (it "errors when no patch buffer exists"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (expect (macher--revise-prompt "Fix it" nil nil)
+                :to-throw 'user-error '("No patch buffer found for revision")))))
+
   (describe "macher--resolve-workspace-path"
     :var
     (temp-workspace-root
