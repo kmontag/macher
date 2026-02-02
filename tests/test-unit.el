@@ -4976,7 +4976,12 @@
           (expect result :to-match "file:.*test.js")
           ;; gptel--strip-mode-suffix returns "js" for js-mode.
           (expect result :to-match "language: js")
-          (expect result :to-match "<source>"))))
+          (expect result :to-match "<source>")
+          ;; Project name should be included.
+          (expect result :to-match "project:")
+          ;; Content should not be indented (no leading spaces after newline).
+          (expect result :to-match "<source>\nproject:")
+          (expect result :not :to-match "<source>\n  "))))
 
     (it "includes cursor position when no selection"
       (with-temp-buffer
@@ -5017,7 +5022,31 @@
         (js-mode)
         (let ((result (macher--focus-description-default)))
           (expect result :to-match "file:")
-          (expect result :to-match "language: js")))))
+          (expect result :to-match "language: js")
+          ;; No project name when there's no workspace.
+          (expect result :not :to-match "project:"))))
+
+    (it "handles directory buffers without workspace"
+      (spy-on 'macher-workspace :and-return-value nil)
+      (let ((dired-directory temp-dir))
+        (with-temp-buffer
+          (let ((result (macher--focus-description-default)))
+            (expect result :to-match "directory:")
+            (expect result :not :to-match "project:")))))
+
+    (it "handles non-file non-directory buffers with workspace"
+      (with-temp-buffer
+        (setq-local macher--workspace (cons 'file temp-dir))
+        (let ((result (macher--focus-description-default)))
+          (expect result :to-match "buffer:")
+          (expect result :to-match "project:"))))
+
+    (it "handles non-file non-directory buffers without workspace"
+      (spy-on 'macher-workspace :and-return-value nil)
+      (with-temp-buffer
+        (let ((result (macher--focus-description-default)))
+          (expect result :to-match "buffer:")
+          (expect result :not :to-match "project:")))))
 
   (describe "macher-focus-description"
     (it "returns result from function when variable is a function"
@@ -5087,7 +5116,20 @@
                   (expect prompt :to-match "language:")
                   (expect prompt :to-match "Add error handling"))))
           ;; Restore the original function.
-          (fset 'gptel--strip-mode-suffix original-function)))))
+          (fset 'gptel--strip-mode-suffix original-function))))
+
+    (it "works without a workspace"
+      (spy-on 'macher-workspace :and-return-value nil)
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (let ((prompt (macher--implement-prompt "Add error handling" nil)))
+          (expect prompt :to-match "language: js")
+          (expect prompt :to-match "Add error handling")
+          (expect prompt :to-match "Implementation request")
+          (expect prompt :to-match "Current focus:")
+          ;; Should not have project name when no workspace.
+          (expect prompt :not :to-match "project:")))))
 
   (describe "macher--revise-prompt"
     :var (temp-file temp-patch-buffer)
@@ -5165,7 +5207,20 @@
         (expect (macher--revise-prompt "Fix it" nil nil)
                 :to-throw
                 'user-error
-                '("No patch buffer found for revision")))))
+                '("No patch buffer found for revision"))))
+
+    (it "works without a workspace"
+      (spy-on 'macher-workspace :and-return-value nil)
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (let ((prompt (macher--revise-prompt "Fix the indentation" nil temp-patch-buffer)))
+          (expect prompt :to-match "Revise your previous work")
+          (expect prompt :to-match "Fix the indentation")
+          (expect prompt :to-match "Your previous work:")
+          (expect prompt :to-match "Current focus:")
+          ;; Should not have project name when no workspace.
+          (expect prompt :not :to-match "project:")))))
 
   (describe "macher--resolve-workspace-path"
     :var

@@ -3306,9 +3306,15 @@ context text."
           (if workspace
               (macher--workspace-root workspace)
             default-directory))
+         (workspace-name
+          (when workspace
+            (macher--workspace-name workspace)))
          (filename (buffer-file-name))
          (dirname dired-directory)
          (parts nil))
+    ;; Add project name if we have a workspace.
+    (when workspace-name
+      (push (format "project: %s" workspace-name) parts))
     (cond
      ;; Standard file-visiting buffer.
      (filename
@@ -3349,7 +3355,7 @@ context text."
      (t
       (push (format "buffer: %s" (buffer-name)) parts)))
     (concat
-     "<source>\n" (mapconcat (lambda (s) (concat "  " s)) (reverse parts) "\n") "\n</source>\n")))
+     "<source>\n" (mapconcat #'identity (reverse parts) "\n") "\n</source>\n")))
 
 (defun macher--implement-prompt (input is-selected)
   "Generate an implementation prompt for INPUT in the current buffer.
