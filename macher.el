@@ -503,6 +503,47 @@ This hook runs after the callback provided to `macher-action' (if any)."
 
 ;;;; Context
 
+(defcustom macher-source-description #'macher--source-description-default
+  "Get a description of the source and the user's current focus.
+
+This will be evaluated when generating prompts for built-in actions, or
+when calling function `macher-source-description' directly.  It can be a
+sexp form or a function.
+
+The result should be a string providing contextual information about the
+current buffer (for example the file being visited) and the user's
+focus (for example the position of point and/or the selected region).
+
+By default, this uses `macher--source-description-default' which generates
+structured source information including:
+
+- File path (relative to workspace root)
+- Programming language
+- Cursor position (line and column) or selected region
+- Context text (text before cursor or selected text)
+
+The information is formatted as XML-like tags for easy parsing.
+
+You can customize this to provide alternative context, for example:
+
+  (setq macher-source-description
+        \\='(format \"Working in %s at line %d\"
+                 (buffer-name)
+                 (line-number-at-pos)))
+
+Or use a custom function:
+
+  (defun my-source-description ()
+    (format \"File: %s\\nTime: %s\"
+            (buffer-file-name)
+            (current-time-string)))
+
+  (setq macher-source-description #\\='my-source-description)
+
+Call `macher-source-description' interactively to yank this value."
+  :type '(choice (function :tag "Function to call") (sexp :tag "Form to evaluate"))
+  :group 'macher-actions)
+
 (defcustom macher-context-string-placeholder "\n[macher_placeholder]\n"
   "A placeholder in the system prompt for the macher context string.
 
@@ -3277,44 +3318,72 @@ otherwise returns (nil . nil)."
           content-pair)))))
 
 ;;; Default Prompt Functions
+(defun macher--source-description-default ()
+  "Build structured source information for the current buffer and cursor/selection.
 
-(defun macher--implement-prompt (input _is-selected)
-  "Generate an implementation prompt for INPUT in the current buffer."
+Returns a string containing XML-tagged source information, or nil if
+there's no relevant source info to include."
   (let* ((workspace (macher-workspace))
          (filename (buffer-file-name))
-         (relpath
-          (when filename
-            (file-relative-name filename (macher--workspace-root workspace))))
-         (source-description
-          (cond
-           ;; No file associated with buffer.
-           ((null filename)
-            "")
-           ;; Directory case.
-           ((file-directory-p filename)
-            (format "The request was sent from the workspace directory `%s`. " relpath))
-           ;; Regular file case.
-           (t
-            (let* ((lang
-                    ;; Use gptel's internal mode formatting method, with a fallback on error in case
-                    ;; the method gets removed or the signature changes (errors should also be
-                    ;; picked up by tests, so we'll notice such a change eventually).
-                    (condition-case nil
-                        (gptel--strip-mode-suffix major-mode)
-                      (error
-                       (format-mode-line mode-name)))))
-              (concat
-               (format "The request was sent from the %s file `%s` in the workspace. " lang relpath)
-               "If the request text appears as a comment or placeholder in the file, "
-               "replace it with the actual implementation. "))))))
+         (dirname dired-directory)
+         (parts nil))
+    (cond
+     ;; Standard file-visiting buffer.
+     (filename
+      (let* ((lang
+              (condition-case nil
+                  (gptel--strip-mode-suffix major-mode)
+                (error
+                 (format-mode-line mode-name))))
+             (has-selection (use-region-p)))
+        ;; File and language.
+        (push
+         (format "file: %s" (file-relative-name filename (macher--workspace-root workspace))) parts)
+        (push (format "language: %s" lang) parts)
+
+        (if has-selection
+            ;; Selection case.
+            (let* ((start (region-beginning))
+                   (end (region-end))
+                   (start-line (line-number-at-pos start))
+                   (end-line (line-number-at-pos end))
+                   (selected-text (buffer-substring-no-properties start end)))
+              (if (= start-line end-line)
+                  (push (format "line: %d" start-line) parts)
+                (push (format "lines: %d-%d" start-line end-line) parts))
+              (push (format "selection:\n%s" selected-text) parts))
+          ;; No selection - show cursor position and current line.
+          (let* ((pos (point))
+                 (line (line-number-at-pos pos))
+                 (col (current-column))
+                 (line-start (line-beginning-position))
+                 (text-before-cursor (buffer-substring-no-properties line-start pos)))
+            (push (format "line: %d, column: %d" line col) parts)
+            (when (not (string-empty-p text-before-cursor))
+              (push (format "text before cursor:\n%s" text-before-cursor) parts))))))
+     ;; Dired directory.
+     (dirname
+      (push (format "directory: %s" (file-relative-name dirname (macher--workspace-root workspace)))
+            parts))
+     ;; Non-file buffer.
+     (t
+      (push (format "buffer: %s" (buffer-name)) parts)))
     (concat
-     "TASK: Implement the following request using workspace tools.\n\n"
-     "INSTRUCTIONS:\n"
-     "1. Read and understand the implementation request below\n"
-     "2. Use the workspace tools to edit files as needed\n"
-     "3. Create working, complete code that fulfills the request\n\n"
-     source-description
-     (format "\n\nIMPLEMENTATION REQUEST:\n\n%s" input))))
+     "<source>\n" (mapconcat (lambda (s) (concat "  " s)) (reverse parts) "\n") "\n</source>\n")))
+
+(defun macher--implement-prompt (input is-selected)
+  "Generate an implementation prompt for INPUT in the current buffer.
+
+The prompt is slightly different depending on whether the content
+IS-SELECTED (vs being entered manually)."
+  (let ((source-description (macher-source-description)))
+    (concat
+     (when source-description
+       (format "Current focus:\n\n%s\n" source-description))
+     (if is-selected
+         "Implementation request (from selected text):"
+       "Implementation request:")
+     "\n\n" input)))
 
 (defun macher--revise-prompt (input _is-selected &optional patch-buffer)
   "Generate a prompt for revising based on INPUT (revision instructions).
@@ -3326,24 +3395,18 @@ patch buffer) are included in the generated prompt."
           (if patch-buffer
               (with-current-buffer patch-buffer
                 (buffer-substring-no-properties (point-min) (point-max)))
-            ;; Doesn't make sense to call this without a patch.
-            (user-error "No patch buffer found for revision"))))
+            (user-error "No patch buffer found for revision")))
+         (source-description (macher-source-description)))
     (concat
-     "TASK: Revise your previous implementation based on new feedback.\n\n"
-     "WHAT YOU NEED TO DO:\n"
-     "1. Read the revision instructions below (if any)\n"
-     "2. Review your previous patch and its original prompt\n"
-     "3. Understand what needs to be changed or improved\n"
-     "4. Create a NEW implementation that addresses the feedback\n"
-     "5. Use the workspace editing tools to make the changes\n\n"
+     (when source-description
+       (format "Current focus:\n\n%s\n" source-description))
+     (format "Your previous work:\n\n%s" patch-content)
      (if (and input (not (string-empty-p input)))
-         (format "REVISION INSTRUCTIONS:\n%s\n\n" input)
-       "")
-     "\n\n"
-     "==================================\n"
-     "YOUR PREVIOUS WORK (for reference)\n"
-     "==================================\n\n"
-     patch-content)))
+         ":\n\n"
+       ".\n\n")
+     (when (and input (not (string-empty-p input)))
+       (concat input "\n\n"))
+     "Previous work for reference:\n\n" patch-content)))
 
 (defun macher--discuss-prompt (input _is-selected)
   "Generate a prompt for discussion based on INPUT.
@@ -4327,6 +4390,25 @@ associated with the current workspace."
 
 
 ;;; Convenience methods for built-in actions.
+
+;;;###autoload
+(defun macher-source-description (&optional interactive)
+  "Get a description of the source and the user's focus.
+
+This simply evaluates the form (or calls the function) of variable
+`macher-source-description', and returns the result.
+
+If called interactively (which sets INTERACTIVE), also yanks the value
+to the kill ring."
+  (interactive (list "p"))
+  (let ((result
+         (if (functionp macher-source-description)
+             (funcall macher-source-description)
+           (eval macher-source-description))))
+    (when interactive
+      (kill-new result)
+      (message "Source description copied to kill ring"))
+    result))
 
 ;;;###autoload
 (defun macher-implement (&optional instructions callback)
