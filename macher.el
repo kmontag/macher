@@ -3394,8 +3394,12 @@ patch buffer) are included in the generated prompt."
 (defun macher--discuss-prompt (input _is-selected)
   "Generate a prompt for discussion based on INPUT.
 
-Currently this is just a no-op transformation."
-  input)
+Includes the current focus description to provide context."
+  (let ((focus-description (macher-focus-description)))
+    (concat
+     (when focus-description
+       (format "Current focus:\n\n%s\n" focus-description))
+     input)))
 
 
 (defun macher--patch-prepare-diff (context _fsm callback)

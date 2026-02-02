@@ -5222,6 +5222,56 @@
           ;; Should not have project name when no workspace.
           (expect prompt :not :to-match "project:")))))
 
+  (describe "macher--discuss-prompt"
+    :var (temp-file)
+
+    (before-each
+      (setq temp-file (make-temp-file "macher-test" nil ".js"))
+      (with-temp-buffer
+        (insert "// Test JavaScript file\nfunction test() {}\n")
+        (write-region (point-min) (point-max) temp-file)))
+
+    (after-each
+      (when (file-exists-p temp-file)
+        (delete-file temp-file)))
+
+    (it "includes focus description with workspace"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((prompt (macher--discuss-prompt "What does this code do?" nil)))
+          (expect prompt :to-match "Current focus:")
+          (expect prompt :to-match "<source>")
+          (expect prompt :to-match "project:")
+          (expect prompt :to-match "What does this code do?"))))
+
+    (it "includes focus description without workspace"
+      (spy-on 'macher-workspace :and-return-value nil)
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (let ((prompt (macher--discuss-prompt "Explain this function" nil)))
+          (expect prompt :to-match "Current focus:")
+          (expect prompt :to-match "<source>")
+          (expect prompt :not :to-match "project:")
+          (expect prompt :to-match "Explain this function"))))
+
+    (it "handles input when focus description is nil"
+      (spy-on 'macher-focus-description :and-return-value nil)
+      (let ((prompt (macher--discuss-prompt "General question" nil)))
+        (expect prompt :not :to-match "Current focus:")
+        (expect prompt :to-equal "General question")))
+
+    (it "preserves input text exactly"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((input "How can I optimize this?\nWith multiple lines."))
+          (let ((prompt (macher--discuss-prompt input nil)))
+            (expect prompt :to-match (regexp-quote input)))))))
+
   (describe "macher--resolve-workspace-path"
     :var
     (temp-workspace-root
