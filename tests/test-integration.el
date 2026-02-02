@@ -2342,7 +2342,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
   (describe "default before-action handler"
     :var*
     (callback-called
-     exit-code fsm callback project-file-buffer
+     exit-code fsm callback project-file-buffer orig-focus-description
      ;; Get the exact expected action buffer contents after a single macher action, with the default
      ;; settings. This will need to be updated if the default UI changes.
      ;;
@@ -2354,14 +2354,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                  ;; Header.
                  "### `%s` %s\n"
                  ;; Full prompt.
-                 "```\n%s\n```\n"
+                 "```\nCurrent focus:\n\n%s\n%s\n```\n"
                  ;; Response (may be empty for error/abort).
                  "%s"
                  ;; Trailing prefix only for successful responses.
                  (if include-trailing-prefix
                      "\n### "
                    ""))
-                action request request response)))
+                action request (macher-focus-description) request response)))
      ;; Get the exact expected action buffer contents for org-mode buffers after a single macher action.
      ;; This will need to be updated if the org UI changes.
      (action-buffer-org-content
@@ -2370,14 +2370,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                  ;; Org-mode header with action as tag.
                  "*** %s :%s:\n"
                  ;; Prompt block.
-                 ":PROMPT:\n%s\n:END:\n"
+                 ":PROMPT:\nCurrent focus:\n\n%s\n%s\n:END:\n"
                  ;; Response (may be empty for error/abort).
                  "%s"
                  ;; Trailing prefix only for successful responses.
                  (if include-trailing-prefix
                      "\n*** "
                    ""))
-                request action request response))))
+                request action (macher-focus-description) request response))))
 
     (before-each
       (setq callback-called nil)
@@ -2389,6 +2389,9 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                (setq callback-called t)
                (setq exit-code cb-exit-code)
                (setq fsm cb-fsm))))
+      (setq orig-focus-description macher-focus-description)
+      ;; Use a predictable focus description for easier testing.
+      (setq macher-focus-description "[focus]")
 
       (funcall setup-project "macher--after-action")
 
@@ -2398,6 +2401,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (setq project-file-buffer (current-buffer)))
 
     (after-each
+      (setq macher-focus-description orig-focus-description)
       (kill-buffer project-file-buffer))
 
     (it "formats prompts/responses for successful requests"
