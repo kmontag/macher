@@ -3354,8 +3354,7 @@ context text."
      ;; Non-file buffer.
      (t
       (push (format "buffer: %s" (buffer-name)) parts)))
-    (concat
-     "<source>\n" (mapconcat #'identity (reverse parts) "\n") "\n</source>\n")))
+    (concat "<source>\n" (mapconcat #'identity (reverse parts) "\n") "\n</source>\n")))
 
 (defun macher--implement-prompt (input is-selected)
   "Generate an implementation prompt for INPUT in the current buffer.
