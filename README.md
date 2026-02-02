@@ -128,20 +128,12 @@ The built-in actions are:
 - **`macher-action`**: Run any action from the `macher-actions-alist`.
 - **`macher-abort`**: Cancel running action requests for the current workspace.
 - **`macher-focus-description`**: Get a description of your current code location. When called
-  interactively, yanks the description to the kill ring. Useful for manually pasting context into
-  conversations.
+  interactively, yanks the description to the kill ring.
 
 The actions buffer UI can be customized with `macher-action-buffer-ui` (see
 [Customization](#customization)).
 
 You can define custom actions in `macher-actions-alist`.
-
-#### Focus description
-
-When you run an action, macher automatically generates a description of your current location in the
-code - the file you're in, your cursor position or selection, and relevant context. This is
-controlled by `macher-focus-description`, which can be customized to change how this information is
-formatted or what details are included.
 
 ### Workspace context
 
