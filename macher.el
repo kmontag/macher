@@ -3367,10 +3367,7 @@ context text."
 
 (defconst macher--action-focus-prefix
   "Current editor context (may or may not be relevant to this request):\n\n"
-  "Prefix for focus description in action prompts.
-
-This clarifies that the focus information is system-provided context
-rather than part of the user's explicit request.")
+  "Prefix for focus description in action prompts.")
 
 (defun macher--implement-prompt (input is-selected)
   "Generate an implementation prompt for INPUT in the current buffer.
