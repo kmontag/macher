@@ -3347,7 +3347,16 @@ context text."
                  (text-before-cursor (buffer-substring-no-properties line-start pos)))
             (push (format "line: %d, column: %d" line col) parts)
             (when (not (string-empty-p text-before-cursor))
-              (push (format "text before cursor:\n%s" text-before-cursor) parts))))))
+              ;; Truncate text-before-cursor to fill-column.
+              (let* ((max-width (or fill-column 70))
+                     (text-length (length text-before-cursor))
+                     (truncated-text
+                      (if (> text-length max-width)
+                          ;; Truncate from the beginning, keeping the end.
+                          (concat
+                           "..." (substring text-before-cursor (- text-length (- max-width 3))))
+                        text-before-cursor)))
+                (push (format "text before cursor:\n%s" truncated-text) parts)))))))
      ;; Dired directory.
      (dirname
       (push (format "directory: %s" (file-relative-name dirname workspace-root)) parts))

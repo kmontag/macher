@@ -4994,6 +4994,45 @@
         (let ((result (macher--focus-description-default)))
           (expect result :to-match "line: 2, column: 10"))))
 
+    (it "truncates text before cursor when it exceeds fill-column"
+      (with-temp-buffer
+        ;; Create a line with numbers 1-100 separated by spaces.
+        (insert (mapconcat #'number-to-string (number-sequence 1 100) " "))
+        (write-region (point-min) (point-max) temp-file)
+        (find-file temp-file)
+        (setq-local macher--workspace (cons 'file temp-dir))
+        (setq-local fill-column 70)
+        (js-mode)
+        (goto-char (point-max))
+        (let* ((result (macher--focus-description-default))
+               ;; Extract the text after "text before cursor:\n".
+               (truncated-line
+                (when (string-match "text before cursor:\n\\(.*\\)$" result)
+                  (match-string 1 result))))
+          (expect result :to-match "text before cursor:")
+          ;; Should have ellipsis at the beginning.
+          (expect result :to-match "text before cursor:\n\\.\\.\\.")
+          ;; Should end with "100" since we're truncating from the beginning.
+          (expect result :to-match " 100$")
+          ;; Should not start with "1" since it's truncated from the beginning.
+          (expect result :not :to-match "text before cursor:\n1 ")
+          ;; The truncated line should be exactly fill-column length.
+          (expect (length truncated-line) :to-equal 70))))
+
+    (it "does not truncate text before cursor when within fill-column"
+      (with-temp-buffer
+        (insert "short line")
+        (write-region (point-min) (point-max) temp-file)
+        (find-file temp-file)
+        (setq-local macher--workspace (cons 'file temp-dir))
+        (setq-local fill-column 70)
+        (js-mode)
+        (goto-char (point-max))
+        (let ((result (macher--focus-description-default)))
+          (expect result :to-match "text before cursor:\nshort line")
+          ;; Should not have ellipsis.
+          (expect result :not :to-match "\\.\\.\\."))))
+
     (it "includes selection when region is active"
       (with-temp-buffer
         (find-file temp-file)
