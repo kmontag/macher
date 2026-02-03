@@ -3354,7 +3354,14 @@ context text."
      ;; Non-file buffer.
      (t
       (push (format "buffer: %s" (buffer-name)) parts)))
-    (concat "<source>\n" (mapconcat #'identity (reverse parts) "\n") "\n</source>\n")))
+    (concat "```\n" (mapconcat #'identity (reverse parts) "\n") "\n```\n")))
+
+(defconst macher--action-focus-prefix
+  "Current editor context (may or may not be relevant to this request):\n\n"
+  "Prefix for focus description in action prompts.
+
+This clarifies that the focus information is system-provided context
+rather than part of the user's explicit request.")
 
 (defun macher--implement-prompt (input is-selected)
   "Generate an implementation prompt for INPUT in the current buffer.
@@ -3364,7 +3371,7 @@ IS-SELECTED (vs being entered manually)."
   (let ((focus-description (macher-focus-description)))
     (concat
      (when focus-description
-       (format "Current focus:\n\n%s\n" focus-description))
+       (concat macher--action-focus-prefix focus-description "\n"))
      (if is-selected
          "Implementation request (from selected text):"
        "Implementation request:")
@@ -3384,7 +3391,7 @@ patch buffer) are included in the generated prompt."
          (focus-description (macher-focus-description)))
     (concat
      (when focus-description
-       (format "Current focus:\n\n%s\n" focus-description))
+       (concat macher--action-focus-prefix focus-description "\n"))
      (if (and input (not (string-empty-p input)))
          (format "Revise your previous work based on these instructions:\n\n%s\n\n" input)
        "Revise your previous work.\n\n")
@@ -3397,7 +3404,7 @@ Includes the current focus description to provide context."
   (let ((focus-description (macher-focus-description)))
     (concat
      (when focus-description
-       (format "Current focus:\n\n%s\n" focus-description))
+       (concat macher--action-focus-prefix focus-description "\n"))
      input)))
 
 
