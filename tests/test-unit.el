@@ -5166,7 +5166,8 @@
           (expect prompt :to-match "language: js")
           (expect prompt :to-match "Add error handling")
           (expect prompt :to-match "Implementation request")
-          (expect prompt :to-match "Current editor context (may or may not be relevant to this request):")
+          (expect prompt
+                  :to-match "Current editor context (may or may not be relevant to this request):")
           ;; Should not have project name when no workspace.
           (expect prompt :not :to-match "project:")))))
 
@@ -5235,7 +5236,8 @@
         (js-mode)
         (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
         (let ((prompt (macher--revise-prompt "Improve error handling" nil temp-patch-buffer)))
-          (expect prompt :to-match "Current editor context (may or may not be relevant to this request):")
+          (expect prompt
+                  :to-match "Current editor context (may or may not be relevant to this request):")
           (expect prompt :to-match "```"))))
 
     (it "errors when no patch buffer exists"
@@ -5257,7 +5259,8 @@
           (expect prompt :to-match "Revise your previous work")
           (expect prompt :to-match "Fix the indentation")
           (expect prompt :to-match "Your previous work:")
-          (expect prompt :to-match "Current editor context (may or may not be relevant to this request):")
+          (expect prompt
+                  :to-match "Current editor context (may or may not be relevant to this request):")
           ;; Should not have project name when no workspace.
           (expect prompt :not :to-match "project:")))))
 
@@ -5280,7 +5283,8 @@
         (js-mode)
         (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
         (let ((prompt (macher--discuss-prompt "What does this code do?" nil)))
-          (expect prompt :to-match "Current editor context (may or may not be relevant to this request):")
+          (expect prompt
+                  :to-match "Current editor context (may or may not be relevant to this request):")
           (expect prompt :to-match "```")
           (expect prompt :to-match "project:")
           (expect prompt :to-match "What does this code do?"))))
@@ -5291,7 +5295,8 @@
         (find-file temp-file)
         (js-mode)
         (let ((prompt (macher--discuss-prompt "Explain this function" nil)))
-          (expect prompt :to-match "Current editor context (may or may not be relevant to this request):")
+          (expect prompt
+                  :to-match "Current editor context (may or may not be relevant to this request):")
           (expect prompt :to-match "```")
           (expect prompt :not :to-match "project:")
           (expect prompt :to-match "Explain this function"))))
@@ -5299,7 +5304,9 @@
     (it "handles input when focus description is nil"
       (spy-on 'macher-focus-description :and-return-value nil)
       (let ((prompt (macher--discuss-prompt "General question" nil)))
-        (expect prompt :not :to-match "Current editor context (may or may not be relevant to this request):")
+        (expect prompt
+                :not
+                :to-match "Current editor context (may or may not be relevant to this request):")
         (expect prompt :to-equal "General question")))
 
     (it "preserves input text exactly"

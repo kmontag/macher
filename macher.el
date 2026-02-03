@@ -3384,8 +3384,7 @@ IS-SELECTED (vs being entered manually)."
      (if is-selected
          "Implementation request (from selected text):\n\n"
        "Implementation request:\n\n")
-     input
-     "\n\nUse the available workspace tools to implement this request.")))
+     input "\n\nUse the available workspace tools to implement this request.")))
 
 (defun macher--revise-prompt (input _is-selected &optional patch-buffer)
   "Generate a prompt for revising based on INPUT (revision instructions).
