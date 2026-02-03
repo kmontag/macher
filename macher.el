@@ -3401,7 +3401,7 @@ patch buffer) are included in the generated prompt."
      (if (and input (not (string-empty-p input)))
          (format "Revise your previous work based on these instructions:\n\n%s\n\n" input)
        "Revise your previous work.\n\n")
-     "Your previous work:\n\n```\n" patch-content "\n```")))
+     "Your previous work:\n\n```diff\n" patch-content "\n```")))
 
 (defun macher--discuss-prompt (input _is-selected)
   "Generate a prompt for discussion based on INPUT.
