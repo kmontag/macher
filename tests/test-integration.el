@@ -2342,7 +2342,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
   (describe "default before-action handler"
     :var*
     (callback-called
-     exit-code fsm callback project-file-buffer orig-focus-description
+     exit-code fsm callback project-file-buffer orig-focus-string
      ;; Get the exact expected action buffer contents after a single macher action, with the default
      ;; settings. This will need to be updated if the default UI changes.
      ;;
@@ -2362,8 +2362,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                      "\n### "
                    ""))
                 action request
-                (if (macher-focus-description)
-                    (concat macher--action-focus-prefix (macher-focus-description) "\n")
+                (if (macher-focus-string)
+                    (concat macher--action-focus-prefix (macher-focus-string) "\n")
                   "")
                 request response)))
      ;; Get the exact expected action buffer contents for org-mode buffers after a single macher action.
@@ -2382,8 +2382,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                      "\n*** "
                    ""))
                 request action
-                (if (macher-focus-description)
-                    (concat macher--action-focus-prefix (macher-focus-description) "\n")
+                (if (macher-focus-string)
+                    (concat macher--action-focus-prefix (macher-focus-string) "\n")
                   "")
                 request response))))
 
@@ -2397,9 +2397,9 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                (setq callback-called t)
                (setq exit-code cb-exit-code)
                (setq fsm cb-fsm))))
-      (setq orig-focus-description macher-focus-description)
+      (setq orig-focus-string macher-focus-string)
       ;; Use a predictable focus description for easier testing.
-      (setq macher-focus-description "[focus]")
+      (setq macher-focus-string "[focus]")
 
       (funcall setup-project "macher--after-action")
 
@@ -2409,7 +2409,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (setq project-file-buffer (current-buffer)))
 
     (after-each
-      (setq macher-focus-description orig-focus-description)
+      (setq macher-focus-string orig-focus-string)
       (kill-buffer project-file-buffer))
 
     (it "formats prompts/responses for successful requests"

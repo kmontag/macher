@@ -503,11 +503,11 @@ This hook runs after the callback provided to `macher-action' (if any)."
 
 ;;;; Context
 
-(defcustom macher-focus-description #'macher--focus-description-default
+(defcustom macher-focus-string #'macher--focus-string-default
   "Function to generate a description of your current location in the code.
 
 This will be evaluated when generating prompts for built-in actions, or
-when calling function `macher-focus-description' directly.  It can be a
+when calling function `macher-focus-string' directly.  It can be a
 sexp form or a function.
 
 The result should be a string describing the user's focus - the file,
@@ -515,9 +515,9 @@ cursor location, selection, etc.  This is included in prompts for
 built-in actions and can be yanked into any conversation to point the
 LLM at a specific place in your code.
 
-By default, this uses `macher--focus-description-default'.
+By default, this uses `macher--focus-string-default'.
 
-Call `macher-focus-description' interactively to yank this value."
+Call `macher-focus-string' interactively to yank this value."
   :type '(choice (function :tag "Function to call") (sexp :tag "Form to evaluate"))
   :group 'macher-actions)
 
@@ -3295,7 +3295,7 @@ otherwise returns (nil . nil)."
           content-pair)))))
 
 ;;; Default Prompt Functions
-(defun macher--focus-description-default ()
+(defun macher--focus-string-default ()
   "Default implementation of focus description.
 
 Returns a string with XML-tagged information about the current buffer,
@@ -3374,10 +3374,10 @@ context text."
 
 The prompt is slightly different depending on whether the content
 IS-SELECTED (vs being entered manually)."
-  (let ((focus-description (macher-focus-description)))
+  (let ((focus-string (macher-focus-string)))
     (concat
-     (when focus-description
-       (concat macher--action-focus-prefix focus-description "\n"))
+     (when focus-string
+       (concat macher--action-focus-prefix focus-string "\n"))
      (if is-selected
          "Implementation request (from selected text):\n\n"
        "Implementation request:\n\n")
@@ -3394,10 +3394,10 @@ patch buffer) are included in the generated prompt."
               (with-current-buffer patch-buffer
                 (buffer-substring-no-properties (point-min) (point-max)))
             (user-error "No patch buffer found for revision")))
-         (focus-description (macher-focus-description)))
+         (focus-string (macher-focus-string)))
     (concat
-     (when focus-description
-       (concat macher--action-focus-prefix focus-description "\n"))
+     (when focus-string
+       (concat macher--action-focus-prefix focus-string "\n"))
      (if (and input (not (string-empty-p input)))
          (format "Revise your previous work based on these instructions:\n\n%s\n\n" input)
        "Revise your previous work.\n\n")
@@ -3407,10 +3407,10 @@ patch buffer) are included in the generated prompt."
   "Generate a prompt for discussion based on INPUT.
 
 Includes the current focus description to provide context."
-  (let ((focus-description (macher-focus-description)))
+  (let ((focus-string (macher-focus-string)))
     (concat
-     (when focus-description
-       (concat macher--action-focus-prefix focus-description "\n"))
+     (when focus-string
+       (concat macher--action-focus-prefix focus-string "\n"))
      input)))
 
 
@@ -4391,22 +4391,22 @@ associated with the current workspace."
 ;;; Convenience methods for built-in actions.
 
 ;;;###autoload
-(defun macher-focus-description (&optional interactive)
+(defun macher-focus-string (&optional interactive)
   "Get a description of your current location in the code.
 
 Evaluates the form (or calls the function) in variable
-`macher-focus-description' and returns the result.
+`macher-focus-string' and returns the result.
 
 If called interactively (which sets INTERACTIVE), yanks the value to
 the kill ring."
   (interactive (list "p"))
   (let ((result
-         (if (functionp macher-focus-description)
-             (funcall macher-focus-description)
-           (eval macher-focus-description))))
+         (if (functionp macher-focus-string)
+             (funcall macher-focus-string)
+           (eval macher-focus-string))))
     (when interactive
       (kill-new result)
-      (message "Source description copied to kill ring"))
+      (message "Focus string copied to kill ring"))
     result))
 
 ;;;###autoload

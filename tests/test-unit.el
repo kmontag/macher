@@ -4950,7 +4950,7 @@
             (expect (length found-handler-states) :to-equal (length expected-handler-states))
             (expect found-handler-states :to-have-same-items-as expected-handler-states))))))
 
-  (describe "macher--focus-description-default"
+  (describe "macher--focus-string-default"
     :var (temp-file temp-dir)
 
     (before-each
@@ -4964,7 +4964,7 @@
 
     (it "returns nil for non-file, non-directory buffers"
       (with-temp-buffer
-        (let ((result (macher--focus-description-default)))
+        (let ((result (macher--focus-string-default)))
           (expect result :to-match "buffer:"))))
 
     (it "includes file path and language for file buffers"
@@ -4972,7 +4972,7 @@
         (find-file temp-file)
         (setq-local macher--workspace (cons 'file temp-dir))
         (js-mode)
-        (let ((result (macher--focus-description-default)))
+        (let ((result (macher--focus-string-default)))
           (expect result :to-match "file:.*test.js")
           ;; gptel--strip-mode-suffix returns "js" for js-mode.
           (expect result :to-match "language: js")
@@ -4991,7 +4991,7 @@
         (goto-char (point-min))
         (forward-line 1)
         (move-to-column 10)
-        (let ((result (macher--focus-description-default)))
+        (let ((result (macher--focus-string-default)))
           (expect result :to-match "line: 2, column: 10"))))
 
     (it "truncates text before cursor when it exceeds fill-column"
@@ -5004,7 +5004,7 @@
         (setq-local fill-column 70)
         (js-mode)
         (goto-char (point-max))
-        (let* ((result (macher--focus-description-default))
+        (let* ((result (macher--focus-string-default))
                ;; Extract the text after "text before cursor:\n".
                (truncated-line
                 (when (string-match "text before cursor:\n\\(.*\\)$" result)
@@ -5028,7 +5028,7 @@
         (setq-local fill-column 70)
         (js-mode)
         (goto-char (point-max))
-        (let ((result (macher--focus-description-default)))
+        (let ((result (macher--focus-string-default)))
           (expect result :to-match "text before cursor:\nshort line")
           ;; Should not have ellipsis.
           (expect result :not :to-match "\\.\\.\\."))))
@@ -5043,7 +5043,7 @@
         (set-mark (point))
         (forward-line 1)
         (activate-mark)
-        (let ((result (macher--focus-description-default)))
+        (let ((result (macher--focus-string-default)))
           (expect result :to-match "selection:")
           (expect result :to-match "function foo"))))
 
@@ -5051,7 +5051,7 @@
       (let ((dired-directory temp-dir))
         (with-temp-buffer
           (setq-local macher--workspace (cons 'file temp-dir))
-          (let ((result (macher--focus-description-default)))
+          (let ((result (macher--focus-string-default)))
             (expect result :to-match "directory:")))))
 
     (it "handles file buffers with no workspace"
@@ -5059,7 +5059,7 @@
       (with-temp-buffer
         (find-file temp-file)
         (js-mode)
-        (let ((result (macher--focus-description-default)))
+        (let ((result (macher--focus-string-default)))
           (expect result :to-match "file:")
           (expect result :to-match "language: js")
           ;; No project name when there's no workspace.
@@ -5069,37 +5069,37 @@
       (spy-on 'macher-workspace :and-return-value nil)
       (let ((dired-directory temp-dir))
         (with-temp-buffer
-          (let ((result (macher--focus-description-default)))
+          (let ((result (macher--focus-string-default)))
             (expect result :to-match "directory:")
             (expect result :not :to-match "project:")))))
 
     (it "handles non-file non-directory buffers with workspace"
       (with-temp-buffer
         (setq-local macher--workspace (cons 'file temp-dir))
-        (let ((result (macher--focus-description-default)))
+        (let ((result (macher--focus-string-default)))
           (expect result :to-match "buffer:")
           (expect result :to-match "project:"))))
 
     (it "handles non-file non-directory buffers without workspace"
       (spy-on 'macher-workspace :and-return-value nil)
       (with-temp-buffer
-        (let ((result (macher--focus-description-default)))
+        (let ((result (macher--focus-string-default)))
           (expect result :to-match "buffer:")
           (expect result :not :to-match "project:")))))
 
-  (describe "macher-focus-description"
+  (describe "macher-focus-string"
     (it "returns result from function when variable is a function"
-      (let ((macher-focus-description (lambda () "test-focus")))
-        (expect (macher-focus-description) :to-equal "test-focus")))
+      (let ((macher-focus-string (lambda () "test-focus")))
+        (expect (macher-focus-string) :to-equal "test-focus")))
 
     (it "evaluates sexp when variable is a sexp"
-      (let ((macher-focus-description '(concat "test" "-" "sexp")))
-        (expect (macher-focus-description) :to-equal "test-sexp")))
+      (let ((macher-focus-string '(concat "test" "-" "sexp")))
+        (expect (macher-focus-string) :to-equal "test-sexp")))
 
     (it "yanks to kill ring when called interactively"
-      (let ((macher-focus-description (lambda () "interactive-test"))
+      (let ((macher-focus-string (lambda () "interactive-test"))
             (kill-ring nil))
-        (macher-focus-description t)
+        (macher-focus-string t)
         (expect (car kill-ring) :to-equal "interactive-test"))))
 
   (describe "macher--implement-prompt"
@@ -5302,7 +5302,7 @@
           (expect prompt :to-match "Explain this function"))))
 
     (it "handles input when focus description is nil"
-      (spy-on 'macher-focus-description :and-return-value nil)
+      (spy-on 'macher-focus-string :and-return-value nil)
       (let ((prompt (macher--discuss-prompt "General question" nil)))
         (expect prompt
                 :not
