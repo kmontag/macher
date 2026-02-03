@@ -4950,6 +4950,158 @@
             (expect (length found-handler-states) :to-equal (length expected-handler-states))
             (expect found-handler-states :to-have-same-items-as expected-handler-states))))))
 
+  (describe "macher--focus-string-default"
+    :var (temp-file temp-dir)
+
+    (before-each
+      (setq temp-dir (make-temp-file "macher-test" t))
+      (setq temp-file (expand-file-name "test.js" temp-dir))
+      (write-region "// Test file\nfunction foo() {\n  return 42;\n}\n" nil temp-file))
+
+    (after-each
+      (when (and temp-dir (file-directory-p temp-dir))
+        (delete-directory temp-dir t)))
+
+    (it "returns nil for non-file, non-directory buffers"
+      (with-temp-buffer
+        (let ((result (macher--focus-string-default)))
+          (expect result :to-match "buffer:"))))
+
+    (it "includes file path and language for file buffers"
+      (with-temp-buffer
+        (find-file temp-file)
+        (setq-local macher--workspace (cons 'file temp-dir))
+        (js-mode)
+        (let ((result (macher--focus-string-default)))
+          (expect result :to-match "file:.*test.js")
+          ;; gptel--strip-mode-suffix returns "js" for js-mode.
+          (expect result :to-match "language: js")
+          (expect result :to-match "```")
+          ;; Project name should be included.
+          (expect result :to-match "project:")
+          ;; Content should not be indented (no leading spaces after newline).
+          (expect result :to-match "```\nproject:")
+          (expect result :not :to-match "```\n  "))))
+
+    (it "includes cursor position when no selection"
+      (with-temp-buffer
+        (find-file temp-file)
+        (setq-local macher--workspace (cons 'file temp-dir))
+        (js-mode)
+        (goto-char (point-min))
+        (forward-line 1)
+        (move-to-column 10)
+        (let ((result (macher--focus-string-default)))
+          (expect result :to-match "line: 2, column: 10"))))
+
+    (it "truncates text before cursor when it exceeds fill-column"
+      (with-temp-buffer
+        ;; Create a line with numbers 1-100 separated by spaces.
+        (insert (mapconcat #'number-to-string (number-sequence 1 100) " "))
+        (write-region (point-min) (point-max) temp-file)
+        (find-file temp-file)
+        (setq-local macher--workspace (cons 'file temp-dir))
+        (setq-local fill-column 70)
+        (js-mode)
+        (goto-char (point-max))
+        (let* ((result (macher--focus-string-default))
+               ;; Extract the text after "text before cursor:\n".
+               (truncated-line
+                (when (string-match "text before cursor:\n\\(.*\\)$" result)
+                  (match-string 1 result))))
+          (expect result :to-match "text before cursor:")
+          ;; Should have ellipsis at the beginning.
+          (expect result :to-match "text before cursor:\n\\.\\.\\.")
+          ;; Should end with "100" since we're truncating from the beginning.
+          (expect result :to-match " 100$")
+          ;; Should not start with "1" since it's truncated from the beginning.
+          (expect result :not :to-match "text before cursor:\n1 ")
+          ;; The truncated line should be exactly fill-column length.
+          (expect (length truncated-line) :to-equal 70))))
+
+    (it "does not truncate text before cursor when within fill-column"
+      (with-temp-buffer
+        (insert "short line")
+        (write-region (point-min) (point-max) temp-file)
+        (find-file temp-file)
+        (setq-local macher--workspace (cons 'file temp-dir))
+        (setq-local fill-column 70)
+        (js-mode)
+        (goto-char (point-max))
+        (let ((result (macher--focus-string-default)))
+          (expect result :to-match "text before cursor:\nshort line")
+          ;; Should not have ellipsis.
+          (expect result :not :to-match "\\.\\.\\."))))
+
+    (it "includes selection when region is active"
+      (with-temp-buffer
+        (find-file temp-file)
+        (setq-local macher--workspace (cons 'file temp-dir))
+        (js-mode)
+        (goto-char (point-min))
+        (forward-line 1)
+        (set-mark (point))
+        (forward-line 1)
+        (activate-mark)
+        (let ((result (macher--focus-string-default)))
+          (expect result :to-match "selection:")
+          (expect result :to-match "function foo"))))
+
+    (it "handles directory buffers in dired mode"
+      (let ((dired-directory temp-dir))
+        (with-temp-buffer
+          (setq-local macher--workspace (cons 'file temp-dir))
+          (let ((result (macher--focus-string-default)))
+            (expect result :to-match "directory:")))))
+
+    (it "handles file buffers with no workspace"
+      (spy-on 'macher-workspace :and-return-value nil)
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (let ((result (macher--focus-string-default)))
+          (expect result :to-match "file:")
+          (expect result :to-match "language: js")
+          ;; No project name when there's no workspace.
+          (expect result :not :to-match "project:"))))
+
+    (it "handles directory buffers without workspace"
+      (spy-on 'macher-workspace :and-return-value nil)
+      (let ((dired-directory temp-dir))
+        (with-temp-buffer
+          (let ((result (macher--focus-string-default)))
+            (expect result :to-match "directory:")
+            (expect result :not :to-match "project:")))))
+
+    (it "handles non-file non-directory buffers with workspace"
+      (with-temp-buffer
+        (setq-local macher--workspace (cons 'file temp-dir))
+        (let ((result (macher--focus-string-default)))
+          (expect result :to-match "buffer:")
+          (expect result :to-match "project:"))))
+
+    (it "handles non-file non-directory buffers without workspace"
+      (spy-on 'macher-workspace :and-return-value nil)
+      (with-temp-buffer
+        (let ((result (macher--focus-string-default)))
+          (expect result :to-match "buffer:")
+          (expect result :not :to-match "project:")))))
+
+  (describe "macher-focus-string"
+    (it "returns result from function when variable is a function"
+      (let ((macher-focus-string (lambda () "test-focus")))
+        (expect (macher-focus-string) :to-equal "test-focus")))
+
+    (it "evaluates sexp when variable is a sexp"
+      (let ((macher-focus-string '(concat "test" "-" "sexp")))
+        (expect (macher-focus-string) :to-equal "test-sexp")))
+
+    (it "yanks to kill ring when called interactively"
+      (let ((macher-focus-string (lambda () "interactive-test"))
+            (kill-ring nil))
+        (macher-focus-string t)
+        (expect (car kill-ring) :to-equal "interactive-test"))))
+
   (describe "macher--implement-prompt"
     :var (temp-file)
 
@@ -4964,20 +5116,16 @@
       (when (file-exists-p temp-file)
         (delete-file temp-file)))
 
-    (it "includes gptel--strip-mode-suffix result for common modes"
-      ;; Test with a JavaScript file to verify language detection.
+    (it "includes focus description with correct language"
       (with-temp-buffer
         (find-file temp-file)
-        ;; Use a mode that's specifically handled by gptel--strip-mode-suffix.
-        (sh-mode)
-        ;; Set the buffer-local workspace variable.
-        (setq-local macher--workspace (cons 'file temp-file))
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
         (let ((prompt (macher--implement-prompt "Add error handling" nil)))
-          ;; The prompt should contain "Javascript" (or similar) as the language.
-          ;; This verifies that our condition-case approach works correctly.
-          (expect prompt :to-match "Shell")
+          ;; gptel--strip-mode-suffix returns "js" for js-mode.
+          (expect prompt :to-match "language: js")
           (expect prompt :to-match "Add error handling")
-          (expect prompt :to-match "IMPLEMENTATION REQUEST"))))
+          (expect prompt :to-match "Implementation request"))))
 
     (it "falls back to mode-name when gptel--strip-mode-suffix fails"
       ;; Temporarily override gptel--strip-mode-suffix to simulate an error.
@@ -4985,13 +5133,11 @@
       (with-temp-buffer
         (find-file temp-file)
         (js-mode)
-        ;; Set the buffer-local workspace variable.
-        (setq-local macher--workspace (cons 'file temp-file))
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
         (let ((prompt (macher--implement-prompt "Add error handling" nil)))
-          ;; Should fall back to using mode-name format.
-          (expect prompt :to-be-truthy)
+          ;; Should fall back to format-mode-line, which may be empty in batch mode.
+          (expect prompt :to-match "language:")
           (expect prompt :to-match "Add error handling")
-          ;; Should not contain the error itself.
           (expect prompt :not :to-match "Simulated error"))))
 
     (it "handles case where gptel--strip-mode-suffix doesn't exist"
@@ -5003,14 +5149,174 @@
               (with-temp-buffer
                 (find-file temp-file)
                 (js-mode)
-                ;; Set the buffer-local workspace variable.
-                (setq-local macher--workspace (cons 'file temp-file))
+                (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
                 (let ((prompt (macher--implement-prompt "Add error handling" nil)))
-                  ;; Should still work by falling back to mode-name.
-                  (expect prompt :to-be-truthy)
+                  ;; Should fall back to format-mode-line, which may be empty in batch mode.
+                  (expect prompt :to-match "language:")
                   (expect prompt :to-match "Add error handling"))))
           ;; Restore the original function.
-          (fset 'gptel--strip-mode-suffix original-function)))))
+          (fset 'gptel--strip-mode-suffix original-function))))
+
+    (it "works without a workspace"
+      (spy-on 'macher-workspace :and-return-value nil)
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (let ((prompt (macher--implement-prompt "Add error handling" nil)))
+          (expect prompt :to-match "language: js")
+          (expect prompt :to-match "Add error handling")
+          (expect prompt :to-match "Implementation request")
+          (expect prompt
+                  :to-match "Current editor context (may or may not be relevant to this request):")
+          ;; Should not have project name when no workspace.
+          (expect prompt :not :to-match "project:")))))
+
+  (describe "macher--revise-prompt"
+    :var (temp-file temp-patch-buffer)
+
+    (before-each
+      (setq temp-file (make-temp-file "macher-test" nil ".js"))
+      (with-temp-buffer
+        (insert "// Test JavaScript file\nfunction test() {}\n")
+        (write-region (point-min) (point-max) temp-file))
+      ;; Create a mock patch buffer.
+      (setq temp-patch-buffer (generate-new-buffer " *macher-test-patch*"))
+      (with-current-buffer temp-patch-buffer
+        (insert "diff --git a/test.js b/test.js\n")
+        (insert "--- a/test.js\n")
+        (insert "+++ b/test.js\n")
+        (insert "@@ -1,2 +1,3 @@\n")
+        (insert " // Test file\n")
+        (insert " function test() {\n")
+        (insert "+  return 42;\n")
+        (insert " }\n")))
+
+    (after-each
+      (when (file-exists-p temp-file)
+        (delete-file temp-file))
+      (when (buffer-live-p temp-patch-buffer)
+        (kill-buffer temp-patch-buffer)))
+
+    (it "includes revision instructions when provided"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((prompt (macher--revise-prompt "Fix the indentation" nil temp-patch-buffer)))
+          (expect prompt :to-match "Revise your previous work based on these instructions:")
+          (expect prompt :to-match "Fix the indentation")
+          (expect prompt :to-match "Your previous work:")
+          (expect prompt :to-match "```")
+          (expect prompt :to-match "diff --git"))))
+
+    (it "handles empty revision instructions"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((prompt (macher--revise-prompt "" nil temp-patch-buffer)))
+          (expect prompt :to-match "Revise your previous work\\.")
+          (expect prompt :not :to-match "instructions:")
+          (expect prompt :to-match "Your previous work:")
+          (expect prompt :to-match "```"))))
+
+    (it "handles nil revision instructions"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((prompt (macher--revise-prompt nil nil temp-patch-buffer)))
+          (expect prompt :to-match "Revise your previous work\\.")
+          (expect prompt :to-match "Your previous work:")
+          (expect prompt :to-match "```"))))
+
+    (it "includes focus description"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((prompt (macher--revise-prompt "Improve error handling" nil temp-patch-buffer)))
+          (expect prompt
+                  :to-match "Current editor context (may or may not be relevant to this request):")
+          (expect prompt :to-match "```"))))
+
+    (it "errors when no patch buffer exists"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (expect (macher--revise-prompt "Fix it" nil nil)
+                :to-throw
+                'user-error
+                '("No patch buffer found for revision"))))
+
+    (it "works without a workspace"
+      (spy-on 'macher-workspace :and-return-value nil)
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (let ((prompt (macher--revise-prompt "Fix the indentation" nil temp-patch-buffer)))
+          (expect prompt :to-match "Revise your previous work")
+          (expect prompt :to-match "Fix the indentation")
+          (expect prompt :to-match "Your previous work:")
+          (expect prompt
+                  :to-match "Current editor context (may or may not be relevant to this request):")
+          ;; Should not have project name when no workspace.
+          (expect prompt :not :to-match "project:")))))
+
+  (describe "macher--discuss-prompt"
+    :var (temp-file)
+
+    (before-each
+      (setq temp-file (make-temp-file "macher-test" nil ".js"))
+      (with-temp-buffer
+        (insert "// Test JavaScript file\nfunction test() {}\n")
+        (write-region (point-min) (point-max) temp-file)))
+
+    (after-each
+      (when (file-exists-p temp-file)
+        (delete-file temp-file)))
+
+    (it "includes focus description with workspace"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((prompt (macher--discuss-prompt "What does this code do?" nil)))
+          (expect prompt
+                  :to-match "Current editor context (may or may not be relevant to this request):")
+          (expect prompt :to-match "```")
+          (expect prompt :to-match "project:")
+          (expect prompt :to-match "What does this code do?"))))
+
+    (it "includes focus description without workspace"
+      (spy-on 'macher-workspace :and-return-value nil)
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (let ((prompt (macher--discuss-prompt "Explain this function" nil)))
+          (expect prompt
+                  :to-match "Current editor context (may or may not be relevant to this request):")
+          (expect prompt :to-match "```")
+          (expect prompt :not :to-match "project:")
+          (expect prompt :to-match "Explain this function"))))
+
+    (it "handles input when focus description is nil"
+      (spy-on 'macher-focus-string :and-return-value nil)
+      (let ((prompt (macher--discuss-prompt "General question" nil)))
+        (expect prompt
+                :not
+                :to-match "Current editor context (may or may not be relevant to this request):")
+        (expect prompt :to-equal "General question")))
+
+    (it "preserves input text exactly"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((input "How can I optimize this?\nWith multiple lines."))
+          (let ((prompt (macher--discuss-prompt input nil)))
+            (expect prompt :to-match (regexp-quote input)))))))
 
   (describe "macher--resolve-workspace-path"
     :var
