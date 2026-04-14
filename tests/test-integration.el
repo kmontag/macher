@@ -79,6 +79,7 @@ This prevents test flakiness from duplicate callback invocations."
    (original-project-vc-extra-root-markers project-vc-extra-root-markers)
    (original-gptel-backend gptel-backend)
    (original-gptel--known-backends gptel--known-backends)
+   (original-gptel--known-backends-length (length gptel--known-backends))
    (original-gptel-model gptel-model)
    (original-gptel-stream gptel-stream)
    (original-gptel-use-curl gptel-use-curl)
@@ -348,7 +349,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
     (gptel-context-remove-all)
     ;; Remove any newly-created backends from the registry.
     (setq gptel--known-backends original-gptel--known-backends)
-    (expect (length gptel--known-backends) :to-be 1)
+    ;; Sanity check that the original list wasn't mutated by reference during the test.
+    (expect (length gptel--known-backends) :to-equal original-gptel--known-backends-length)
     ;; Reset variables that may have changed.
     (setq project-dir nil)
     (setq project-file nil)
