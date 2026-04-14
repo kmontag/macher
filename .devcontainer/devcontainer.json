@@ -1,0 +1,7 @@
+{
+  "name": "macher",
+  "build": {
+    "dockerfile": "Containerfile"
+  },
+  "postCreateCommand": "npm install"
+}

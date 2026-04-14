@@ -1,0 +1,2 @@
+FROM node:24-alpine3.23
+RUN apk add bash emacs-nox git grep make patch python3
