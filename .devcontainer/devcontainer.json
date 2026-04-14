@@ -4,5 +4,5 @@
     "dockerfile": "Containerfile",
     "context": ".."
   },
-  "postCreateCommand": "eask install-deps --dev && cp .eask/*/elpa/buttercup-*/buttercup.el .eask/buttercup.el && cp .eask/*/elpa/gptel-*/gptel.el .eask/gptel.el && cp .eask/*/elpa/gptel-*/gptel-ollama.el .eask/gptel-ollama.el"
+  "postCreateCommand": "npm install"
 }
