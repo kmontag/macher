@@ -4801,9 +4801,7 @@
         (let ((found-handler-states nil)
               (expected-handler-states
                (cl-delete-duplicates
-                (mapcan (lambda (row)
-                          (mapcar #'cdr (cdr row)))
-                        gptel-request--transitions))))
+                (mapcan (lambda (row) (mapcar #'cdr (cdr row))) gptel-request--transitions))))
           (dolist (state-handlers (gptel-fsm-handlers fsm))
             (when (member test-handler (cdr state-handlers))
               (push (car state-handlers) found-handler-states)))

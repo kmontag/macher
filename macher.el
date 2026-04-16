@@ -1319,7 +1319,7 @@ Returns (file . FILENAME) if the buffer is visiting a file, nil otherwise."
   "Get the project name for PROJECT-ID using project.el."
   (require 'project)
   (if-let ((project (project-current nil project-id)))
-    (project-name project)
+      (project-name project)
     ;; Get the last directory name from the root (trailing slash removed).
     (file-name-nondirectory (directory-file-name project-id))))
 
@@ -2192,12 +2192,12 @@ Signals an error if the directory is not found in the workspace."
          (get-file-content-size
           (file-path) "Get the size of FILE-PATH, considering context modifications."
           (if-let ((entry (assoc (macher--normalize-path file-path) context-contents)))
-            (let* ((contents (cdr entry))
-                   (new-content (cdr contents)))
-              (if new-content
-                  (length new-content)
-                ;; File is deleted in context, so size is 0.
-                0))
+              (let* ((contents (cdr entry))
+                     (new-content (cdr contents)))
+                (if new-content
+                    (length new-content)
+                  ;; File is deleted in context, so size is 0.
+                  0))
             ;; Not in context, get size from disk.
             (if (file-exists-p file-path)
                 (file-attribute-size (file-attributes file-path))
@@ -3562,15 +3562,15 @@ CALLBACK takes no arguments."
     ;; calls) once there's a gptel release that includes
     ;; https://github.com/karthink/gptel/pull/1192.
     (if-let ((parents (plist-get preset-for-gptel :parents)))
-      ;; If the current preset has any parents, apply them and call this function recursively with
-      ;; one parent popped from the front of the list.
-      (let* ((first-parent (car parents))
-             (remaining-parents (cdr parents)))
-        (macher--with-preset
-         first-parent
-         (lambda ()
-           (macher--with-preset
-            (plist-put (copy-sequence preset-for-gptel) :parents remaining-parents) callback))))
+        ;; If the current preset has any parents, apply them and call this function recursively with
+        ;; one parent popped from the front of the list.
+        (let* ((first-parent (car parents))
+               (remaining-parents (cdr parents)))
+          (macher--with-preset
+           first-parent
+           (lambda ()
+             (macher--with-preset
+              (plist-put (copy-sequence preset-for-gptel) :parents remaining-parents) callback))))
       (gptel-with-preset preset-for-gptel (funcall callback)))))
 
 (defun macher--parse-directive (directive)
@@ -3856,20 +3856,20 @@ CALLBACK and FSM are as described in the
                 (setq context-or-t
                       (if (buffer-live-p buffer)
                           (if-let ((workspace (macher-workspace buffer)))
-                            ;; If we found a workspace, perform context initialization.
-                            (let ((context
-                                   (macher--make-context
-                                    :workspace workspace
-                                    :prompt prompt
-                                    :process-request-function process-request-function)))
-                              ;; Store the context on the FSM, so we can look it up e.g. for
-                              ;; processing later.
-                              (setq info (plist-put info :macher--context context))
-                              (setf (gptel-fsm-info fsm) info)
-                              ;; Mark this FSM as the most recent macher request.
-                              (with-current-buffer buffer
-                                (setq macher--fsm-latest fsm))
-                              context)
+                              ;; If we found a workspace, perform context initialization.
+                              (let ((context
+                                     (macher--make-context
+                                      :workspace workspace
+                                      :prompt prompt
+                                      :process-request-function process-request-function)))
+                                ;; Store the context on the FSM, so we can look it up e.g. for
+                                ;; processing later.
+                                (setq info (plist-put info :macher--context context))
+                                (setf (gptel-fsm-info fsm) info)
+                                ;; Mark this FSM as the most recent macher request.
+                                (with-current-buffer buffer
+                                  (setq macher--fsm-latest fsm))
+                                context)
                             ;; Request buffer live but no workspace found.
                             t)
                         ;; Request buffer not live - no workspace can be found.
