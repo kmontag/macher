@@ -4796,13 +4796,17 @@
 
         ;; Verify that our handler was actually added to the FSM in the right places.
         (expect (gptel-fsm-handlers fsm) :not :to-equal original-handlers)
-        (let ((found-handler-states nil))
+        ;; Compute expected target states dynamically from the transitions table,
+        ;; so this test doesn't break when gptel adds new FSM states.
+        (let ((found-handler-states nil)
+              (expected-handler-states
+               (cl-delete-duplicates
+                (mapcan (lambda (row) (mapcar #'cdr (cdr row))) gptel-request--transitions))))
           (dolist (state-handlers (gptel-fsm-handlers fsm))
             (when (member test-handler (cdr state-handlers))
               (push (car state-handlers) found-handler-states)))
-          (let ((expected-handler-states '(DONE ERRS TOOL TYPE WAIT)))
-            (expect (length found-handler-states) :to-equal (length expected-handler-states))
-            (expect found-handler-states :to-have-same-items-as expected-handler-states))))))
+          (expect (length found-handler-states) :to-equal (length expected-handler-states))
+          (expect found-handler-states :to-have-same-items-as expected-handler-states)))))
 
   (describe "macher--add-termination-handler"
     :var (fsm test-handler handler-calls)

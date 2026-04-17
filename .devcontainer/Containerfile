@@ -1,0 +1,7 @@
+FROM node:24-alpine3.23
+RUN apk add bash emacs-nox git grep make patch python3
+
+# Warm the npm cache so postCreateCommand is fast.
+WORKDIR /tmp/macher-deps
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts && rm -rf /tmp/macher-deps

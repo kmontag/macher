@@ -59,10 +59,18 @@ format.check: format.elisp.check format.prettier.check
 PYTHON3 := $(shell which python3)
 
 # Common setup for elisp-autofmt commands. Notes:
+#
 # - We use editorconfig-apply to respect .editorconfig settings (e.g. fill-column).
-# - elisp-autofmt--workaround-make-proc forces use of call-process instead of make-process,
-#   which works around subprocess communication issues in Nix-isolated CI environments.
+#
+# - elisp-autofmt--workaround-make-proc forces use of call-process instead of make-process, which
+#   works around subprocess communication issues in Nix-isolated CI environments.
+#
 # - .eask/*.el provides macro definitions so test files are formatted correctly.
+#
+# - The advice strips harmless "JSON definition:" stderr from elisp-autofmt's Python subprocess.
+#   Without this, null hints in cached defs cause warnings that make elisp-autofmt-buffer return nil
+#   (might be worth filing an issue upstream, see
+#   https://codeberg.org/ideasman42/emacs-elisp-autofmt/commit/4436178ae0954c5c52d27571e7f2c5c31f5638b2).
 define ELISP_AUTOFMT_SETUP
 --eval "(require 'editorconfig)" \
 --eval "(require 'elisp-autofmt)" \
@@ -70,7 +78,8 @@ define ELISP_AUTOFMT_SETUP
 --eval "(setq elisp-autofmt-python-bin \"$(PYTHON3)\")" \
 -l .eask/buttercup.el \
 -l .eask/gptel.el \
--l .eask/gptel-ollama.el
+-l .eask/gptel-ollama.el \
+--eval "(advice-add 'elisp-autofmt--call-process :filter-return (lambda (r) (let ((stderr (cdr r))) (if (and stderr (string-empty-p (replace-regexp-in-string \"JSON definition:.*\\n?\" \"\" stderr))) (cons (car r) nil) r))))"
 endef
 
 .PHONY: format.elisp
