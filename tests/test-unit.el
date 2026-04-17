@@ -235,7 +235,20 @@
                   :to-equal '("hello world hello universe" . "hi world hi universe"))))
       (it "sets the dirty-p flag"
         (macher--tool-edit-file context temp-file "original" "modified" nil)
-        (expect (macher-context-dirty-p context) :to-be-truthy))))
+        (expect (macher-context-dirty-p context) :to-be-truthy))
+      (it "errors when workspace-files includes a file not on disk"
+        (let ((proj-dir (make-temp-file "macher-test-edit-proj" t)))
+          (write-region "" nil (expand-file-name ".project" proj-dir))
+          (write-region "real" nil (expand-file-name "real.txt" proj-dir))
+          (let ((ctx (macher--make-context
+                      :workspace (cons 'project (file-name-as-directory proj-dir)))))
+            (spy-on 'macher--workspace-files
+                    :and-return-value
+                    (list (expand-file-name "real.txt" proj-dir)
+                          (expand-file-name "ghost.txt" proj-dir)))
+            (unwind-protect
+                (expect (macher--tool-edit-file ctx "ghost.txt" "old" "new" nil) :to-throw)
+              (delete-directory proj-dir t)))))))
 
   (describe "macher--process-request"
     :var (context fsm temp-file build-patch-called)
@@ -2785,7 +2798,18 @@
           ;; 0.4 should round to 0 (no extra lines).
           (expect result-0.4 :to-match "hello")
           ;; 0.6 should round to 1 (1 extra line).
-          (expect result-0.6 :to-match "hello")))))
+          (expect result-0.6 :to-match "hello"))))
+
+    (it "search handles nonexistent files in workspace gracefully"
+      ;; When workspace-files includes a file that doesn't exist on disk,
+      ;; search should still work, treating the missing file as empty.
+      (spy-on 'macher--workspace-files
+              :and-return-value
+              (list (expand-file-name "file1.txt" temp-dir)
+                    (expand-file-name "ghost.txt" temp-dir)))
+      (let ((result (macher--tool-search-helper context "hello")))
+        (expect result :to-match "file1.txt")
+        (expect result :not :to-match "ghost.txt"))))
 
   (describe "macher--tool-read-file"
     :var (context temp-dir)
@@ -2862,6 +2886,15 @@
 
     (it "signals error for non-existent files"
       (expect (macher--tool-read-file context "nonexistent.txt") :to-throw))
+
+    (it "errors when workspace-files includes a file not on disk"
+      ;; When a custom workspace type's :get-files returns stale entries,
+      ;; read-file should error rather than silently returning nil.
+      (spy-on 'macher--workspace-files
+              :and-return-value
+              (list (expand-file-name "test-file.txt" temp-dir)
+                    (expand-file-name "ghost.txt" temp-dir)))
+      (expect (macher--tool-read-file context "ghost.txt") :to-throw))
 
     (describe "float parameter handling"
       (it "handles float offset values by rounding them"
@@ -6763,7 +6796,176 @@
                     (goto-char (point-min))
                     (while (search-forward macher-context-string-marker-start nil t)
                       (setq marker-count (1+ marker-count))))
-                  (expect marker-count :to-equal 1))))))))))
+                  (expect marker-count :to-equal 1)))))))))
+
+  ;; Custom project type for mock-remote test paths.
+  (cl-defmethod project-root ((proj (head test-remote-project)))
+    (cadr proj))
+  (cl-defmethod project-files ((proj (head test-remote-project)) &optional _dirs)
+    (caddr proj))
+
+  (describe "remote workspace compatibility"
+    :var (temp-dir remote-root remote-call-count remote-handler
+          saved-handler-alist saved-find-functions)
+
+    (before-each
+      (setq temp-dir (make-temp-file "macher-test-remote" t))
+      (setq saved-handler-alist file-name-handler-alist)
+      (setq saved-find-functions project-find-functions)
+
+      ;; Build mock remote file handler.  Paths prefixed with
+      ;; /mock-remote: are routed through this handler, which strips the
+      ;; prefix and delegates to the local filesystem — reproducing the
+      ;; key TRAMP behaviors (xref path stripping, per-file handler
+      ;; dispatch).
+      (let* ((prefix "/mock-remote:")
+             (rx "\\`/mock-remote:")
+             (strip (lambda (path)
+                      (if (string-match-p rx path)
+                          (substring path (length prefix))
+                        path))))
+
+        (setq remote-root (concat prefix (file-name-as-directory temp-dir)))
+        (setq remote-call-count 0)
+
+        (setq remote-handler
+              (lambda (operation &rest args)
+                ;; Count I/O operations that would be network round-trips.
+                (when (memq operation
+                            '(file-exists-p file-readable-p file-attributes
+                              insert-file-contents process-file
+                              start-file-process directory-files
+                              vc-registered))
+                  (setq remote-call-count (1+ remote-call-count)))
+                (cond
+                 ;; Report as remote so xref takes the remote code path.
+                 ((eq operation 'file-remote-p)
+                  (when (string-match-p rx (car args))
+                    (pcase (cadr args)
+                      ('nil prefix)
+                      ('localname (funcall strip (car args)))
+                      ('method "mock-remote")
+                      ('host "localhost")
+                      (_ nil))))
+                 ;; Preserve prefix through path expansion.
+                 ((eq operation 'expand-file-name)
+                  (concat prefix
+                          (expand-file-name
+                           (funcall strip (car args))
+                           (and (cadr args) (funcall strip (cadr args))))))
+                 ((eq operation 'file-name-directory)
+                  (let ((dir (file-name-directory (funcall strip (car args)))))
+                    (and dir (concat prefix dir))))
+                 ((eq operation 'file-name-as-directory)
+                  (concat prefix
+                          (file-name-as-directory (funcall strip (car args)))))
+                 ((eq operation 'directory-file-name)
+                  (concat prefix
+                          (directory-file-name (funcall strip (car args)))))
+                 ((eq operation 'file-truename)
+                  (concat prefix (file-truename (funcall strip (car args)))))
+                 ;; Reproduce the TRAMP behavior: when xref returns a local
+                 ;; path and the workspace root is remote,
+                 ;; file-relative-name can't relativize them.
+                 ((eq operation 'file-relative-name)
+                  (let ((name (car args))
+                        (dir (cadr args)))
+                    (if (and dir
+                             (not (string-match-p rx name))
+                             (string-match-p rx dir))
+                        name
+                      (file-relative-name (funcall strip name)
+                                          (and dir (funcall strip dir))))))
+                 ;; Run processes locally.
+                 ((eq operation 'process-file)
+                  (let ((default-directory (funcall strip default-directory)))
+                    (apply #'call-process args)))
+                 ((eq operation 'start-file-process)
+                  (let ((default-directory (funcall strip default-directory)))
+                    (apply #'start-process args)))
+                 ((eq operation 'unhandled-file-name-directory)
+                  nil)
+                 ;; Default: strip prefix, delegate locally.
+                 (t
+                  (let ((file-name-handler-alist
+                         (cl-remove-if
+                          (lambda (e) (eq (cdr e) remote-handler))
+                          file-name-handler-alist)))
+                    (apply operation
+                           (mapcar (lambda (a)
+                                     (if (and (stringp a)
+                                              (string-match-p rx a))
+                                         (funcall strip a)
+                                       a))
+                                   args)))))))
+
+        ;; Register handler and project finder.
+        (push (cons rx remote-handler) file-name-handler-alist)
+
+        (let ((files (mapcar (lambda (f)
+                               (concat prefix (expand-file-name f temp-dir)))
+                             '("src/main.py" "src/util.py"))))
+          (push (lambda (dir)
+                  (when (string-match-p rx dir)
+                    (list 'test-remote-project dir files)))
+                project-find-functions)))
+
+      ;; Create test files.
+      (make-directory (expand-file-name "src" temp-dir))
+      (write-region "hello world" nil (expand-file-name "src/main.py" temp-dir))
+      (write-region "hello again" nil (expand-file-name "src/util.py" temp-dir))
+      (write-region "" nil (expand-file-name ".project" temp-dir)))
+
+    (after-each
+      (setq file-name-handler-alist saved-handler-alist)
+      (setq project-find-functions saved-find-functions)
+      (when (and temp-dir (file-exists-p temp-dir))
+        (delete-directory temp-dir t)))
+
+    (it "search produces correct relative paths over a remote connection"
+      ;; Over a remote connection, xref-matches-in-files strips the remote
+      ;; prefix from result paths (e.g. /ssh:host:/path/file becomes
+      ;; /path/file).  The search function must still produce correct
+      ;; relative paths despite this mismatch.
+      (let* ((context (macher--make-context
+                       :workspace (cons 'project remote-root)))
+             (result (macher--search-get-xref-matches context "hello")))
+        (expect result :to-be-truthy)
+        (expect (assoc "src/main.py" result) :to-be-truthy)
+        (expect (assoc "src/util.py" result) :to-be-truthy)
+        (dolist (entry result)
+          (expect (file-name-absolute-p (car entry)) :to-be nil))))
+
+    (it "search does not make O(N) remote calls for N workspace files"
+      ;; When each workspace file triggers individual I/O operations (e.g.
+      ;; per-file existence checks), every one becomes a round-trip over a
+      ;; remote connection.  The total I/O call count should stay sub-linear
+      ;; in the number of workspace files.
+      (dotimes (i 20)
+        (write-region (format "hello from file %d" i) nil
+                      (expand-file-name (format "file_%d.txt" i) temp-dir)))
+
+      ;; Override project finder for the 20-file workspace.
+      (let* ((files (mapcar (lambda (i)
+                              (concat "/mock-remote:"
+                                      (expand-file-name
+                                       (format "file_%d.txt" i) temp-dir)))
+                            (number-sequence 0 19)))
+             (project-find-functions
+              (cons (lambda (dir)
+                      (when (string-match-p "\\`/mock-remote:" dir)
+                        (list 'test-remote-project dir files)))
+                    project-find-functions)))
+
+        (setq remote-call-count 0)
+        (let ((context (macher--make-context
+                        :workspace (cons 'project remote-root))))
+          (macher--tool-search context "hello" nil nil "files"))
+
+        ;; With 20 files and per-file I/O checks, the handler is invoked
+        ;; many more times than the file count.  After removing per-file
+        ;; round-trips, the count should drop well below N.
+        (expect remote-call-count :to-be-less-than 20)))))
 
 (provide 'test-unit)
 ;;; test-unit.el ends here
