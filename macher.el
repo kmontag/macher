@@ -1338,8 +1338,11 @@ Returns a list of relative file paths."
   (require 'project)
   (when-let* ((proj (project-current nil project-id))
               (files (project-files proj)))
-    ;; Return files relative to project root.
-    (mapcar (lambda (f) (file-relative-name f project-id)) files)))
+    ;; Return files relative to project root.  When project-id is a
+    ;; remote (TRAMP) path, project-files returns local paths without
+    ;; the remote prefix, so we relativize against the local part.
+    (let ((rel-base (or (file-remote-p project-id 'localname) project-id)))
+      (mapcar (lambda (f) (file-relative-name f rel-base)) files))))
 
 (defun macher-workspace (&optional buffer)
   "Get the workspace information for BUFFER.
@@ -2668,10 +2671,12 @@ the `xref-search-program' to perform the search."
                                (file-relative-name full-path workspace-root))))
                         (string-match-p file-regexp rel-path))
                     t)
-                  ;; File exists or has content in context.
-                  (or (file-exists-p full-path)
-                      (let ((entry (assoc (macher--normalize-path full-path) context-contents)))
-                        (and entry (cdr (cdr entry))))))))
+                  ;; Skip per-file existence checks to avoid O(N)
+                  ;; remote round-trips over TRAMP.  Workspace files
+                  ;; come from project-files and are expected to exist;
+                  ;; non-existent files produce no grep matches.
+                  ;; Context-deleted files are filtered out later.
+                  t)))
              workspace-files))
            ;; Add any context-only files that match our criteria.
            (context-only-files
@@ -2759,7 +2764,12 @@ the `xref-search-program' to perform the search."
                             ;; Path is a single file, use the original path parameter.
                             path
                           ;; Otherwise, always relative to workspace root.
-                          (file-relative-name original-file workspace-root))))
+                          ;; Over TRAMP, xref returns local paths without
+                          ;; the remote prefix, so relativize against the
+                          ;; local part of workspace-root.
+                          (file-relative-name original-file
+                            (or (file-remote-p workspace-root 'localname)
+                                workspace-root)))))
 
                     ;; Group results by file for proper formatting.
                     (let ((file-entry (assoc rel-path results)))
