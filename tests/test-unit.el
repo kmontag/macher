@@ -6945,9 +6945,9 @@
                       :workspace (cons 'project remote-root))))
         (macher--tool-search context "hello" nil nil "files"))
 
-      ;; With 20 files and per-file I/O checks, the handler is invoked
-      ;; many more times than the file count.  After removing per-file
-      ;; round-trips, the count should drop well below N.
+      ;; The total I/O call count should stay well below the number
+      ;; of workspace files — per-file remote calls (like file-exists-p)
+      ;; would push the count above 20.
       (expect remote-call-count :to-be-less-than 20))))
 
 (provide 'test-unit)

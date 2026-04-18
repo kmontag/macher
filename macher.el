@@ -2671,11 +2671,11 @@ the `xref-search-program' to perform the search."
                                (file-relative-name full-path workspace-root))))
                         (string-match-p file-regexp rel-path))
                     t)
-                  ;; Skip per-file existence checks to avoid O(N)
-                  ;; remote round-trips over TRAMP.  Workspace files
-                  ;; come from project-files and are expected to exist;
-                  ;; non-existent files produce no grep matches.
-                  ;; Context-deleted files are filtered out later.
+                  ;; Workspace files come from project-files and are
+                  ;; expected to exist.  Checking per-file with
+                  ;; file-exists-p is expensive over TRAMP (each call
+                  ;; is a remote round-trip), and unnecessary — the
+                  ;; search backend (grep/rg) skips missing files.
                   t)))
              workspace-files))
            ;; Add any context-only files that match our criteria.
@@ -2764,9 +2764,9 @@ the `xref-search-program' to perform the search."
                             ;; Path is a single file, use the original path parameter.
                             path
                           ;; Otherwise, always relative to workspace root.
-                          ;; Over TRAMP, xref returns local paths without
-                          ;; the remote prefix, so relativize against the
-                          ;; local part of workspace-root.
+                          ;; When workspace-root is remote, xref result
+                          ;; paths lack the TRAMP prefix, so relativize
+                          ;; against the local part of workspace-root.
                           (file-relative-name original-file
                             (or (file-remote-p workspace-root 'localname)
                                 workspace-root)))))
