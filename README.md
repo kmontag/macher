@@ -2,7 +2,7 @@
 
 A project-aware LLM editing toolset for Emacs, built on [gptel](https://github.com/karthink/gptel).
 
-https://github.com/user-attachments/assets/82c822fe-35e9-47a2-87db-b4dba2432d1b
+https://github.com/user-attachments/assets/af8bed3d-913b-4365-9f71-85d969810d22
 
 ## What is macher?
 
@@ -81,7 +81,7 @@ if you want more specifics. Action commands will work regardless of whether you'
 After calling `(macher-install)`, you can use macher presets and tools in any gptel request or
 buffer.
 
-https://github.com/user-attachments/assets/9b3e0734-5907-4e01-a356-6f9066d7b844
+https://github.com/user-attachments/assets/d6a5c8ee-559e-42ab-a240-381f7187cb06
 
 Built-in presets:
 
