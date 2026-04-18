@@ -6798,20 +6798,25 @@
                       (setq marker-count (1+ marker-count))))
                   (expect marker-count :to-equal 1)))))))))
 
-  ;; Custom project type for mock-remote test paths.
-  (cl-defmethod project-root ((proj (head test-remote-project)))
-    (cadr proj))
-  (cl-defmethod project-files ((proj (head test-remote-project)) &optional _dirs)
-    (caddr proj))
-
   (describe "remote workspace compatibility"
     :var (temp-dir remote-root remote-call-count remote-handler
-          saved-handler-alist saved-find-functions)
+          saved-handler-alist)
 
     (before-each
       (setq temp-dir (make-temp-file "macher-test-remote" t))
       (setq saved-handler-alist file-name-handler-alist)
-      (setq saved-find-functions project-find-functions)
+
+      ;; Create test files and initialize a git repo so project-vc
+      ;; discovers the project naturally through the mock file handler.
+      (make-directory (expand-file-name "src" temp-dir))
+      (write-region "hello world" nil (expand-file-name "src/main.py" temp-dir))
+      (write-region "hello again" nil (expand-file-name "src/util.py" temp-dir))
+      (let ((default-directory temp-dir))
+        (call-process "git" nil nil nil "init")
+        (call-process "git" nil nil nil "add" ".")
+        (call-process "git" nil nil nil
+                      "-c" "user.name=test" "-c" "user.email=test@test"
+                      "commit" "-m" "init"))
 
       ;; Build mock remote file handler.  Paths prefixed with
       ;; /mock-remote: are routed through this handler, which strips the
@@ -6899,26 +6904,11 @@
                                        a))
                                    args)))))))
 
-        ;; Register handler and project finder.
-        (push (cons rx remote-handler) file-name-handler-alist)
-
-        (let ((files (mapcar (lambda (f)
-                               (concat prefix (expand-file-name f temp-dir)))
-                             '("src/main.py" "src/util.py"))))
-          (push (lambda (dir)
-                  (when (string-match-p rx dir)
-                    (list 'test-remote-project dir files)))
-                project-find-functions)))
-
-      ;; Create test files.
-      (make-directory (expand-file-name "src" temp-dir))
-      (write-region "hello world" nil (expand-file-name "src/main.py" temp-dir))
-      (write-region "hello again" nil (expand-file-name "src/util.py" temp-dir))
-      (write-region "" nil (expand-file-name ".project" temp-dir)))
+        ;; Register handler.
+        (push (cons rx remote-handler) file-name-handler-alist)))
 
     (after-each
       (setq file-name-handler-alist saved-handler-alist)
-      (setq project-find-functions saved-find-functions)
       (when (and temp-dir (file-exists-p temp-dir))
         (delete-directory temp-dir t)))
 
@@ -6944,28 +6934,21 @@
       (dotimes (i 20)
         (write-region (format "hello from file %d" i) nil
                       (expand-file-name (format "file_%d.txt" i) temp-dir)))
+      (let ((default-directory temp-dir))
+        (call-process "git" nil nil nil "add" ".")
+        (call-process "git" nil nil nil
+                      "-c" "user.name=test" "-c" "user.email=test@test"
+                      "commit" "-m" "add test files"))
 
-      ;; Override project finder for the 20-file workspace.
-      (let* ((files (mapcar (lambda (i)
-                              (concat "/mock-remote:"
-                                      (expand-file-name
-                                       (format "file_%d.txt" i) temp-dir)))
-                            (number-sequence 0 19)))
-             (project-find-functions
-              (cons (lambda (dir)
-                      (when (string-match-p "\\`/mock-remote:" dir)
-                        (list 'test-remote-project dir files)))
-                    project-find-functions)))
+      (setq remote-call-count 0)
+      (let ((context (macher--make-context
+                      :workspace (cons 'project remote-root))))
+        (macher--tool-search context "hello" nil nil "files"))
 
-        (setq remote-call-count 0)
-        (let ((context (macher--make-context
-                        :workspace (cons 'project remote-root))))
-          (macher--tool-search context "hello" nil nil "files"))
-
-        ;; With 20 files and per-file I/O checks, the handler is invoked
-        ;; many more times than the file count.  After removing per-file
-        ;; round-trips, the count should drop well below N.
-        (expect remote-call-count :to-be-less-than 20)))))
+      ;; With 20 files and per-file I/O checks, the handler is invoked
+      ;; many more times than the file count.  After removing per-file
+      ;; round-trips, the count should drop well below N.
+      (expect remote-call-count :to-be-less-than 20))))
 
 (provide 'test-unit)
 ;;; test-unit.el ends here
