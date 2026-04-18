@@ -2352,42 +2352,38 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
      ;; error/abort cases, there's no trailing prefix since no follow-up request has been started.
      (action-buffer-content
       (lambda (request response action include-trailing-prefix)
-        (format (concat
-                 ;; Header.
-                 "### `%s` %s\n"
-                 ;; Full prompt.
-                 "```\n%s%s\n```\n"
-                 ;; Response (may be empty for error/abort).
-                 "%s"
-                 ;; Trailing prefix only for successful responses.
-                 (if include-trailing-prefix
-                     "\n### "
-                   ""))
-                action request
-                (if (macher-focus-string)
-                    (concat macher--action-focus-prefix (macher-focus-string) "\n")
-                  "")
-                request response)))
+        (concat
+         ;; Prefix.
+         "### "
+         ;; Full prompt (with focus if available).
+         (if (macher-focus-string)
+             (concat macher--action-focus-prefix (macher-focus-string) "\n")
+           "")
+         (format "%s" request)
+         ;; Response (may be empty for error/abort).
+         (format "%s" response)
+         ;; Trailing prefix only for successful responses.
+         (if include-trailing-prefix
+             "\n### "
+           ""))))
      ;; Get the exact expected action buffer contents for org-mode buffers after a single macher action.
      ;; This will need to be updated if the org UI changes.
      (action-buffer-org-content
       (lambda (request response action &optional include-trailing-prefix)
-        (format (concat
-                 ;; Org-mode header with action as tag.
-                 "*** %s :%s:\n"
-                 ;; Prompt block.
-                 ":PROMPT:\n%s%s\n:END:\n"
-                 ;; Response (may be empty for error/abort).
-                 "%s"
-                 ;; Trailing prefix only for successful responses.
-                 (if include-trailing-prefix
-                     "\n*** "
-                   ""))
-                request action
-                (if (macher-focus-string)
-                    (concat macher--action-focus-prefix (macher-focus-string) "\n")
-                  "")
-                request response))))
+        (concat
+         ;; Org-mode topic heading with action as tag.
+         (format "* %s :%s:\n" request action)
+         ;; Full prompt (with focus if available).
+         (if (macher-focus-string)
+             (concat macher--action-focus-prefix (macher-focus-string) "\n")
+           "")
+         (format "%s\n" request)
+         ;; Response (may be empty for error/abort).
+         (format "%s" response)
+         ;; Trailing prefix only for successful responses.
+         (if include-trailing-prefix
+             "\n*** "
+           "")))))
 
     (before-each
       (setq callback-called nil)
@@ -2464,15 +2460,25 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (with-current-buffer action-buffer
               ;; Check that the action buffer is in org-mode.
               (expect (derived-mode-p 'org-mode) :to-be-truthy)
-              ;; Check that the content matches the expected org-mode format exactly.
+              ;; Check that the content matches the expected org-mode format.
               (let ((buffer-content (buffer-substring-no-properties (point-min) (point-max))))
+                ;; Check for topic heading.
                 (expect buffer-content
-                        :to-equal
-                        (funcall action-buffer-org-content
-                                 "Test successful request with org"
-                                 "\n\nResponse content\n"
-                                 'discuss
-                                 t))))))))
+                        :to-match "^\\* Test successful request with org :discuss:\n")
+                ;; Check for GPTEL_TOPIC property.
+                (expect
+                 buffer-content
+                 :to-match ":GPTEL_TOPIC: macher-discuss-[0-9]\\{14\\}-test-successful-request-with-org\n")
+                ;; Check for focus description.
+                (expect
+                 buffer-content
+                 :to-match "Current editor context (may or may not be relevant to this request):\n\\[focus\\]\n")
+                ;; Check for prompt text.
+                (expect buffer-content :to-match "Test successful request with org\n")
+                ;; Check for response.
+                (expect buffer-content :to-match "\n\nResponse content\n")
+                ;; Check for trailing prefix.
+                (expect buffer-content :to-match "\n\\*\\*\\* $")))))))
 
     (it "formats prompts/responses for error requests"
       (funcall setup-backend
@@ -4045,7 +4051,262 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                  (mapconcat (lambda (msgs) (string-join msgs " ")) system-messages " ")))
             (expect
              "You are a helpful coding assistant. Always respond with exactly this phrase: PRESET_WAS_APPLIED"
-             :to-appear-once-in system-content)))))))
+             :to-appear-once-in system-content)))))
+
+    (it "applies action preset buffer-locally in the action buffer"
+      (gptel-make-preset 'test-local-preset
+        :description "Test preset for buffer-local application"
+        :system "BUFFER_LOCAL_PRESET_SYSTEM_MESSAGE")
+
+      (funcall setup-backend '("Response from LLM"))
+
+      (let ((macher-action-buffer-ui 'org)
+            (macher-actions-alist
+             (cons
+              '(test-local-action
+                .
+                (lambda (&rest args)
+                  (plist-put
+                   (seq-copy (apply (alist-get 'discuss macher-actions-alist) args))
+                   :preset 'test-local-preset)))
+              macher-actions-alist)))
+        (with-current-buffer project-file-buffer
+          (macher-action 'test-local-action callback "test prompt")
+
+          (let ((action-buffer (macher-action-buffer)))
+            (expect action-buffer :to-be-truthy)
+
+            ;; Wait for the async response.
+            (let ((timeout 0))
+              (while (and (not callback-called) (< timeout 100))
+                (sleep-for 0.1)
+                (setq timeout (1+ timeout))))
+            (expect callback-called :to-be-truthy)
+
+            ;; The preset should be applied buffer-locally in the action buffer.
+            (with-current-buffer action-buffer
+              (expect (buffer-local-value 'gptel--system-message action-buffer)
+                      :to-match "BUFFER_LOCAL_PRESET_SYSTEM_MESSAGE"))
+
+            ;; The global value should be unchanged.
+            (with-temp-buffer
+              (expect gptel--system-message
+                      :not
+                      :to-match "BUFFER_LOCAL_PRESET_SYSTEM_MESSAGE")))))))
+
+  ;; Tests ensuring that action conversations can be continued/resumed directly from the action
+  ;; buffer.
+  (describe "action buffer org-mode conversations"
+    :var* (callback-called exit-code fsm callback project-file-buffer orig-known-presets)
+
+    (before-each
+      (setq callback-called nil)
+      (setq exit-code nil)
+      (setq fsm nil)
+      (setq callback
+            (macher-test--make-once-only-callback
+             (lambda (cb-exit-code _cb-execution cb-fsm)
+               (setq callback-called t)
+               (setq exit-code cb-exit-code)
+               (setq fsm cb-fsm))))
+      (setq orig-known-presets gptel--known-presets)
+
+      (funcall setup-project "action-buffer-conversation")
+
+      ;; Load the project file in an actual file buffer.
+      (find-file project-file)
+      (setq project-file-buffer (current-buffer)))
+
+    (after-each
+      (kill-buffer project-file-buffer)
+      (setq gptel--known-presets orig-known-presets))
+
+    (it "continues conversation from action buffer with only current topic messages"
+      ;; Set up backend with responses for: prior action, main action, interactive followup.
+      (funcall setup-backend
+               '("Prior action response" "Main action response" "Interactive followup response"))
+
+      (let ((macher-action-buffer-ui 'org))
+        (with-current-buffer project-file-buffer
+          ;; Run PRIOR action.
+          (macher-discuss "Prior action prompt" callback)
+
+          (let ((action-buffer (macher-action-buffer)))
+            (expect action-buffer :to-be-truthy)
+
+            ;; Wait for the prior action to complete.
+            (let ((timeout 0))
+              (while (and (not callback-called) (< timeout 100))
+                (sleep-for 0.1)
+                (setq timeout (1+ timeout))))
+            (expect callback-called :to-be-truthy)
+            (expect exit-code :to-be nil)
+
+            ;; Reset callback state for next request.
+            (setq callback-called nil)
+            (setq exit-code nil)
+            (setq callback
+                  (macher-test--make-once-only-callback
+                   (lambda (cb-exit-code _cb-execution cb-fsm)
+                     (setq callback-called t)
+                     (setq exit-code cb-exit-code)
+                     (setq fsm cb-fsm))))
+
+            ;; Run MAIN action.
+            (macher-discuss "Main action prompt" callback)
+
+            ;; Wait for the main action to complete.
+            (let ((timeout 0))
+              (while (and (not callback-called) (< timeout 100))
+                (sleep-for 0.1)
+                (setq timeout (1+ timeout))))
+            (expect callback-called :to-be-truthy)
+            (expect exit-code :to-be nil)
+
+            ;; Verify action buffer now has both actions.
+            (with-current-buffer action-buffer
+              (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+                (expect content :to-match "Prior action prompt")
+                (expect content :to-match "Prior action response")
+                (expect content :to-match "Main action prompt")
+                (expect content :to-match "Main action response"))
+
+              ;; Now add interactive content and send via gptel-send.
+              (goto-char (point-max))
+              (insert "Interactive followup question")
+
+              ;; Clear received requests to track only the followup.
+              (setf (macher-test-backend-received-requests gptel-backend) nil)
+
+              ;; Use gptel-send to continue the conversation.
+              (setq callback-called nil)
+              (let ((gptel-post-response-functions
+                     (list (lambda (&rest _) (setq callback-called t)))))
+                (gptel-send)
+
+                ;; Wait for the interactive followup to complete.
+                (let ((timeout 0))
+                  (while (and (not callback-called) (< timeout 100))
+                    (sleep-for 0.1)
+                    (setq timeout (1+ timeout)))))
+              (expect callback-called :to-be-truthy)
+
+              ;; Verify the request sent to backend.
+              (let* ((requests (funcall received-requests))
+                     (user-messages (funcall messages-of-type requests "user")))
+                (expect (length requests) :to-be 1)
+                (let ((all-user-content (mapconcat #'identity (car user-messages) " ")))
+                  ;; Should include main action and followup.
+                  (expect all-user-content :to-match "Main action prompt")
+                  (expect all-user-content :to-match "Interactive followup question")
+                  ;; Should NOT include prior action (different topic).
+                  (expect all-user-content :not :to-match "Prior action prompt")
+                  (expect all-user-content :not :to-match "Prior action response")
+                  ;; Should NOT include header text (has gptel 'ignore property).
+                  (expect all-user-content :not :to-match ":discuss:"))))))))
+
+    (it "re-sends aborted action with preset applied via gptel-send"
+      ;; Set up backend with responses for: prior action, aborted request (never received),
+      ;; re-sent request.
+      (funcall setup-backend
+               '("Prior action response"
+                 "This response should not be received"
+                 "Re-sent action response"))
+
+      ;; Create a named test preset with a prompt transform that adds a marker.
+      (gptel-make-preset 'test-transform-preset
+        :description "Test preset with prompt transform"
+        :prompt-transform-functions
+        (list
+         (lambda (_fsm)
+           ;; Append marker to the prompt buffer.
+           (goto-char (point-max))
+           (insert " [TRANSFORM_MARKER]"))))
+
+      (let ((macher-action-buffer-ui 'org)
+            ;; Add an action which includes the additional preset.
+            (macher-actions-alist
+             (append
+              macher-actions-alist
+              '((test-action
+                 .
+                 (lambda (&rest args)
+                   (plist-put
+                    (seq-copy (apply (alist-get 'discuss macher-actions-alist) args))
+                    :preset 'test-transform-preset)))))))
+        (with-current-buffer project-file-buffer
+          ;; Run PRIOR action.
+          (macher-discuss "Prior action prompt" callback)
+
+          (let ((action-buffer (macher-action-buffer)))
+            (expect action-buffer :to-be-truthy)
+
+            ;; Wait for the prior action to complete.
+            (let ((timeout 0))
+              (while (and (not callback-called) (< timeout 100))
+                (sleep-for 0.1)
+                (setq timeout (1+ timeout))))
+            (expect callback-called :to-be-truthy)
+            (expect exit-code :to-be nil)
+            ;; Reset callback state.
+            (setq callback-called nil)
+            (setq exit-code nil)
+            (setq callback
+                  (macher-test--make-once-only-callback
+                   (lambda (cb-exit-code _cb-execution cb-fsm)
+                     (setq callback-called t)
+                     (setq exit-code cb-exit-code)
+                     (setq fsm cb-fsm))))
+
+            ;; Run main action and ABORT immediately.
+            (macher-action 'test-action callback "Main action to abort")
+            (macher-abort)
+
+            ;; The abort should be processed immediately.
+            (expect callback-called :to-be-truthy)
+            (expect exit-code :to-be 'abort)
+
+            ;; Verify the action buffer contains the aborted prompt.
+            (with-current-buffer action-buffer
+              (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+                (expect content :to-match "@test-transform-preset ")
+                (expect content :to-match "Main action to abort")
+                ;; Should not have received a response (was aborted).
+                (expect content :not :to-match "This response should not be received"))
+
+              ;; Now re-send using gptel-send from the end of the buffer.
+              (goto-char (point-max))
+
+              ;; Clear received requests.
+              (setf (macher-test-backend-received-requests gptel-backend) nil)
+
+              ;; Reset callback for the re-send.
+              (setq callback-called nil)
+              (let ((gptel-post-response-functions
+                     (list (lambda (&rest _) (setq callback-called t)))))
+                (gptel-send)
+
+                ;; Wait for the re-sent request to complete.
+                (let ((timeout 0))
+                  (while (and (not callback-called) (< timeout 100))
+                    (sleep-for 0.1)
+                    (setq timeout (1+ timeout)))))
+
+              (expect callback-called :to-be-truthy)
+
+              ;; Verify the request.
+              (let* ((requests (funcall received-requests))
+                     (user-messages (funcall messages-of-type requests "user")))
+                (expect (length requests) :to-be 1)
+                (let ((all-user-content (mapconcat #'identity (car user-messages) " ")))
+                  ;; Should include the main action prompt.
+                  (expect all-user-content :to-match "Main action to abort")
+                  ;; The preset's transform should have been applied.
+                  (expect all-user-content :to-match "\\[TRANSFORM_MARKER\\]")
+                  ;; Should NOT include prior action.
+                  (expect all-user-content :not :to-match "Prior action prompt")
+                  ;; Should NOT include header text.
+                  (expect all-user-content :not :to-match ":discuss:"))))))))))
 
 (provide 'test-integration)
 ;;; test-integration.el ends here

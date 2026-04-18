@@ -30,7 +30,7 @@ configuration with `use-package`:
 ```elisp
 (use-package macher
   :custom
-  ;; The org UI has structured navigation and nice content folding.
+  ;; The org UI has structured conversations and nice content folding.
   (macher-action-buffer-ui 'org)
 
   :config
@@ -66,11 +66,14 @@ if you want more specifics. Action commands will work regardless of whether you'
 
 ## Usage
 
-### Presets
+### Presets/Tools
 
-After calling `(macher-install)`, you can use macher presets in any gptel request or buffer.
+After calling `(macher-install)`, you can use macher presets and tools in any gptel request or
+buffer.
 
 https://github.com/user-attachments/assets/9b3e0734-5907-4e01-a356-6f9066d7b844
+
+Built-in presets:
 
 - **`@macher`**: Full editing capabilities. Adds tools to read, search, and edit files. Changes are
   captured in memory and displayed as a patch. Also inherits `@macher-system`.
@@ -90,7 +93,8 @@ https://github.com/user-attachments/assets/9b3e0734-5907-4e01-a356-6f9066d7b844
 
 - **`@macher-base`**: Utility preset that enables macher tool infrastructure. This gets applied
   automatically when using other macher presets, but you may want to apply it globally via
-  `macher-enable`, if you want to use macher tools and/or dynamic context in more generic contexts. This adds transforms that run on every outgoing request, which:
+  `macher-enable`, if you want to use macher tools and/or dynamic context in more generic contexts.
+  This adds transforms that run on every outgoing request, which:
     - provide macher tools with a shared editing environment
     - replace instances of the `macher-context-string-placeholder` in the system prompt
 
@@ -99,13 +103,15 @@ https://github.com/user-attachments/assets/9b3e0734-5907-4e01-a356-6f9066d7b844
 
 All built-in presets can safely be repeatedly applied.
 
+You can also manage macher tools directly from the `gptel-menu`.
+
 ### Actions
 
 Actions are convenience commands that use macher presets with a specific workflow:
 
 - A description of your current location in the code is generated (see `macher-focus-string`).
 - A prompt is captured based on the current selection or manual input.
-- The prompt is sent in a dedicated actions buffer, with a macher preset applied.
+- The prompt is sent in a dedicated actions buffer, with a preset applied.
 
 The built-in actions are:
 
@@ -132,6 +138,10 @@ The built-in actions are:
 
 The actions buffer UI can be customized with `macher-action-buffer-ui` (see
 [Customization](#customization)).
+
+When using the `org-mode` UI (via `macher-action-buffer-ui` and/or `gptel-default-mode`), macher
+will set a `GPTEL_TOPIC` for outgoing actions, so you can continue conversations directly in the
+action buffer using `gptel-send`.
 
 You can define custom actions in `macher-actions-alist`.
 
