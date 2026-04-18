@@ -25,7 +25,7 @@
     (insert
      "# Wave.\n\n"
      "if __name__ == \"__main__\":\n"
-     "    # TODO: show a gnarly infinite wave animation. ctrl-c to quit.\n"
+     "    # TODO: show an epic 3-layer ocean wave animation.\n"
      "    pass\n"))
 
   ;; Open the main file and the lib file side by side.
@@ -80,7 +80,7 @@
          ;; Run `macher-revise'.
          "M-x m a c h e r - r TAB <pause> RET <pause> "
          ;; Enter revision request.
-         (macher--demo-text-to-key-sequence "add a surfer and make the wave blue")
+         (macher--demo-text-to-key-sequence "add a surfer and make the water shades of blue")
          " <pause> RET ")))
       ((eq hook-idx 1)
        ;; Catch the next and final patch-ready event.

@@ -68,7 +68,7 @@
                   (macher--demo-text-to-key-sequence
                    (concat
                     "cool. @macher write a self-playing demo with randomized paddles, "
-                    "15 lines x 25 columns. use colors."))
+                    "15 lines x 25 columns, and a scoreboard. use colors."))
                   ;; Send the request.
                   " <pause> C-c RET ")))
                ((eq hook-idx 1)
