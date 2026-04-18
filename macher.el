@@ -327,7 +327,7 @@ filesystem.")
      ,(apply-partially #'macher--action-from-region-or-input
                        "Discuss: "
                        #'macher--discuss-prompt
-                       'macher)))
+                       'macher-ro)))
   "Alist of actions that can be invoked within a macher workspace.
 
 These definitions are used by `macher-action' to send macher requests
