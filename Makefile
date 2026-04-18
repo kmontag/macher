@@ -140,7 +140,7 @@ demos: $(patsubst demo/demo-%.el,demo/output/%.mp4,$(wildcard demo/demo-*.el))
 
 demo/output/%.cast: demo/demo-%.el macher.el demo/setup.el $(EASK) .eask
 	mkdir -p "$(@D)"
-	$(ASCIINEMA) rec --idle-time-limit 2 --command "$(EASK) emacs -nw -l demo/setup.el -l $<" --idle-time-limit=1 --cols=180 --rows=50 --overwrite "$@"
+	$(ASCIINEMA) rec --command "$(EASK) emacs -nw -l demo/setup.el -l $<" --idle-time-limit=1 --window-size=180x50 --overwrite "$@"
 
 demo/output/%.gif: demo/output/%.cast
 	$(AGG) --theme=github-dark "$<" "$@"

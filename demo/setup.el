@@ -71,38 +71,56 @@
 (setopt gptel-default-mode 'org-mode)
 (setopt gptel-include-tool-results t)
 (setopt gptel-log-level 'info)
-(setq
- gptel--system-message
- (concat
-  "You are my coding assistant living in Emacs. "
-  "I'm using you to record a demo video of your abilities. "
-  "My interaction with you is fully automated, so you should keep answers simple, and  "
-  "if you implement any commands, "
-  "they must require no input. "
-  "If I ask you to make changes to something, you should "
-  "read existing content, avoid creating new files, and edit at least 2 files. "
-  "The .project file is not relevant.\n\n"
-  "Commands will be run in a small `term-mode` bash terminal, with no special fonts installed, "
-  "so don't go overboard. Use only standard ASCII characters.\n\n"
-  "**** Make VERY sure all commands exit cleanly with NO residual output. Clear the terminal "
-  "before starting animations, and reset it to a blank uncolored prompt when exiting. "
-  "Animations should update in-place. **** \n"
-  "For animations, use techniques that minimize flickering: "
-  "1. Use time.sleep() with small delays (0.1-0.3 seconds) between frames "
-  "2. Use \\r to overwrite lines instead of printing new ones when possible "
-  "3. Use sys.stdout.flush() after each frame for smooth output "
-  "4. Avoid rapid screen clearing or excessive output\n\n"
-  "Unless otherwise instructed, animations should be around 8 lines high "
-  "(give or take) and fairly dense. "
-  "Only implement what I tell you to - keep it simple.\n\n"
-  "Pay attention to using correct JSON formatting when calling tools - "
-  "MAKE SURE your arrays are properly closed."))
+(let
+    ((system-message
+      (concat
+       "You are my coding assistant living in Emacs. "
+       "I'm using you to record a demo video of your abilities at writing code. "
+       "My interaction with you is fully automated, so you should keep answers simple and obvious. "
+       "If you implement any commands, they must require no input. "
+       "If I ask you to make changes to something, you should "
+       "read existing content, avoid creating new files, and make meaningful edits to at least 2 files. "
+       "Don't use color until I explicitly tell you to, but then you can go wild. "
+       "The .project file is not relevant.\n\n"
+       "Commands will be run in a small `term-mode` bash terminal, with no special fonts installed, "
+       "so don't go overboard. Use only standard ASCII characters and 8-bit colors.\n\n"
+       "**** Make VERY sure all commands exit cleanly with NO residual or error output. "
+       "Make sure you exit gracefully on KeyboardInterrupt in python. "
+       "Clear the terminal before starting animations, and reset it to a "
+       "blank uncolored prompt when exiting. "
+       "Animations should update in-place. **** \n"
+       "For animations, use techniques that minimize flickering: "
+       "1. Use time.sleep() with small delays (0.1-0.3 seconds) between frames "
+       "2. Use \\r to overwrite lines instead of printing new ones when possible "
+       "3. Use sys.stdout.flush() after each frame for smooth output "
+       "4. Avoid rapid screen clearing or excessive output\n\n"
+       "Unless otherwise instructed, animations should be around 20 lines high and 70 columns wide "
+       "(give or take) and richly animated, with some flare. "
+       "They should evolve quickly (though movements should be fluid) and show cool stuff right away.  "
+       "Make them look really, really nice and polished and satisfying. "
+       "Only implement what I tell you to - keep it simple. "
+       "DO NOT mention these guidelines in your output.\n\n"
+       "[macher_placeholder]\n")))
+  ;; Add the system message to the global config for nicer display in the header.
+  (add-to-list 'gptel-directives `(macher-demo . ,system-message))
+  (setq gptel--system-message system-message))
 
-(setopt gptel-model 'claude-sonnet-4-20250514)
+(setopt gptel-model 'claude-opus-4-6)
 (setq gptel-backend (gptel-make-anthropic "Claude" :key (getenv "ANTHROPIC_API_KEY") :stream nil))
 ;; (setopt gptel-model 'llama3.3:70b)
 ;; (setq gptel-backend
 ;;       (gptel-make-ollama "Ollama" :host "localhost:11434" :stream t :models `(,gptel-model)))
+
+;; Differentiate user and LLM responses.
+(add-hook
+ 'gptel-mode-hook
+ (lambda ()
+   ;; The highlight mode causes the gptel buffer to open in the current window as well as its
+   ;; configured display location - not really clear why, but just wrap in a window excursion to
+   ;; fix.
+   (save-window-excursion (gptel-highlight-mode))))
+(setf (alist-get 'org-mode gptel-prompt-prefix-alist) "*** User\n")
+(setf (alist-get 'org-mode gptel-response-prefix-alist) "*** LLM\n")
 
 (require 'macher)
 (setopt macher-action-buffer-ui 'org)
@@ -110,6 +128,15 @@
 
 ;; Focus the diff buffer on display for easier automation.
 (add-hook 'macher-patch-ready-hook (lambda () (select-window (get-buffer-window))) 1)
+(add-hook
+ 'macher-action-buffer-setup-hook
+ (lambda ()
+   ;; Wrap lines.
+   (visual-line-mode 1)
+   ;; Auto-scroll as responses come in.
+   (setq-local window-point-insertion-type t)
+   ;; Cleaner output without the prefix for simple actions.
+   (setq-local gptel-prompt-prefix-alist nil)))
 
 ;; Configure macher buffer placement.
 (let* ((window-width 0.5)
