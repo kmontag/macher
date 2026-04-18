@@ -4485,7 +4485,11 @@
           (setq-local macher--workspace '(test . "/tmp/test"))
           (macher--action-buffer-setup)
           ;; Check that the before-action hook was added.
-          (expect (member #'macher--before-action macher-before-action-functions) :to-be-truthy)
+          (expect (member #'macher--before-action-insert-prompt macher-before-action-functions)
+                  :to-be-truthy)
+          ;; Check that the display-buffer hook was added.
+          (expect (member #'macher--before-action-display-buffer macher-before-action-functions)
+                  :to-be-truthy)
           ;; Check that gptel-mode is NOT enabled (basic doesn't enable it).
           (expect (bound-and-true-p gptel-mode) :to-be nil))))
 
@@ -4496,10 +4500,9 @@
           (macher--action-buffer-setup)
           ;; Check that gptel-mode is enabled.
           (expect (bound-and-true-p gptel-mode) :to-be-truthy)
-          ;; Check that visual-line-mode is enabled.
-          (expect (bound-and-true-p visual-line-mode) :to-be-truthy)
           ;; Check that the before-action hook was added.
-          (expect (member #'macher--before-action macher-before-action-functions) :to-be-truthy))))
+          (expect (member #'macher--before-action-insert-prompt macher-before-action-functions)
+                  :to-be-truthy))))
 
     (it "sets up org UI correctly"
       (let ((macher-action-buffer-ui 'org))
@@ -4511,7 +4514,8 @@
           ;; Check that gptel-mode is enabled.
           (expect (bound-and-true-p gptel-mode) :to-be-truthy)
           ;; Check that the before-action hook was added.
-          (expect (member #'macher--before-action macher-before-action-functions) :to-be-truthy))))
+          (expect (member #'macher--before-action-insert-prompt macher-before-action-functions)
+                  :to-be-truthy))))
 
     (it "performs no setup when UI is nil"
       (let ((macher-action-buffer-ui nil))
@@ -4519,7 +4523,10 @@
           (setq-local macher--workspace '(test . "/tmp/test"))
           (macher--action-buffer-setup)
           ;; Check that no hooks were added.
-          (expect (member #'macher--before-action macher-before-action-functions) :to-be nil)
+          (expect (member #'macher--before-action-insert-prompt macher-before-action-functions)
+                  :to-be nil)
+          (expect (member #'macher--before-action-display-buffer macher-before-action-functions)
+                  :to-be nil)
           ;; Check that gptel-mode is NOT enabled.
           (expect (bound-and-true-p gptel-mode) :to-be nil)
           ;; Check that major mode is still fundamental-mode.
@@ -4531,7 +4538,117 @@
           (setq-local macher--workspace '(test . "/tmp/test"))
           (expect (macher--action-buffer-setup) :to-throw 'user-error)))))
 
-  (describe "macher--before-action"
+  (describe "macher--transform-backticks-to-org-src"
+    (it "transforms single backtick block to org src block"
+      (let ((input "Some text\n```python\nprint('hello')\n```\nMore text")
+            (expected "Some text\n#+begin_src python\nprint('hello')\n#+end_src\nMore text"))
+        (expect (macher--transform-backticks-to-org-src input) :to-equal expected)))
+
+    (it "transforms multiple backtick blocks"
+      (let
+          ((input "```js\nconst x = 1;\n```\nText\n```python\nprint(x)\n```")
+           (expected
+            "#+begin_src js\nconst x = 1;\n#+end_src\nText\n#+begin_src python\nprint(x)\n#+end_src"))
+        (expect (macher--transform-backticks-to-org-src input) :to-equal expected)))
+
+    (it "handles backtick blocks without language"
+      (let ((input "```\ncode here\n```")
+            (expected "#+begin_src \ncode here\n#+end_src"))
+        (expect (macher--transform-backticks-to-org-src input) :to-equal expected)))
+
+    (it "escapes special org characters in code"
+      (let ((input "```\n,* Not a heading\n#+begin_src\n```"))
+        ;; org-escape-code-in-string should add commas before special lines.
+        (expect (macher--transform-backticks-to-org-src input) :to-match ",\\* Not a heading")))
+
+    (it "returns input unchanged if no backtick blocks"
+      (let ((input "Just some text with no code blocks"))
+        (expect (macher--transform-backticks-to-org-src input) :to-equal input))))
+
+  (describe "macher--apply-preset-locally"
+    :var (original-presets)
+
+    (before-each
+      (setq original-presets gptel--known-presets)
+      (setq gptel--known-presets nil))
+
+    (after-each
+      (setq gptel--known-presets original-presets))
+
+    (it "sets buffer-local variables from a plist preset"
+      (with-temp-buffer
+        (let ((gptel--system-message "original"))
+          (macher--apply-preset-locally '(:system "from-preset"))
+          (expect (buffer-local-value 'gptel--system-message (current-buffer))
+                  :to-equal "from-preset")
+          ;; Global value should be unchanged.
+          (with-temp-buffer
+            (expect gptel--system-message :to-equal "original")))))
+
+    (it "sets buffer-local variables from a registered symbol preset"
+      (gptel-make-preset 'test-local-preset :description "Test" :system "preset-system")
+      (with-temp-buffer
+        (macher--apply-preset-locally 'test-local-preset)
+        (expect (buffer-local-value 'gptel--system-message (current-buffer))
+                :to-equal "preset-system")))
+
+    (it "falls back to macher-presets-alist for unregistered symbols"
+      (with-temp-buffer
+        (let ((macher-presets-alist `((test-macher-preset . (:system "macher-system")))))
+          (macher--apply-preset-locally 'test-macher-preset)
+          (expect (buffer-local-value 'gptel--system-message (current-buffer))
+                  :to-equal "macher-system"))))
+
+    (it "does nothing for nil preset-spec"
+      (with-temp-buffer
+        (let ((gptel--system-message "original"))
+          (macher--apply-preset-locally 'nonexistent-symbol)
+          ;; Should not have changed anything.
+          (expect gptel--system-message :to-equal "original"))))
+
+    (it "applies parent presets"
+      (gptel-make-preset 'parent-preset :description "Parent" :system "parent-system")
+      (with-temp-buffer
+        (macher--apply-preset-locally '(:parents (parent-preset) :use-tools t))
+        ;; Parent's system message should be applied.
+        (expect (buffer-local-value 'gptel--system-message (current-buffer))
+                :to-equal "parent-system")
+        ;; Child's use-tools should also be applied.
+        (expect (buffer-local-value 'gptel-use-tools (current-buffer)) :to-be t)))
+
+    (it "applies anonymous plist parents"
+      (with-temp-buffer
+        (macher--apply-preset-locally '(:parents ((:system "anon-parent-system")) :use-tools t))
+        (expect (buffer-local-value 'gptel--system-message (current-buffer))
+                :to-equal "anon-parent-system")
+        (expect (buffer-local-value 'gptel-use-tools (current-buffer)) :to-be t))))
+
+  (describe "macher--before-action-insert-prompt"
+    (it "does not scroll the window to point"
+      (let ((buf (generate-new-buffer "*test-no-scroll*")))
+        (unwind-protect
+            (progn
+              ;; Fill with enough content to exceed the window height.
+              (with-current-buffer buf
+                (dotimes (_ 200)
+                  (insert "filler line\n")))
+              ;; Display the buffer and set window-point at the top.
+              (let ((win (display-buffer buf)))
+                (set-window-point win (point-min))
+                (with-current-buffer buf
+                  (let ((execution
+                         (macher--make-action-execution
+                          :action 'discuss
+                          :prompt "new prompt"
+                          :summary "new prompt"
+                          :buffer buf)))
+                    (macher--before-action-insert-prompt execution)
+                    ;; Point should be at the end (after inserted text).
+                    (expect (point) :to-be-greater-than 200)
+                    ;; But the window should NOT have scrolled to follow point.
+                    (expect (window-point win) :to-equal (point-min))))))
+          (kill-buffer buf))))
+
     (describe "prefix insertion"
       (it "inserts prefix at beginning of empty buffer"
         (with-temp-buffer
@@ -4542,7 +4659,7 @@
                   :prompt "Test prompt"
                   :summary "Test prompt"
                   :buffer (current-buffer))))
-            (macher--before-action execution)
+            (macher--before-action-insert-prompt execution)
             ;; The buffer should start with the prefix.
             (expect (buffer-substring-no-properties 1 5) :to-equal "### "))))
 
@@ -4557,7 +4674,7 @@
                   :prompt "Test prompt"
                   :summary "Test prompt"
                   :buffer (current-buffer))))
-            (macher--before-action execution)
+            (macher--before-action-insert-prompt execution)
             ;; Check that a newline was inserted before the prefix.
             (let ((content (buffer-substring-no-properties (point-min) (point-max))))
               (expect content :to-match "previous response content\n### ")))))
@@ -4573,7 +4690,7 @@
                   :prompt "Test prompt"
                   :summary "Test prompt"
                   :buffer (current-buffer))))
-            (macher--before-action execution)
+            (macher--before-action-insert-prompt execution)
             ;; Check that no extra newline was added.
             (let ((content (buffer-substring-no-properties (point-min) (point-max))))
               (expect content :to-match "previous response content\n### ")
@@ -4591,11 +4708,235 @@
                   :prompt "Test prompt"
                   :summary "Test prompt"
                   :buffer (current-buffer))))
-            (macher--before-action execution)
+            (macher--before-action-insert-prompt execution)
             ;; Prefix should not be duplicated.
             (let ((content (buffer-substring-no-properties (point-min) (point-max))))
-              ;; The header and prompt will be added, but not another prefix before them.
-              (expect content :to-match "^previous content\n### `test` Test prompt")))))))
+              ;; The prompt will be added directly after the existing prefix.
+              (expect content :to-match "^previous content\n### Test prompt"))))))
+
+    (describe "preset handling"
+      (it "does not output anything for preset passed as plist"
+        (with-temp-buffer
+          (setq-local gptel-prompt-prefix-alist '((fundamental-mode . "### ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'test
+                  :prompt "Test prompt"
+                  :summary "Test prompt"
+                  :preset
+                  '(:use-tools t :description "Inline preset")
+                  :buffer (current-buffer))))
+            (macher--before-action-insert-prompt execution)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect content :not :to-match "@")
+              (expect content :to-match "^### Test prompt$")))))
+
+      (it "does not output anything for preset from macher-presets-alist not in global registry"
+        (let ((gptel--known-presets nil))
+          (with-temp-buffer
+            (setq-local gptel-prompt-prefix-alist '((fundamental-mode . "### ")))
+            (let ((execution
+                   (macher--make-action-execution
+                    :action 'test
+                    :prompt "Test prompt"
+                    :summary "Test prompt"
+                    :preset 'nonexistent-preset
+                    :buffer (current-buffer))))
+              (macher--before-action-insert-prompt execution)
+              (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+                (expect content :not :to-match "@")
+                (expect content :to-match "^### Test prompt$"))))))
+
+      (it "outputs @-syntax for normal preset that exists in global registry"
+        (let ((gptel--known-presets nil))
+          (gptel-make-preset 'test-preset :description "Test preset")
+          (with-temp-buffer
+            (setq-local gptel-prompt-prefix-alist '((fundamental-mode . "### ")))
+            (let ((execution
+                   (macher--make-action-execution
+                    :action 'test
+                    :prompt "Test prompt"
+                    :summary "Test prompt"
+                    :preset 'test-preset
+                    :buffer (current-buffer))))
+              (macher--before-action-insert-prompt execution)
+              (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+                (expect content :to-match "### @test-preset Test prompt$"))))))
+
+      (it "handles nil preset gracefully"
+        (with-temp-buffer
+          (setq-local gptel-prompt-prefix-alist '((fundamental-mode . "### ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'test
+                  :prompt "Test prompt"
+                  :summary "Test prompt"
+                  :preset nil
+                  :buffer (current-buffer))))
+            (macher--before-action-insert-prompt execution)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect content :not :to-match "@")
+              (expect content :to-match "^### Test prompt$"))))))
+
+    (describe "text properties"
+      (it "sets gptel 'ignore property on the header line"
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'test
+                  :prompt "Test prompt"
+                  :summary "Test prompt"
+                  :buffer (current-buffer))))
+            (macher--before-action-insert-prompt execution)
+            ;; Find the header line and check its text property.
+            (goto-char (point-min))
+            (let ((header-end (line-end-position)))
+              ;; The header should have gptel 'ignore property.
+              (expect (get-text-property (point-min) 'gptel) :to-equal 'ignore)
+              ;; The property should extend to the end of the header line.
+              (expect (get-text-property (1- header-end) 'gptel) :to-equal 'ignore)))))
+
+      (it "does not set gptel 'ignore on prompt content"
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'test
+                  :prompt "Test prompt content"
+                  :summary "Test prompt"
+                  :buffer (current-buffer))))
+            (macher--before-action-insert-prompt execution)
+            ;; Find where the prompt starts (after header and prefix).
+            (goto-char (point-min))
+            (search-forward "Test prompt content")
+            (let ((prompt-start (match-beginning 0)))
+              ;; The prompt text should NOT have gptel 'ignore property.
+              (expect (get-text-property prompt-start 'gptel) :not :to-equal 'ignore)))))
+
+      (it "header with ignore property is excluded when buffer is parsed"
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'test
+                  :prompt "User message content"
+                  :summary "Summary"
+                  :buffer (current-buffer))))
+            (macher--before-action-insert-prompt execution)
+            ;; Now parse the buffer as gptel would.
+            (goto-char (point-max))
+            (let* ((gptel--known-backends nil)
+                   (backend (gptel-make-ollama "Test Ollama"))
+                   (parsed (gptel--parse-buffer backend (point-max))))
+              ;; The parsed messages should include the user message.
+              (expect (cl-some
+                       (lambda (msg)
+                         (and (string= (plist-get msg :role) "user")
+                              (string-match-p "User message content" (plist-get msg :content))))
+                       parsed)
+                      :to-be-truthy)
+              ;; The parsed messages should NOT include the header text.
+              (expect (cl-some
+                       (lambda (msg)
+                         (string-match-p ":test:" (or (plist-get msg :content) "")))
+                       parsed)
+                      :to-be nil))))))
+
+    (describe "org mode behavior"
+      (it "folds source blocks after insertion"
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'test
+                  :prompt "Check this code:\n```python\nprint(\"hello world\")\n```"
+                  :summary "Test prompt"
+                  :buffer (current-buffer))))
+            (macher--before-action-insert-prompt execution)
+            ;; Find the src block content line.
+            (goto-char (point-min))
+            (expect (re-search-forward "^#\\+begin_src" nil t) :to-be-truthy)
+            (forward-line 1)
+            ;; The content inside the src block should be invisible (folded).
+            (expect (invisible-p (point)) :to-be-truthy))))
+
+      (it "does not fold non-src blocks"
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+          ;; Manually insert content with a non-src block (since backtick transform only creates
+          ;; src blocks).
+          (let
+              ((execution
+                (macher--make-action-execution
+                 :action 'test
+                 :prompt "Here is an example:\n#+begin_example\nsome example content\n#+end_example"
+                 :summary "Test prompt"
+                 :buffer (current-buffer))))
+            (macher--before-action-insert-prompt execution)
+            ;; Find the example block content line.
+            (goto-char (point-min))
+            (expect (re-search-forward "^#\\+begin_example" nil t) :to-be-truthy)
+            (forward-line 1)
+            ;; The content inside the example block should NOT be invisible.
+            (expect (invisible-p (point)) :to-be nil))))
+
+      (it "sets GPTEL_TOPIC property in org-mode"
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'discuss
+                  :prompt "Test prompt for topic"
+                  :summary "Test prompt for topic setting"
+                  :buffer (current-buffer))))
+            (macher--before-action-insert-prompt execution)
+            ;; The buffer should have a GPTEL_TOPIC property set.
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              ;; Check that GPTEL_TOPIC is present.
+              (expect content :to-match ":GPTEL_TOPIC:")
+              ;; Check that the topic follows the expected format.
+              (expect
+               content
+               :to-match ":GPTEL_TOPIC: macher-discuss-[0-9]\\{14\\}-test-prompt-for-topic-setting")))))))
+
+
+  (describe "macher--before-action-scroll"
+    (it "updates window point to match buffer point"
+      (let ((buf (generate-new-buffer "*test-scroll*")))
+        (unwind-protect
+            (progn
+              (with-current-buffer buf
+                (dotimes (_ 200)
+                  (insert "filler line\n")))
+              (let ((win (display-buffer buf)))
+                (set-window-point win (point-min))
+                (with-current-buffer buf
+                  ;; Move point to the end.
+                  (goto-char (point-max))
+                  (macher--before-action-scroll nil)
+                  ;; Window point should now match buffer point.
+                  (expect (window-point win) :to-equal (point-max)))))
+          (kill-buffer buf))))
+
+    (it "is a no-op when the buffer has no window"
+      (with-temp-buffer
+        (insert "some content")
+        (goto-char (point-max))
+        ;; Should not error when there's no window.
+        (expect (macher--before-action-scroll nil) :not :to-throw))))
 
   (describe "macher-action"
     :var ((original-action-buffer-setup-hook macher-action-buffer-setup-hook) project-file-buffer)
@@ -5173,7 +5514,17 @@
           (expect prompt
                   :to-match "Current editor context (may or may not be relevant to this request):")
           ;; Should not have project name when no workspace.
-          (expect prompt :not :to-match "project:")))))
+          (expect prompt :not :to-match "project:"))))
+
+    (it "uses selected-text wording when is-selected is non-nil"
+      (with-temp-buffer
+        (find-file temp-file)
+        (js-mode)
+        (setq-local macher--workspace (cons 'file (file-name-directory temp-file)))
+        (let ((prompt (macher--implement-prompt "Add error handling" t)))
+          (expect prompt :to-match "Implementation request (from user-selected text),")
+          (expect prompt :not :to-match "Implementation request,")
+          (expect prompt :to-match "Add error handling")))))
 
   (describe "macher--revise-prompt"
     :var (temp-file temp-patch-buffer)
