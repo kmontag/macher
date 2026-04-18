@@ -33,6 +33,16 @@ configuration with `use-package`:
   ;; The org UI has structured conversations and nice content folding.
   (macher-action-buffer-ui 'org)
 
+  :hook
+  ;; Set up action buffer behavior to your liking.  Alternately, do
+  ;; this more generally in your `gptel-mode-hook'.
+  (macher-action-buffer-setup
+   . (lambda ()
+      ;; Auto-scroll responses.
+      (setq-local window-point-insertion-type t)
+      ;; Wrap lines.
+      (visual-line-mode 1))
+
   :config
   ;; Recommended - register macher tools and presets with gptel.
   (macher-install)

@@ -401,8 +401,8 @@ The choices are:
   to display the action buffer and insert a nicely-formatted prompt.
 
 - ='default' - like ='basic', but also enables `gptel-mode' and the
-  global `gptel-default-mode' (e.g. markdown or org), and sets up
-  auto-scrolling, line wrapping, and tool call rendering.
+  global `gptel-default-mode' (e.g. markdown or org), and ensures tool
+  calls are rendered.
 
 - ='org' - like ='default', but instead of the `gptel-default-mode',
   enables `org-mode'.  If you're already using `org-mode' as your
@@ -1488,16 +1488,12 @@ buffer when actions are performed."
 
 This setup is shared among the symbol `default' and symbol `org' UI
 configurations.  The function enables `gptel-mode', ensures tool results
-are included in output, and sets up auto-scrolling, line wrapping, and
-a hook to apply the action's preset buffer-locally."
+are included in output, and sets up a hook to apply the action's preset
+buffer-locally."
   ;; Include tool calls in output.
   (setq-local gptel-include-tool-results t)
   ;; Enable gptel-mode for a nice header and LLM interaction feedback.
   (gptel-mode 1)
-  ;; Wrap lines.
-  (visual-line-mode 1)
-  ;; Auto-scroll when at end of buffer.
-  (setq-local window-point-insertion-type t)
   ;; Apply the action's preset buffer-locally before each request.
   (add-hook 'macher-before-action-functions #'macher--before-action-apply-preset nil t)
   ;; Scroll the action buffer window to the current cursor position.
