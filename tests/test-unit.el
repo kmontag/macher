@@ -6953,7 +6953,52 @@
       ;; The total I/O call count should stay well below the number
       ;; of workspace files — per-file remote calls (like file-exists-p)
       ;; would push the count above 20.
-      (expect remote-call-count :to-be-less-than 20))))
+      (expect remote-call-count :to-be-less-than 20))
+
+    (it "read-file does not redundantly validate the workspace root"
+      ;; macher--workspace-root is called multiple times during a single
+      ;; read-file invocation (from resolve-workspace-path, workspace-files,
+      ;; etc.), and each call checks file-directory-p on the root.  Count
+      ;; how many times macher--workspace-root is called.
+      (let ((root-call-count 0))
+        (advice-add 'macher--workspace-root :before
+                    (lambda (&rest _args)
+                      (setq root-call-count (1+ root-call-count)))
+                    '((name . count-root-calls)))
+        (unwind-protect
+            (ignore-errors
+              (let ((context (macher--make-context
+                              :workspace (cons 'project remote-root))))
+                (macher--tool-read-file context "src/main.py")))
+          (advice-remove 'macher--workspace-root 'count-root-calls))
+        ;; macher--workspace-root does a file-directory-p check each time
+        ;; it's called, so it should be called at most once per tool
+        ;; invocation rather than repeatedly from resolve-workspace-path,
+        ;; workspace-files, workspace-root, etc.
+        (expect root-call-count :to-equal 1)))
+
+    (it "read-file does not trigger redundant project discovery"
+      ;; macher--workspace-files calls macher--workspace-root internally,
+      ;; which re-triggers project-current and its associated I/O
+      ;; (file-exists-p, file-attributes on the root, .gitmodules checks,
+      ;; etc.).  This is redundant since resolve-workspace-path already
+      ;; validated the root.  Track how many times project-current is
+      ;; invoked during a single read-file call.
+      (let ((project-current-count 0))
+        (advice-add 'project-current :before
+                    (lambda (&rest _args)
+                      (setq project-current-count (1+ project-current-count)))
+                    '((name . count-project-current)))
+        (unwind-protect
+            (ignore-errors
+              (let ((context (macher--make-context
+                              :workspace (cons 'project remote-root))))
+                (macher--tool-read-file context "src/main.py")))
+          (advice-remove 'project-current 'count-project-current))
+        ;; project-current triggers project-try-vc which does multiple
+        ;; remote I/O calls (file-exists-p, file-attributes, .gitmodules).
+        ;; It should be called at most once per tool invocation.
+        (expect project-current-count :to-equal 1)))))
 
 (provide 'test-unit)
 ;;; test-unit.el ends here
