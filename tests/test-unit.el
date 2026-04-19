@@ -6881,15 +6881,11 @@
                   (concat prefix (directory-file-name (funcall strip (car args)))))
                  ((eq operation 'file-truename)
                   (concat prefix (file-truename (funcall strip (car args)))))
-                 ;; Reproduce the TRAMP behavior: when xref returns a local
-                 ;; path and the workspace root is remote,
-                 ;; file-relative-name can't relativize them.
+                 ;; Relativize by stripping the mock-remote prefix from
+                 ;; both paths and delegating to the real file-relative-name.
                  ((eq operation 'file-relative-name)
-                  (let ((name (car args))
-                        (dir (cadr args)))
-                    (if (and dir (not (string-match-p rx name)) (string-match-p rx dir))
-                        name
-                      (file-relative-name (funcall strip name) (and dir (funcall strip dir))))))
+                  (file-relative-name (funcall strip (car args))
+                                      (and (cadr args) (funcall strip (cadr args)))))
                  ;; Run processes locally.
                  ((eq operation 'process-file)
                   (let ((default-directory (funcall strip default-directory)))
@@ -6921,10 +6917,8 @@
         (delete-directory temp-dir t)))
 
     (it "search produces correct relative paths over a remote connection"
-      ;; Over a remote connection, xref-matches-in-files strips the remote
-      ;; prefix from result paths (e.g. /ssh:host:/path/file becomes
-      ;; /path/file).  The search function must still produce correct
-      ;; relative paths despite this mismatch.
+      ;; The search function must produce correct relative paths when the
+      ;; workspace root is a remote (TRAMP) path.
       (let* ((context (macher--make-context :workspace (cons 'project remote-root)))
              (result (macher--search-get-xref-matches context "hello")))
         (expect result :to-be-truthy)

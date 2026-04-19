@@ -1338,11 +1338,8 @@ Returns a list of relative file paths."
   (require 'project)
   (when-let* ((proj (project-current nil project-id))
               (files (project-files proj)))
-    ;; Return files relative to project root.  When project-id is a
-    ;; remote (TRAMP) path, project-files returns local paths without
-    ;; the remote prefix, so we relativize against the local part.
-    (let ((rel-base (or (file-remote-p project-id 'localname) project-id)))
-      (mapcar (lambda (f) (file-relative-name f rel-base)) files))))
+    ;; Return files relative to project root.
+    (mapcar (lambda (f) (file-relative-name f project-id)) files)))
 
 (defun macher-workspace (&optional buffer)
   "Get the workspace information for BUFFER.
@@ -2772,10 +2769,13 @@ the `xref-search-program' to perform the search."
                             ;; Path is a single file, use the original path parameter.
                             path
                           ;; Otherwise, always relative to workspace root.
-                          ;; When workspace-root is remote, xref result
-                          ;; paths lack the TRAMP prefix, so relativize
-                          ;; against the local part of workspace-root.
-                          (file-relative-name original-file
+                          ;; Strip any remote prefix from both paths so
+                          ;; file-relative-name can compare them even when
+                          ;; one has a TRAMP prefix and the other does not
+                          ;; (e.g. xref may return local paths while
+                          ;; workspace-root is remote).
+                          (file-relative-name (or (file-remote-p original-file 'localname)
+                                                  original-file)
                                               (or (file-remote-p workspace-root 'localname)
                                                   workspace-root)))))
 
