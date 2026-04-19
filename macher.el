@@ -1941,19 +1941,28 @@ types."
              (path-components (file-name-split relative-path))
              (current-path workspace-root))
         ;; Check each component except the last one for files or symlinks (only below workspace
-        ;; root).
+        ;; root).  Use a single file-attributes call per component instead of separate
+        ;; file-exists-p / file-symlink-p / file-directory-p calls, since each is a round-trip
+        ;; over TRAMP.
         (when (> (length path-components) 1)
           (dolist (component (butlast path-components))
             (unless
                 ;; Skip empty components.
                 (string-empty-p component)
               (setq current-path (expand-file-name component current-path))
-              (when (file-exists-p current-path)
-                (cond
-                 ((file-symlink-p current-path)
-                  (error "Path '%s' contains a symbolic link in a non-final component" rel-path))
-                 ((not (file-directory-p current-path))
-                  (error "Path '%s' contains a file in a non-final component" rel-path)))))))))
+              (let ((attrs (file-attributes current-path)))
+                ;; attrs is nil when the path doesn't exist.
+                (when attrs
+                  (let ((type (file-attribute-type attrs)))
+                    (cond
+                     ;; type is a string when the path is a symlink (the string is the target).
+                     ((stringp type)
+                      (error
+                       "Path '%s' contains a symbolic link in a non-final component" rel-path))
+                     ;; type is t for directories, nil for regular files.
+                     ((not (eq t type))
+                      (error
+                       "Path '%s' contains a file in a non-final component" rel-path)))))))))))
 
     ;; Validate access permissions.
     (let* ((raw-workspace-files (macher--workspace-files workspace))
@@ -1973,14 +1982,18 @@ types."
               (string= (directory-file-name workspace-root) full-path)
               ;; Check whether the path begins with the workspace root + the path separator.
               (string-prefix-p (file-name-as-directory workspace-root) full-path))))
-           (file-exists (file-exists-p full-path)))
+           ;; Use file-attributes once instead of separate file-exists-p and
+           ;; file-directory-p calls, since each is a TRAMP round-trip.
+           (path-attrs (file-attributes full-path))
+           (file-exists (not (null path-attrs)))
+           (is-directory (eq t (file-attribute-type path-attrs))))
 
       (when (and is-outside-workspace (not (member full-path workspace-files)))
         (error "Path '%s' resolves outside the workspace" rel-path))
 
       (when (and file-exists
                  ;; Allow directories, but only within the workspace.
-                 (or is-outside-workspace (not (file-directory-p full-path)))
+                 (or is-outside-workspace (not is-directory))
                  (not (member full-path workspace-files)))
         (error "File '%s' is not in the workspace files list" rel-path)))
 
@@ -2112,18 +2125,10 @@ CALLBACK is called with arguments (full-path new-content) where:
 
 If SET-DIRTY-P is non-nil, sets the dirty-p flag on the context."
   (let* ((workspace (macher-context-workspace context))
-         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
-         (get-or-create-file-contents
-          (lambda (file-path)
-            "Get or create contents for FILE-PATH in the current context.
-
-Returns a cons cell (orig-content . new-content) of strings for the
-file.  Also updates the context's :contents alist."
-            (let ((full-path (funcall resolve-workspace-path file-path)))
-              (macher-context--contents-for-file full-path context))))
-         (full-path (funcall resolve-workspace-path path))
-         ;; Get implementation contents for this file.
-         (contents (funcall get-or-create-file-contents path))
+         (full-path (macher--resolve-workspace-path workspace path))
+         ;; Get or create contents for this file directly — avoid
+         ;; resolving the path a second time.
+         (contents (macher-context--contents-for-file full-path context))
          (new-content (cdr contents)))
     ;; Check if the file exists for editing.
     (if (not new-content)
@@ -2156,40 +2161,40 @@ offset/limit/show-line-numbers processing.  For symlinks, returns the target
 path instead of following the link.  Signals an error if the file is not
 found in the workspace."
   (let* ((workspace (macher-context-workspace context))
-         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
-         (full-path (funcall resolve-workspace-path path)))
+         (full-path (macher--resolve-workspace-path workspace path)))
 
     ;; Check if this is a symlink first (only for existing files).
-    (if (file-symlink-p full-path)
-        ;; For symlinks, return the target path instead of following the link.
-        (let ((target (file-symlink-p full-path)))
-          (format "Symlink target: %s" target))
+    (let ((symlink-target (file-symlink-p full-path)))
+      (if symlink-target
+          ;; For symlinks, return the target path instead of following the link.
+          (format "Symlink target: %s" symlink-target)
 
-      ;; Normal/non-symlink handling.
-      (macher--with-workspace-file
-       context
-       path
-       (lambda (_full-path new-content)
-         ;; Some LLMs (for example qwen3-coder at time of writing) seem to have trouble invoking
-         ;; tools with integer inputs - they'll always pass e.g. '1.0' instead of '1'.  Therefore we
-         ;; need to support float inputs, which in general we handle by rounding to the nearest
-         ;; integer.
-         (let* ((parsed-offset
-                 (when offset
-                   (round offset)))
-                (parsed-limit
-                 (when limit
-                   (round limit)))
-                (processed-content
-                 (macher--read-string new-content parsed-offset parsed-limit show-line-numbers)))
-           ;; Check if the processed content exceeds the maximum read length.
-           (when (> (length processed-content) macher--max-read-length)
-             (error
-              "File content too large: %d bytes exceeds maximum read length of %d bytes"
-              (length processed-content)
-              macher--max-read-length))
-           processed-content))
-       nil))))
+        ;; Fetch file contents directly using the already-resolved path,
+        ;; rather than going through macher--with-workspace-file which
+        ;; would resolve the path a second time.
+        (let* ((contents (macher-context--contents-for-file full-path context))
+               (new-content (cdr contents)))
+          (if (not new-content)
+              (error "File '%s' not found in workspace" path)
+            ;; Some LLMs (for example qwen3-coder at time of writing) seem to have trouble
+            ;; invoking tools with integer inputs - they'll always pass e.g. '1.0' instead of
+            ;; '1'.  Therefore we need to support float inputs, which in general we handle by
+            ;; rounding to the nearest integer.
+            (let* ((parsed-offset
+                    (when offset
+                      (round offset)))
+                   (parsed-limit
+                    (when limit
+                      (round limit)))
+                   (processed-content
+                    (macher--read-string new-content parsed-offset parsed-limit show-line-numbers)))
+              ;; Check if the processed content exceeds the maximum read length.
+              (when (> (length processed-content) macher--max-read-length)
+                (error
+                 "File content too large: %d bytes exceeds maximum read length of %d bytes"
+                 (length processed-content)
+                 macher--max-read-length))
+              processed-content)))))))
 
 (defun macher--tool-list-directory (context path &optional recursive sizes)
   "List directory contents at PATH within the workspace.
@@ -2365,9 +2370,13 @@ Signals an error if the directory is not found in the workspace."
                             entry
                           (concat current-rel-path "/" entry)))
                        (entry-deleted-p (file-deleted-in-context-p entry-full-path))
-                       (entry-exists-on-disk-p (file-exists-p entry-full-path))
-                       (entry-is-symlink-p
-                        (and (not entry-deleted-p) (file-symlink-p entry-full-path)))
+                       ;; Use a single file-attributes call per entry instead of
+                       ;; separate file-exists-p / file-symlink-p / file-directory-p,
+                       ;; since each is a TRAMP round-trip.
+                       (entry-attrs (file-attributes entry-full-path))
+                       (entry-exists-on-disk-p (not (null entry-attrs)))
+                       (entry-disk-type (and entry-attrs (file-attribute-type entry-attrs)))
+                       (entry-is-symlink-p (and (not entry-deleted-p) (stringp entry-disk-type)))
                        (entry-exists-in-context-p
                         (when-let ((entry
                                     (assoc
@@ -2385,8 +2394,7 @@ Signals an error if the directory is not found in the workspace."
                              (not entry-deleted-p) (not entry-is-symlink-p)
                              ;; A path is a directory if it exists on disk as a directory OR if it's
                              ;; in our context-new-directories list.
-                             (or (file-directory-p entry-full-path)
-                                 (member entry context-new-directories))))
+                             (or (eq t entry-disk-type) (member entry context-new-directories))))
                        (size-info "")
                        (indent (make-string (* depth 2) ?\s)))
 
@@ -2398,9 +2406,9 @@ Signals an error if the directory is not found in the workspace."
                         (setq size-info (format " (%s)" (macher--format-size file-size)))))
 
                     ;; Add symlink target info if it's a symlink.
+                    ;; entry-disk-type is the symlink target string.
                     (when entry-is-symlink-p
-                      (let ((target (file-symlink-p entry-full-path)))
-                        (setq size-info (format " -> %s" target))))
+                      (setq size-info (format " -> %s" entry-disk-type)))
 
                     ;; Add entry to results.
                     (push (format "%s%s: %s%s"
