@@ -1939,8 +1939,8 @@ types."
              (current-path workspace-root))
         ;; Check each component except the last one for files or symlinks (only below workspace
         ;; root).  Use a single file-attributes call per component instead of separate
-        ;; file-exists-p / file-symlink-p / file-directory-p calls, since each is a round-trip
-        ;; over TRAMP.
+        ;; file-exists-p/file-symlink-p/file-directory-p calls, since each is a round-trip over
+        ;; TRAMP.
         (when (> (length path-components) 1)
           (dolist (component (butlast path-components))
             (unless
@@ -2123,8 +2123,6 @@ CALLBACK is called with arguments (full-path new-content) where:
 If SET-DIRTY-P is non-nil, sets the dirty-p flag on the context."
   (let* ((workspace (macher-context-workspace context))
          (full-path (macher--resolve-workspace-path workspace path))
-         ;; Get or create contents for this file directly — avoid
-         ;; resolving the path a second time.
          (contents (macher-context--contents-for-file full-path context))
          (new-content (cdr contents)))
     ;; Check if the file exists for editing.
