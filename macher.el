@@ -2409,6 +2409,7 @@ Signals an error if the directory is not found in the workspace."
                         (setq size-info (format " (%s)" (macher--format-size file-size)))))
 
                     ;; Add symlink target info if it's a symlink.
+                    ;;
                     ;; entry-disk-type is the symlink target string.
                     (when entry-is-symlink-p
                       (setq size-info (format " -> %s" entry-disk-type)))
