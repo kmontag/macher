@@ -1309,14 +1309,15 @@ Returns (file . FILENAME) if the buffer is visiting a file, nil otherwise."
 
 ;; Built-in workspace type functions
 (defun macher--project-root (project-id)
-  "Get the project root for PROJECT-ID, validating it's a real project root."
-  (require 'project)
-  ;; Verify that project-id is actually a valid project root directory.
-  (unless (and (stringp project-id)
-               (file-name-absolute-p project-id)
-               (file-directory-p project-id)
-               (project-current nil project-id))
-    (error "Project ID '%s' is not a valid project root directory" project-id))
+  "Get the project root for PROJECT-ID.
+
+Validates only the shape of the ID (absolute path string).  A full
+`project-current' check is deliberately avoided here: it triggers a
+cascade of remote I/O (VC discovery, `.gitmodules' probing, etc.) that
+becomes very expensive over TRAMP, and `project-files' will re-validate
+the project when it's actually needed."
+  (unless (and (stringp project-id) (file-name-absolute-p project-id))
+    (error "Project ID '%s' is not a valid project root" project-id))
   project-id)
 
 (defun macher--project-name (project-id)
@@ -1375,11 +1376,11 @@ absolute path to a real directory."
                   (error
                    "Root function for workspace type %s failed to return a root" workspace-type))
             (error "No root function configured for workspace type %s" workspace-type))))
-    ;; Verify that the root is a real directory.
+    ;; Only validate the shape of the root.  A `file-directory-p' check would be a remote
+    ;; round-trip over TRAMP on every call; any real file operation downstream will fail with a
+    ;; reasonable error anyway if the root doesn't exist.
     (unless (and root (file-name-absolute-p root))
       (error "Workspace root '%s' is not an absolute path" root))
-    (unless (and root (file-directory-p root))
-      (error "Workspace root '%s' is not a valid directory" root))
     root))
 
 (defun macher--workspace-name (workspace)
@@ -1394,15 +1395,19 @@ Returns a string containing the workspace name."
         (funcall name-fn workspace-id)
       (error "No name function configured for workspace type %s" workspace-type))))
 
-(defun macher--workspace-files (workspace)
+(defun macher--workspace-files (workspace &optional root-path)
   "Get list of files in WORKSPACE.
 WORKSPACE is a cons cell (TYPE . ID) where TYPE is a workspace type.
-Returns a list of absolute file paths."
+Returns a list of absolute file paths.
+
+If ROOT-PATH is provided, it is used as the workspace root for
+resolving relative paths; otherwise `macher--workspace-root' is called.
+Passing an already-computed root avoids a redundant call over TRAMP."
   (let* ((workspace-type (car workspace))
          (workspace-id (cdr workspace))
          (type-config (alist-get workspace-type macher-workspace-types-alist))
          (files-fn (plist-get type-config :get-files))
-         (root-path (macher--workspace-root workspace)))
+         (root-path (or root-path (macher--workspace-root workspace))))
     (when files-fn
       (let ((files (funcall files-fn workspace-id)))
         ;; Ensure all paths are absolute.
@@ -1961,8 +1966,9 @@ types."
                       (error
                        "Path '%s' contains a file in a non-final component" rel-path)))))))))))
 
-    ;; Validate access permissions.
-    (let* ((raw-workspace-files (macher--workspace-files workspace))
+    ;; Validate access permissions.  Pass the already-computed workspace-root to avoid a
+    ;; redundant `macher--workspace-root' call inside `macher--workspace-files'.
+    (let* ((raw-workspace-files (macher--workspace-files workspace workspace-root))
            ;; Process workspace files by expanding them relative to workspace root
            (workspace-files
             (when raw-workspace-files
