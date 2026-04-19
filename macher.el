@@ -1939,9 +1939,9 @@ types."
              (path-components (file-name-split relative-path))
              (current-path workspace-root))
         ;; Check each component except the last one for files or symlinks (only below workspace
-        ;; root).  Use a single file-attributes call per component instead of separate
-        ;; file-exists-p/file-symlink-p/file-directory-p calls, since each is a round-trip over
-        ;; TRAMP.
+        ;; root).  For performance (especially over remote connections), use a single
+        ;; file-attributes call per component instead of separate
+        ;; file-exists-p/file-symlink-p/file-directory-p calls.
         (when (> (length path-components) 1)
           (dolist (component (butlast path-components))
             (unless
