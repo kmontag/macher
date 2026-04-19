@@ -2665,6 +2665,9 @@ the `xref-search-program' to perform the search."
             (cl-remove-if-not
              (lambda (file-path)
                (let ((full-path (expand-file-name file-path workspace-root)))
+                 ;; Note - we don't check explicitly that `file-exists-p', since this is expensive
+                 ;; for remote files or large projects.  The search backend (grep/rg) should simply
+                 ;; be able to skip files that don't exist.
                  (and
                   ;; File is under the search path.
                   (string-prefix-p search-path full-path)
@@ -2675,13 +2678,7 @@ the `xref-search-program' to perform the search."
                                  (file-relative-name full-path search-path)
                                (file-relative-name full-path workspace-root))))
                         (string-match-p file-regexp rel-path))
-                    t)
-                  ;; Workspace files come from project-files and are
-                  ;; expected to exist.  Checking per-file with
-                  ;; file-exists-p is expensive over TRAMP (each call
-                  ;; is a remote round-trip), and unnecessary — the
-                  ;; search backend (grep/rg) skips missing files.
-                  t)))
+                    t))))
              workspace-files))
            ;; Add any context-only files that match our criteria.
            (context-only-files
