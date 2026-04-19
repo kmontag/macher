@@ -1060,7 +1060,7 @@
                   (append (macher--project-files (cdr workspace)) (list symlink-path))))
 
         (let ((result (macher--tool-list-directory context ".")))
-          (expect result :to-match "link: file-symlink ->")
+          (expect result :to-match (format "link: file-symlink -> %s" target-path))
           (expect result :to-match "file: file1.txt")
           (expect result :to-match "file: file2.el"))
 
@@ -1079,7 +1079,7 @@
                   (append (macher--project-files (cdr workspace)) (list dir-symlink-path))))
 
         (let ((result (macher--tool-list-directory context ".")))
-          (expect result :to-match "link: dir-symlink ->")
+          (expect result :to-match (format "link: dir-symlink -> %s" target-dir))
           (expect result :to-match "dir: subdir"))
 
         ;; Clean up.
@@ -2846,8 +2846,7 @@
                   (append (macher--project-files (cdr workspace)) (list symlink-path))))
 
         (let ((result (macher--tool-read-file context "test-symlink")))
-          (expect result :to-match "Symlink target:")
-          (expect result :to-match target-path))
+          (expect result :to-equal (format "Symlink target: %s" target-path)))
 
         ;; Clean up.
         (delete-file symlink-path))
@@ -2863,8 +2862,7 @@
                   (append (macher--project-files (cdr workspace)) (list broken-symlink-path))))
 
         (let ((result (macher--tool-read-file context "broken-symlink")))
-          (expect result :to-match "Symlink target:")
-          (expect result :to-match "/nonexistent/target"))
+          (expect result :to-equal "Symlink target: /nonexistent/target"))
 
         ;; Clean up.
         (delete-file broken-symlink-path))
@@ -2880,8 +2878,7 @@
                   (append (macher--project-files (cdr workspace)) (list rel-symlink-path))))
 
         (let ((result (macher--tool-read-file context "rel-symlink")))
-          (expect result :to-match "Symlink target:")
-          (expect result :to-match "./test-file.txt"))
+          (expect result :to-equal "Symlink target: ./test-file.txt"))
 
         ;; Clean up.
         (delete-file rel-symlink-path)))
