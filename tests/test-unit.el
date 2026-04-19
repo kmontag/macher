@@ -1056,7 +1056,7 @@
         ;; Mock workspace files to include the symlink.
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   (append (macher--project-files (cdr workspace)) (list symlink-path))))
 
         (let ((result (macher--tool-list-directory context ".")))
@@ -1075,7 +1075,7 @@
         ;; Mock workspace files to include the directory symlink
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   (append (macher--project-files (cdr workspace)) (list dir-symlink-path))))
 
         (let ((result (macher--tool-list-directory context ".")))
@@ -1092,7 +1092,7 @@
         ;; Mock workspace files to include the broken symlink.
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   (append (macher--project-files (cdr workspace)) (list broken-symlink-path))))
 
         (let ((result (macher--tool-list-directory context ".")))
@@ -1180,7 +1180,7 @@
         ;; This simulates files that exist on disk but aren't tracked by the workspace.
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   ;; Get the actual files from the real function but filter out untracked files.
                   (let ((files (macher--project-files (cdr workspace))))
                     (cl-remove-if
@@ -1247,7 +1247,7 @@
         ;; Mock workspace files to exclude these directories entirely.
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   ;; Get the actual files but filter out anything in untracked directories.
                   (let ((files (macher--project-files (cdr workspace))))
                     (cl-remove-if
@@ -1334,7 +1334,7 @@
                 ;; files outside the workspace root.
                 (spy-on 'macher--workspace-files
                         :and-call-fake
-                        (lambda (workspace &rest _args)
+                        (lambda (workspace)
                           ;; Get the actual project files and add our external file
                           (let ((normal-files (macher--project-files (cdr workspace))))
                             (append normal-files (list external-file)))))
@@ -1729,7 +1729,7 @@
         ;; Mock workspace-files to exclude extra-file.
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   (let ((files (macher--project-files (cdr workspace))))
                     (cl-remove-if (lambda (file) (string-match-p "excluded\\.txt$" file)) files))))
 
@@ -1744,7 +1744,7 @@
         ;; Mock workspace-files to exclude extra-file.
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   (let ((files (macher--project-files (cdr workspace))))
                     (cl-remove-if (lambda (file) (string-match-p "excluded\\.txt$" file)) files))))
 
@@ -2842,7 +2842,7 @@
         ;; Mock workspace files to include the symlink
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   (append (macher--project-files (cdr workspace)) (list symlink-path))))
 
         (let ((result (macher--tool-read-file context "test-symlink")))
@@ -2858,7 +2858,7 @@
         ;; Mock workspace files to include the broken symlink
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   (append (macher--project-files (cdr workspace)) (list broken-symlink-path))))
 
         (let ((result (macher--tool-read-file context "broken-symlink")))
@@ -2874,7 +2874,7 @@
         ;; Mock workspace files to include the relative symlink
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   (append (macher--project-files (cdr workspace)) (list rel-symlink-path))))
 
         (let ((result (macher--tool-read-file context "rel-symlink")))
@@ -5744,7 +5744,7 @@
         ;; Spy on macher--workspace-files to exclude extra.txt from the files list.
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   ;; Get the actual files from the real function but filter out extra.txt.
                   (let ((files (macher--project-files (cdr workspace))))
                     (cl-remove-if (lambda (file) (string-match-p "extra\\.txt$" file)) files))))
@@ -5776,7 +5776,7 @@
         ;; Mock workspace files to include the symlink.
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   (append (macher--project-files (cdr workspace)) (list symlink-path))))
 
         (let ((result (macher--resolve-workspace-path project-workspace "test-symlink")))
@@ -5892,7 +5892,7 @@
         ;; Mock workspace files to include the broken symlink.
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   (append (macher--project-files (cdr workspace)) (list broken-symlink))))
 
         (let ((result (macher--resolve-workspace-path project-workspace "broken-symlink")))
@@ -5913,7 +5913,7 @@
         ;; Spy on macher--workspace-files to exclude the symlink from the files list.
         (spy-on 'macher--workspace-files
                 :and-call-fake
-                (lambda (workspace &rest _args)
+                (lambda (workspace)
                   ;; Get the actual files from the real function but filter out the symlink.
                   (let ((files (macher--project-files (cdr workspace))))
                     (cl-remove-if
@@ -6928,27 +6928,17 @@
       ;; would push the count above 20.
       (expect remote-call-count :to-be-less-than 20))
 
-    (it "read-file does not redundantly validate the workspace root"
-      ;; macher--workspace-root is called multiple times during a single
-      ;; read-file invocation (from resolve-workspace-path, workspace-files,
-      ;; etc.), and each call checks file-directory-p on the root.  Count
-      ;; how many times macher--workspace-root is called.
-      (let ((root-call-count 0))
-        (advice-add 'macher--workspace-root :before
-                    (lambda (&rest _args)
-                      (setq root-call-count (1+ root-call-count)))
-                    '((name . count-root-calls)))
-        (unwind-protect
-            (ignore-errors
-              (let ((context (macher--make-context
-                              :workspace (cons 'project remote-root))))
-                (macher--tool-read-file context "src/main.py")))
-          (advice-remove 'macher--workspace-root 'count-root-calls))
-        ;; macher--workspace-root does a file-directory-p check each time
-        ;; it's called, so it should be called at most once per tool
-        ;; invocation rather than repeatedly from resolve-workspace-path,
-        ;; workspace-files, workspace-root, etc.
-        (expect root-call-count :to-equal 1)))
+    (it "macher--workspace-root does not trigger remote I/O"
+      ;; macher--workspace-root is a pure resolver: it should return the
+      ;; configured root without validating it, since any downstream file
+      ;; operation will fail naturally if the root is bad.  Over TRAMP,
+      ;; a validation like file-directory-p would be a remote round-trip
+      ;; every time the function is called (which may be many times per
+      ;; tool invocation).
+      (setq remote-call-count 0)
+      (let ((workspace (cons 'project remote-root)))
+        (expect (macher--workspace-root workspace) :not :to-be nil))
+      (expect remote-call-count :to-equal 0))
 
     (it "read-file does not trigger redundant project discovery"
       ;; macher--workspace-files calls macher--workspace-root internally,

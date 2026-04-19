@@ -1395,19 +1395,15 @@ Returns a string containing the workspace name."
         (funcall name-fn workspace-id)
       (error "No name function configured for workspace type %s" workspace-type))))
 
-(defun macher--workspace-files (workspace &optional root-path)
+(defun macher--workspace-files (workspace)
   "Get list of files in WORKSPACE.
 WORKSPACE is a cons cell (TYPE . ID) where TYPE is a workspace type.
-Returns a list of absolute file paths.
-
-If ROOT-PATH is provided, it is used as the workspace root for
-resolving relative paths; otherwise `macher--workspace-root' is called.
-Passing an already-computed root avoids a redundant call over TRAMP."
+Returns a list of absolute file paths."
   (let* ((workspace-type (car workspace))
          (workspace-id (cdr workspace))
          (type-config (alist-get workspace-type macher-workspace-types-alist))
          (files-fn (plist-get type-config :get-files))
-         (root-path (or root-path (macher--workspace-root workspace))))
+         (root-path (macher--workspace-root workspace)))
     (when files-fn
       (let ((files (funcall files-fn workspace-id)))
         ;; Ensure all paths are absolute.
@@ -1966,9 +1962,8 @@ types."
                       (error
                        "Path '%s' contains a file in a non-final component" rel-path)))))))))))
 
-    ;; Validate access permissions.  Pass the already-computed workspace-root to avoid a
-    ;; redundant `macher--workspace-root' call inside `macher--workspace-files'.
-    (let* ((raw-workspace-files (macher--workspace-files workspace workspace-root))
+    ;; Validate access permissions.
+    (let* ((raw-workspace-files (macher--workspace-files workspace))
            ;; Process workspace files by expanding them relative to workspace root
            (workspace-files
             (when raw-workspace-files
