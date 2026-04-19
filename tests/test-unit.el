@@ -240,12 +240,14 @@
         (let ((proj-dir (make-temp-file "macher-test-edit-proj" t)))
           (write-region "" nil (expand-file-name ".project" proj-dir))
           (write-region "real" nil (expand-file-name "real.txt" proj-dir))
-          (let ((ctx (macher--make-context
-                      :workspace (cons 'project (file-name-as-directory proj-dir)))))
+          (let ((ctx
+                 (macher--make-context
+                  :workspace (cons 'project (file-name-as-directory proj-dir)))))
             (spy-on 'macher--workspace-files
                     :and-return-value
-                    (list (expand-file-name "real.txt" proj-dir)
-                          (expand-file-name "ghost.txt" proj-dir)))
+                    (list
+                     (expand-file-name "real.txt" proj-dir)
+                     (expand-file-name "ghost.txt" proj-dir)))
             (unwind-protect
                 (expect (macher--tool-edit-file ctx "ghost.txt" "old" "new" nil) :to-throw)
               (delete-directory proj-dir t)))))))
@@ -2805,8 +2807,8 @@
       ;; search should still work, treating the missing file as empty.
       (spy-on 'macher--workspace-files
               :and-return-value
-              (list (expand-file-name "file1.txt" temp-dir)
-                    (expand-file-name "ghost.txt" temp-dir)))
+              (list
+               (expand-file-name "file1.txt" temp-dir) (expand-file-name "ghost.txt" temp-dir)))
       (let ((result (macher--tool-search-helper context "hello")))
         (expect result :to-match "file1.txt")
         (expect result :not :to-match "ghost.txt"))))
@@ -2892,8 +2894,8 @@
       ;; read-file should error rather than silently returning nil.
       (spy-on 'macher--workspace-files
               :and-return-value
-              (list (expand-file-name "test-file.txt" temp-dir)
-                    (expand-file-name "ghost.txt" temp-dir)))
+              (list
+               (expand-file-name "test-file.txt" temp-dir) (expand-file-name "ghost.txt" temp-dir)))
       (expect (macher--tool-read-file context "ghost.txt") :to-throw))
 
     (describe "float parameter handling"
@@ -6799,8 +6801,7 @@
                   (expect marker-count :to-equal 1)))))))))
 
   (describe "remote workspace compatibility"
-    :var (temp-dir remote-root remote-call-count remote-handler
-          saved-handler-alist)
+    :var (temp-dir remote-root remote-call-count remote-handler saved-handler-alist)
 
     (before-each
       (setq temp-dir (make-temp-file "macher-test-remote" t))
@@ -6814,9 +6815,17 @@
       (let ((default-directory temp-dir))
         (call-process "git" nil nil nil "init")
         (call-process "git" nil nil nil "add" ".")
-        (call-process "git" nil nil nil
-                      "-c" "user.name=test" "-c" "user.email=test@test"
-                      "commit" "-m" "init"))
+        (call-process "git"
+                      nil
+                      nil
+                      nil
+                      "-c"
+                      "user.name=test"
+                      "-c"
+                      "user.email=test@test"
+                      "commit"
+                      "-m"
+                      "init"))
 
       ;; Build mock remote file handler.  Paths prefixed with
       ;; /mock-remote: are routed through this handler, which strips the
@@ -6825,10 +6834,11 @@
       ;; dispatch).
       (let* ((prefix "/mock-remote:")
              (rx "\\`/mock-remote:")
-             (strip (lambda (path)
-                      (if (string-match-p rx path)
-                          (substring path (length prefix))
-                        path))))
+             (strip
+              (lambda (path)
+                (if (string-match-p rx path)
+                    (substring path (length prefix))
+                  path))))
 
         (setq remote-root (concat prefix (file-name-as-directory temp-dir)))
         (setq remote-call-count 0)
@@ -6836,11 +6846,15 @@
         (setq remote-handler
               (lambda (operation &rest args)
                 ;; Count I/O operations that would be network round-trips.
-                (when (memq operation
-                            '(file-exists-p file-readable-p file-attributes
-                              insert-file-contents process-file
-                              start-file-process directory-files
-                              vc-registered))
+                (when (memq
+                       operation
+                       '(file-exists-p file-readable-p
+                                       file-attributes
+                                       insert-file-contents
+                                       process-file
+                                       start-file-process
+                                       directory-files
+                                       vc-registered))
                   (setq remote-call-count (1+ remote-call-count)))
                 (cond
                  ;; Report as remote so xref takes the remote code path.
@@ -6854,19 +6868,17 @@
                       (_ nil))))
                  ;; Preserve prefix through path expansion.
                  ((eq operation 'expand-file-name)
-                  (concat prefix
-                          (expand-file-name
-                           (funcall strip (car args))
-                           (and (cadr args) (funcall strip (cadr args))))))
+                  (concat
+                   prefix
+                   (expand-file-name (funcall strip (car args))
+                                     (and (cadr args) (funcall strip (cadr args))))))
                  ((eq operation 'file-name-directory)
                   (let ((dir (file-name-directory (funcall strip (car args)))))
                     (and dir (concat prefix dir))))
                  ((eq operation 'file-name-as-directory)
-                  (concat prefix
-                          (file-name-as-directory (funcall strip (car args)))))
+                  (concat prefix (file-name-as-directory (funcall strip (car args)))))
                  ((eq operation 'directory-file-name)
-                  (concat prefix
-                          (directory-file-name (funcall strip (car args)))))
+                  (concat prefix (directory-file-name (funcall strip (car args)))))
                  ((eq operation 'file-truename)
                   (concat prefix (file-truename (funcall strip (car args)))))
                  ;; Reproduce the TRAMP behavior: when xref returns a local
@@ -6875,12 +6887,9 @@
                  ((eq operation 'file-relative-name)
                   (let ((name (car args))
                         (dir (cadr args)))
-                    (if (and dir
-                             (not (string-match-p rx name))
-                             (string-match-p rx dir))
+                    (if (and dir (not (string-match-p rx name)) (string-match-p rx dir))
                         name
-                      (file-relative-name (funcall strip name)
-                                          (and dir (funcall strip dir))))))
+                      (file-relative-name (funcall strip name) (and dir (funcall strip dir))))))
                  ;; Run processes locally.
                  ((eq operation 'process-file)
                   (let ((default-directory (funcall strip default-directory)))
@@ -6894,15 +6903,14 @@
                  (t
                   (let ((file-name-handler-alist
                          (cl-remove-if
-                          (lambda (e) (eq (cdr e) remote-handler))
-                          file-name-handler-alist)))
+                          (lambda (e) (eq (cdr e) remote-handler)) file-name-handler-alist)))
                     (apply operation
-                           (mapcar (lambda (a)
-                                     (if (and (stringp a)
-                                              (string-match-p rx a))
-                                         (funcall strip a)
-                                       a))
-                                   args)))))))
+                           (mapcar
+                            (lambda (a)
+                              (if (and (stringp a) (string-match-p rx a))
+                                  (funcall strip a)
+                                a))
+                            args)))))))
 
         ;; Register handler.
         (push (cons rx remote-handler) file-name-handler-alist)))
@@ -6917,8 +6925,7 @@
       ;; prefix from result paths (e.g. /ssh:host:/path/file becomes
       ;; /path/file).  The search function must still produce correct
       ;; relative paths despite this mismatch.
-      (let* ((context (macher--make-context
-                       :workspace (cons 'project remote-root)))
+      (let* ((context (macher--make-context :workspace (cons 'project remote-root)))
              (result (macher--search-get-xref-matches context "hello")))
         (expect result :to-be-truthy)
         (expect (assoc "src/main.py" result) :to-be-truthy)
@@ -6932,17 +6939,24 @@
       ;; remote connection.  The total I/O call count should stay sub-linear
       ;; in the number of workspace files.
       (dotimes (i 20)
-        (write-region (format "hello from file %d" i) nil
-                      (expand-file-name (format "file_%d.txt" i) temp-dir)))
+        (write-region
+         (format "hello from file %d" i) nil (expand-file-name (format "file_%d.txt" i) temp-dir)))
       (let ((default-directory temp-dir))
         (call-process "git" nil nil nil "add" ".")
-        (call-process "git" nil nil nil
-                      "-c" "user.name=test" "-c" "user.email=test@test"
-                      "commit" "-m" "add test files"))
+        (call-process "git"
+                      nil
+                      nil
+                      nil
+                      "-c"
+                      "user.name=test"
+                      "-c"
+                      "user.email=test@test"
+                      "commit"
+                      "-m"
+                      "add test files"))
 
       (setq remote-call-count 0)
-      (let ((context (macher--make-context
-                      :workspace (cons 'project remote-root))))
+      (let ((context (macher--make-context :workspace (cons 'project remote-root))))
         (macher--tool-search context "hello" nil nil "files"))
 
       ;; The total I/O call count should stay well below the number

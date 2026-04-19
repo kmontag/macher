@@ -2768,8 +2768,8 @@ the `xref-search-program' to perform the search."
                           ;; paths lack the TRAMP prefix, so relativize
                           ;; against the local part of workspace-root.
                           (file-relative-name original-file
-                            (or (file-remote-p workspace-root 'localname)
-                                workspace-root)))))
+                                              (or (file-remote-p workspace-root 'localname)
+                                                  workspace-root)))))
 
                     ;; Group results by file for proper formatting.
                     (let ((file-entry (assoc rel-path results)))
