@@ -1437,10 +1437,9 @@
         ;; adding a non-existent path to the workspace-files list and ensure search
         ;; doesn't crash and still returns matches for the real files.
         (let ((stale-path (expand-file-name "ghost.txt" temp-dir)))
-          (spy-on 'macher--workspace-files
-                  :and-call-fake
-                  (lambda (workspace)
-                    (cons stale-path (macher--project-files (cdr workspace)))))
+          (spy-on
+           'macher--workspace-files
+           :and-call-fake (lambda (workspace) (cons stale-path (macher--project-files (cdr workspace)))))
           (let ((result (macher--search-get-xref-matches context "hello")))
             (expect (assoc "file1.txt" result) :to-be-truthy)
             (expect (assoc "ghost.txt" result) :to-be nil))))

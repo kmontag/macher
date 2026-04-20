@@ -2172,8 +2172,7 @@ Returns the processed content as a string."
        (t
         (string-join selected-lines "\n"))))))
 
-(defun macher--with-workspace-file (context path callback
-                                            &optional set-dirty-p workspace-files)
+(defun macher--with-workspace-file (context path callback &optional set-dirty-p workspace-files)
   "Helper function to execute CALLBACK with workspace file content.
 
 CONTEXT is a `macher-context' struct containing workspace information.
@@ -3435,7 +3434,8 @@ otherwise returns (nil . nil)."
                   (with-temp-buffer
                     (insert-file-contents normalized-path)
                     (buffer-substring-no-properties (point-min) (point-max)))
-                (file-missing nil)))
+                (file-missing
+                 nil)))
              ;; For non-existent files, store (nil . nil); for existing files, the original and
              ;; new content start as the same.
              (content-pair
