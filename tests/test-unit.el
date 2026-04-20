@@ -6878,15 +6878,14 @@
     :var (temp-dir remote-root)
 
     (before-all
-      ;; Register a custom TRAMP method that uses a local /bin/sh as
-      ;; its "login program".  This exercises real TRAMP code paths —
-      ;; path parsing, handler dispatch, caching, xref temp-file
-      ;; management — without needing a network connection.  The same
-      ;; trick is used by TRAMP's own test suite.
+      ;; Register a custom TRAMP method that uses a local /bin/sh as its "login program".  This
+      ;; exercises real TRAMP code paths — path parsing, handler dispatch, caching, xref temp-file
+      ;; management — without needing a network connection.  The same trick is used by TRAMP's own
+      ;; test suite.
       (require 'tramp)
       (require 'tramp-sh)
-      ;; Suppress chatty "File is missing: .gitmodules" log lines
-      ;; that TRAMP emits when project.el probes for submodules.
+      ;; Suppress chatty "File is missing: .gitmodules" log lines that TRAMP emits when project.el
+      ;; probes for submodules.
       (setq tramp-verbose 0)
       (unless (assoc "mock" tramp-methods)
         (add-to-list
@@ -6901,8 +6900,8 @@
     (before-each
       (setq temp-dir (make-temp-file "macher-test-remote" t))
 
-      ;; Create test files and initialize a git repo so project-vc
-      ;; discovers the project through TRAMP.
+      ;; Create test files and initialize a git repo so project-vc discovers the project through
+      ;; TRAMP.
       (make-directory (expand-file-name "src" temp-dir))
       (write-region "hello world" nil (expand-file-name "src/main.py" temp-dir))
       (write-region "hello again" nil (expand-file-name "src/util.py" temp-dir))
@@ -6910,24 +6909,26 @@
         (call-process "git" nil nil nil "init")
         (call-process "git" nil nil nil "add" ".")
         (call-process "git"
-                      nil nil nil
-                      "-c" "user.name=test"
-                      "-c" "user.email=test@test"
-                      "commit" "-m" "init"))
+                      nil
+                      nil
+                      nil
+                      "-c"
+                      "user.name=test"
+                      "-c"
+                      "user.email=test@test"
+                      "commit"
+                      "-m"
+                      "init"))
 
-      ;; Construct the remote root in TRAMP's normalized form
-      ;; (/mock:HOST:PATH/) and prime the connection so that the first
-      ;; real operation doesn't have to initialize it.
-      (setq remote-root
-            (format "/mock:%s:%s" (system-name) (file-name-as-directory temp-dir)))
+      ;; Construct the remote root in TRAMP's normalized form (/mock:HOST:PATH/) and prime the
+      ;; connection so that the first real operation doesn't have to initialize it.
+      (setq remote-root (format "/mock:%s:%s" (system-name) (file-name-as-directory temp-dir)))
       (file-directory-p remote-root)
 
-      ;; Spy on tramp-send-command to count remote round-trips.  Every
-      ;; actual command sent to the remote shell goes through this
-      ;; function, so it gives a uniform, backend-agnostic measure of
-      ;; "remote I/O" regardless of which primitive (file-attributes,
-      ;; file-exists-p, process-file, etc.) triggered it.  Installed
-      ;; after warm-up so connection-setup commands aren't counted.
+      ;; Spy on tramp-send-command to count remote round-trips.  Every actual command sent to the
+      ;; remote shell goes through this function, so it gives a uniform, backend-agnostic measure of
+      ;; "remote I/O" regardless of which primitive (file-attributes, file-exists-p, process-file,
+      ;; etc.) triggered it.  Installed after warm-up so connection-setup commands aren't counted.
       (spy-on 'tramp-send-command :and-call-through))
 
     (after-each
@@ -6947,43 +6948,46 @@
           (expect (file-name-absolute-p (car entry)) :to-be nil))))
 
     (it "search makes sub-linear remote calls in N workspace files"
-      ;; A regression that triggers per-file I/O (e.g. a
-      ;; `file-exists-p' check on each workspace file) would push the
-      ;; total remote-call count above the file count.  Create more
-      ;; than 100 files and assert that the total stays under 100 —
-      ;; that directly proves the operation is sub-linear.
+      ;; A regression that triggers per-file I/O (e.g. a `file-exists-p' check on each workspace
+      ;; file) would push the total remote-call count above the file count.  Create more than 100
+      ;; files and assert that the total stays under 100 — that directly proves the operation is
+      ;; sub-linear.  Note we expect a somewhat large baseline of remote operations, for
+      ;; e.g. project.el project detection; but we want to make sure it doesn't grow linearly with
+      ;; the number of files in the project.
       (dotimes (i 120)
         (write-region
-         (format "hello from file %d" i) nil
-         (expand-file-name (format "file_%d.txt" i) temp-dir)))
+         (format "hello from file %d" i) nil (expand-file-name (format "file_%d.txt" i) temp-dir)))
       (let ((default-directory temp-dir))
         (call-process "git" nil nil nil "add" ".")
         (call-process "git"
-                      nil nil nil
-                      "-c" "user.name=test"
-                      "-c" "user.email=test@test"
-                      "commit" "-m" "add test files"))
+                      nil
+                      nil
+                      nil
+                      "-c"
+                      "user.name=test"
+                      "-c"
+                      "user.email=test@test"
+                      "commit"
+                      "-m"
+                      "add test files"))
 
       (let ((context (macher--make-context :workspace (cons 'project remote-root))))
         (macher--tool-search context "hello" nil nil "files"))
       (expect (spy-calls-count 'tramp-send-command) :to-be-less-than 100))
 
     (it "macher--workspace-root does not trigger remote I/O"
-      ;; macher--workspace-root is a pure resolver: it should return
-      ;; the configured root without validating it, since any
-      ;; downstream file operation will fail naturally if the root is
-      ;; bad.  Over TRAMP, a validation like file-directory-p would be
-      ;; a remote round-trip every time the function is called (which
-      ;; may be many times per tool invocation).
+      ;; `macher--workspace-root' is a pure resolver: it should return the configured root without
+      ;; validating it, since any downstream file operation will fail naturally if the root is bad.
+      ;; Over TRAMP, a validation like file-directory-p would be a remote round-trip every time the
+      ;; function is called (which may be many times per tool invocation).
       (let ((workspace (cons 'project remote-root)))
         (expect (macher--workspace-root workspace) :not :to-be nil))
       (expect (spy-calls-count 'tramp-send-command) :to-equal 0))
 
     (it "read-file does not trigger redundant project discovery"
-      ;; project-current (called transitively via macher--project-files)
-      ;; triggers project-try-vc which walks the directory tree probing
-      ;; for .git/.gitmodules.  It's expensive over TRAMP and should be
-      ;; called at most once per tool invocation.
+      ;; `project-current' (called transitively via `macher--project-files') triggers project-try-vc
+      ;; which walks the directory tree probing for .git/.gitmodules.  It's expensive over TRAMP and
+      ;; should be called at most once per tool invocation.
       (spy-on 'project-current :and-call-through)
       (ignore-errors
         (let ((context (macher--make-context :workspace (cons 'project remote-root))))
@@ -6991,11 +6995,10 @@
       (expect (spy-calls-count 'project-current) :to-equal 1))
 
     (it "search does not trigger redundant project discovery"
-      ;; The search tool resolves the search path via
-      ;; macher--resolve-workspace-path and also reads workspace-files
-      ;; directly.  Both paths call macher--workspace-files
-      ;; internally, but project-current (and its directory-walk
-      ;; probes) should only happen once per tool invocation.
+      ;; The search tool resolves the search path via `macher--resolve-workspace-path' and also reads
+      ;; workspace-files directly.  Both paths call `macher--workspace-files' internally, but
+      ;; project-current (and its directory-walk probes) should only happen once per tool
+      ;; invocation.
       (spy-on 'project-current :and-call-through)
       (ignore-errors
         (let ((context (macher--make-context :workspace (cons 'project remote-root))))
@@ -7003,10 +7006,9 @@
       (expect (spy-calls-count 'project-current) :to-equal 1))
 
     (it "list-directory does not trigger redundant project discovery"
-      ;; Like search, list-directory resolves a path and separately
-      ;; reads workspace-files for entry collection.  Both should
-      ;; share the same workspace-files computation so project-current
-      ;; only runs once.
+      ;; Like search, list-directory resolves a path and separately reads workspace-files for entry
+      ;; collection.  Both should share the same workspace-files computation so project-current only
+      ;; runs once.
       (spy-on 'project-current :and-call-through)
       (ignore-errors
         (let ((context (macher--make-context :workspace (cons 'project remote-root))))
