@@ -105,7 +105,15 @@
         (expect (cdr non-existent-contents) :to-be nil) ;; New content should be nil.
         ;; Should be added to context's contents list.
         (expect (assoc (macher--normalize-path non-existent) (macher-context-contents context))
-                :to-be-truthy))))
+                :to-be-truthy)))
+
+    (it "propagates non-file-missing read errors (e.g. permission denied)"
+      ;; `contents-for-file' should catch `file-missing' to avoid a separate existence
+      ;; probe, but broader `file-error' signals must propagate so real problems
+      ;; (permission denied, TRAMP connection failure, etc.) aren't silently hidden.
+      (cl-letf (((symbol-function 'insert-file-contents)
+                 (lambda (&rest _) (signal 'file-error '("Permission denied")))))
+        (expect (macher-context--contents-for-file temp-file context) :to-throw 'file-error))))
 
   (describe "macher-context--set-new-content-for-file"
     :var (context temp-file original-contents)
@@ -1421,6 +1429,21 @@
          context)
         (let ((result (macher--search-get-xref-matches context "modified")))
           (expect (assoc "file1.txt" result) :to-be-truthy)))
+
+      (it "tolerates stale workspace-files entries pointing at missing files"
+        ;; `macher--search-get-xref-matches' no longer filters workspace-files through
+        ;; `file-exists-p' up-front (that was expensive over TRAMP); it relies on the
+        ;; search backend to skip missing files.  Simulate a stale project cache by
+        ;; adding a non-existent path to the workspace-files list and ensure search
+        ;; doesn't crash and still returns matches for the real files.
+        (let ((stale-path (expand-file-name "ghost.txt" temp-dir)))
+          (spy-on 'macher--workspace-files
+                  :and-call-fake
+                  (lambda (workspace)
+                    (cons stale-path (macher--project-files (cdr workspace)))))
+          (let ((result (macher--search-get-xref-matches context "hello")))
+            (expect (assoc "file1.txt" result) :to-be-truthy)
+            (expect (assoc "ghost.txt" result) :to-be nil))))
 
       (it "shows paths relative to workspace root even when path is specified"
         (let ((result (macher--search-get-xref-matches context "hello" :path "subdir")))
