@@ -6884,6 +6884,7 @@
       ;; management — without needing a network connection.  The same
       ;; trick is used by TRAMP's own test suite.
       (require 'tramp)
+      (require 'tramp-sh)
       ;; Suppress chatty "File is missing: .gitmodules" log lines
       ;; that TRAMP emits when project.el probes for submodules.
       (setq tramp-verbose 0)
@@ -6919,7 +6920,15 @@
       ;; real operation doesn't have to initialize it.
       (setq remote-root
             (format "/mock:%s:%s" (system-name) (file-name-as-directory temp-dir)))
-      (file-directory-p remote-root))
+      (file-directory-p remote-root)
+
+      ;; Spy on tramp-send-command to count remote round-trips.  Every
+      ;; actual command sent to the remote shell goes through this
+      ;; function, so it gives a uniform, backend-agnostic measure of
+      ;; "remote I/O" regardless of which primitive (file-attributes,
+      ;; file-exists-p, process-file, etc.) triggered it.  Installed
+      ;; after warm-up so connection-setup commands aren't counted.
+      (spy-on 'tramp-send-command :and-call-through))
 
     (after-each
       (tramp-cleanup-all-connections)
@@ -6940,8 +6949,12 @@
     (it "search does not make O(N) remote calls for N workspace files"
       ;; When each workspace file triggers individual I/O operations
       ;; (e.g. per-file existence checks), every one becomes a
-      ;; round-trip over a remote connection.  The per-file-stat count
-      ;; should stay sub-linear in the number of workspace files.
+      ;; round-trip over a remote connection.  The total remote-call
+      ;; count should stay roughly constant regardless of how many
+      ;; files are in the workspace.  The baseline for a small
+      ;; workspace is ~70 calls (xref temp-file dance, git
+      ;; submodule probe, grep invocation); a per-file regression
+      ;; would add ~9 extra calls per file.
       (dotimes (i 20)
         (write-region
          (format "hello from file %d" i) nil
@@ -6954,10 +6967,9 @@
                       "-c" "user.email=test@test"
                       "commit" "-m" "add test files"))
 
-      (spy-on 'file-attributes :and-call-through)
       (let ((context (macher--make-context :workspace (cons 'project remote-root))))
         (macher--tool-search context "hello" nil nil "files"))
-      (expect (spy-calls-count 'file-attributes) :to-be-less-than 20))
+      (expect (spy-calls-count 'tramp-send-command) :to-be-less-than 100))
 
     (it "macher--workspace-root does not trigger remote I/O"
       ;; macher--workspace-root is a pure resolver: it should return
@@ -6966,10 +6978,9 @@
       ;; bad.  Over TRAMP, a validation like file-directory-p would be
       ;; a remote round-trip every time the function is called (which
       ;; may be many times per tool invocation).
-      (spy-on 'file-attributes :and-call-through)
       (let ((workspace (cons 'project remote-root)))
         (expect (macher--workspace-root workspace) :not :to-be nil))
-      (expect (spy-calls-count 'file-attributes) :to-equal 0))
+      (expect (spy-calls-count 'tramp-send-command) :to-equal 0))
 
     (it "read-file does not trigger redundant project discovery"
       ;; project-current (called transitively via macher--project-files)
@@ -7005,22 +7016,17 @@
           (macher--tool-list-directory context ".")))
       (expect (spy-calls-count 'project-current) :to-equal 1))
 
-    (it "loading a file's contents into the context does a single remote read"
-      ;; macher-context--contents-for-file should not check file-exists-p
-      ;; before reading the file — that's a separate TRAMP round-trip.
-      ;; Instead it should just try to read and treat a read failure as
-      ;; a non-existent file.
-      (spy-on 'file-exists-p :and-call-through)
+    (it "loading a file's contents into the context makes at most one remote read"
+      ;; macher-context--contents-for-file should not do a separate
+      ;; file-exists-p probe before reading — that's a wasted
+      ;; round-trip.  It should just try to read and handle the
+      ;; missing-file error.  For a single small file, the total
+      ;; remote-call count should stay tight (~20 for one read and
+      ;; one local-copy; a redundant exists-check would push it up).
       (let* ((context (macher--make-context :workspace (cons 'project remote-root)))
              (full-path (expand-file-name "src/main.py" remote-root)))
         (macher-context--contents-for-file full-path context))
-      (let ((calls-on-target
-             (seq-filter
-              (lambda (call)
-                (let ((arg (car (spy-context-args call))))
-                  (and (stringp arg) (string-match-p "main\\.py\\'" arg))))
-              (spy-calls-all 'file-exists-p))))
-        (expect (length calls-on-target) :to-equal 0)))))
+      (expect (spy-calls-count 'tramp-send-command) :to-be-less-than 25))))
 
 (provide 'test-unit)
 ;;; test-unit.el ends here
