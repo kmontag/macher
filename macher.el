@@ -3426,15 +3426,16 @@ otherwise returns (nil . nil)."
     (if existing-contents
         ;; Return the existing contents.
         (cdr existing-contents)
-      ;; Try to load the file content, treating a read failure as a non-existent file.  This
-      ;; avoids a separate `file-exists-p' round-trip over TRAMP before the actual read.
+      ;; Try to load the file content, treating a missing file as (nil . nil) rather than
+      ;; doing a separate `file-exists-p' round-trip over TRAMP before the actual read.  Only
+      ;; catch `file-missing' — broader `file-error' signals (permission denied, TRAMP
+      ;; connection failure, etc.) should propagate so the caller sees the real problem.
       (let* ((file-content
               (condition-case nil
                   (with-temp-buffer
                     (insert-file-contents normalized-path)
                     (buffer-substring-no-properties (point-min) (point-max)))
-                (file-missing nil)
-                (file-error nil)))
+                (file-missing nil)))
              ;; For non-existent files, store (nil . nil); for existing files, the original and
              ;; new content start as the same.
              (content-pair
