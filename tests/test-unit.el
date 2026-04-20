@@ -6941,12 +6941,10 @@
       (expect remote-call-count :to-equal 0))
 
     (it "read-file does not trigger redundant project discovery"
-      ;; macher--workspace-files calls macher--workspace-root internally,
-      ;; which re-triggers project-current and its associated I/O
-      ;; (file-exists-p, file-attributes on the root, .gitmodules checks,
-      ;; etc.).  This is redundant since resolve-workspace-path already
-      ;; validated the root.  Track how many times project-current is
-      ;; invoked during a single read-file call.
+      ;; project-current (called transitively via macher--project-files)
+      ;; triggers project-try-vc which walks the directory tree probing
+      ;; for .git/.gitmodules.  It's expensive over TRAMP and should be
+      ;; called at most once per tool invocation.
       (let ((project-current-count 0))
         (advice-add 'project-current :before
                     (lambda (&rest _args)
@@ -6958,10 +6956,47 @@
                               :workspace (cons 'project remote-root))))
                 (macher--tool-read-file context "src/main.py")))
           (advice-remove 'project-current 'count-project-current))
-        ;; project-current triggers project-try-vc which does multiple
-        ;; remote I/O calls (file-exists-p, file-attributes, .gitmodules).
-        ;; It should be called at most once per tool invocation.
-        (expect project-current-count :to-equal 1)))))
+        (expect project-current-count :to-equal 1)))
+
+    (it "search does not trigger redundant project discovery"
+      ;; The search tool resolves the search path via
+      ;; macher--resolve-workspace-path and also reads workspace-files
+      ;; directly.  Both paths call macher--workspace-files internally,
+      ;; but project-current (and its directory-walk probes) should only
+      ;; happen once per tool invocation.
+      (let ((project-current-count 0))
+        (advice-add 'project-current :before
+                    (lambda (&rest _args)
+                      (setq project-current-count (1+ project-current-count)))
+                    '((name . count-project-current-search)))
+        (unwind-protect
+            (ignore-errors
+              (let ((context (macher--make-context
+                              :workspace (cons 'project remote-root))))
+                (macher--tool-search context "hello" nil nil "files")))
+          (advice-remove 'project-current 'count-project-current-search))
+        (expect project-current-count :to-equal 1)))
+
+    (it "loading a file's contents into the context does a single remote read"
+      ;; macher-context--contents-for-file should not check file-exists-p
+      ;; before reading the file — that's a separate TRAMP round-trip.
+      ;; Instead it should just try to read and treat a read failure as
+      ;; a non-existent file.
+      (let ((file-exists-p-count 0))
+        (advice-add 'file-exists-p :before
+                    (lambda (path &rest _args)
+                      (when (and (stringp path)
+                                 (string-match-p "main\\.py\\'" path))
+                        (setq file-exists-p-count (1+ file-exists-p-count))))
+                    '((name . count-file-exists-p)))
+        (unwind-protect
+            (ignore-errors
+              (let* ((context (macher--make-context
+                               :workspace (cons 'project remote-root)))
+                     (full-path (expand-file-name "src/main.py" remote-root)))
+                (macher-context--contents-for-file full-path context)))
+          (advice-remove 'file-exists-p 'count-file-exists-p))
+        (expect file-exists-p-count :to-equal 0)))))
 
 (provide 'test-unit)
 ;;; test-unit.el ends here

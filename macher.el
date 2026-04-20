@@ -1888,7 +1888,7 @@ Ensures paths are consistently handled throughout the codebase."
       (expand-file-name path)
     (error "PATH must be an absolute file path")))
 
-(defun macher--resolve-workspace-path (workspace rel-path)
+(defun macher--resolve-workspace-path (workspace rel-path &optional workspace-files)
   "Get the full path for REL-PATH within the WORKSPACE.
 
 The path will be resolved relative to the workspace root.  '.' and '..'
@@ -1962,8 +1962,9 @@ types."
                       (error
                        "Path '%s' contains a file in a non-final component" rel-path)))))))))))
 
-    ;; Validate access permissions.
-    (let* ((raw-workspace-files (macher--workspace-files workspace))
+    ;; Validate access permissions.  If WORKSPACE-FILES was passed in, use it instead of calling
+    ;; `macher--workspace-files' (which can trigger `project-current' over TRAMP).
+    (let* ((raw-workspace-files (or workspace-files (macher--workspace-files workspace)))
            ;; Process workspace files by expanding them relative to workspace root
            (workspace-files
             (when raw-workspace-files
@@ -2642,10 +2643,14 @@ the `xref-search-program' to perform the search."
          (case-fold-search case-insensitive)
          (workspace (macher-context-workspace context))
          (workspace-root (macher--workspace-root workspace))
-         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
+         ;; Compute workspace-files once and reuse it for path resolution below.  Each call
+         ;; triggers `project-current' which is expensive over TRAMP (walks the directory tree
+         ;; looking for a VC root).
+         (workspace-files (macher--workspace-files workspace))
+         (resolve-workspace-path
+          (lambda (rel-path) (macher--resolve-workspace-path workspace rel-path workspace-files)))
          (search-path (funcall resolve-workspace-path (or path ".")))
          (context-contents (macher-context-contents context))
-         (workspace-files (macher--workspace-files workspace))
          (path
           (when path
             (expand-file-name path workspace-root)))
@@ -3344,30 +3349,23 @@ otherwise returns (nil . nil)."
     (if existing-contents
         ;; Return the existing contents.
         (cdr existing-contents)
-      ;; Handle file existence check.
-      (if (not (file-exists-p normalized-path))
-          ;; For non-existent files, store (nil . nil) in context and return it.
-          (let ((context-contents (macher-context-contents context))
-                (content-pair (cons nil nil)))
-            ;; Add to context.
-            (push (cons normalized-path content-pair) context-contents)
-            (setf (macher-context-contents context) context-contents)
-            content-pair)
-        ;; For existing files, load the file content.
-        (let* ((file-content
-                (with-temp-buffer
-                  (insert-file-contents normalized-path)
-                  (buffer-substring-no-properties (point-min) (point-max))))
-               (context-contents (macher-context-contents context))
-               ;; Both original and new content start as the same.
-               (content-pair (cons file-content file-content)))
-
-          ;; Add to context.
-          (push (cons normalized-path content-pair) context-contents)
-          (setf (macher-context-contents context) context-contents)
-
-          ;; Return the content pair.
-          content-pair)))))
+      ;; Try to load the file content, treating a read failure as a non-existent file.  This
+      ;; avoids a separate `file-exists-p' round-trip over TRAMP before the actual read.
+      (let* ((file-content
+              (condition-case nil
+                  (with-temp-buffer
+                    (insert-file-contents normalized-path)
+                    (buffer-substring-no-properties (point-min) (point-max)))
+                (file-missing nil)
+                (file-error nil)))
+             ;; For non-existent files, store (nil . nil); for existing files, the original and
+             ;; new content start as the same.
+             (content-pair
+              (if file-content
+                  (cons file-content file-content)
+                (cons nil nil))))
+        (push (cons normalized-path content-pair) (macher-context-contents context))
+        content-pair))))
 
 ;;; Default Prompt Functions
 (defun macher--focus-string-default ()
