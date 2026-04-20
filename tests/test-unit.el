@@ -6875,14 +6875,33 @@
                   (expect marker-count :to-equal 1)))))))))
 
   (describe "remote workspace compatibility"
-    :var (temp-dir remote-root remote-call-count remote-handler saved-handler-alist)
+    :var (temp-dir remote-root)
+
+    (before-all
+      ;; Register a custom TRAMP method that uses a local /bin/sh as
+      ;; its "login program".  This exercises real TRAMP code paths —
+      ;; path parsing, handler dispatch, caching, xref temp-file
+      ;; management — without needing a network connection.  The same
+      ;; trick is used by TRAMP's own test suite.
+      (require 'tramp)
+      ;; Suppress chatty "File is missing: .gitmodules" log lines
+      ;; that TRAMP emits when project.el probes for submodules.
+      (setq tramp-verbose 0)
+      (unless (assoc "mock" tramp-methods)
+        (add-to-list
+         'tramp-methods
+         `("mock"
+           (tramp-login-program ,(executable-find "sh"))
+           (tramp-login-args (("-i")))
+           (tramp-remote-shell "/bin/sh")
+           (tramp-remote-shell-args ("-c"))
+           (tramp-connection-timeout 10)))))
 
     (before-each
       (setq temp-dir (make-temp-file "macher-test-remote" t))
-      (setq saved-handler-alist file-name-handler-alist)
 
       ;; Create test files and initialize a git repo so project-vc
-      ;; discovers the project naturally through the mock file handler.
+      ;; discovers the project through TRAMP.
       (make-directory (expand-file-name "src" temp-dir))
       (write-region "hello world" nil (expand-file-name "src/main.py" temp-dir))
       (write-region "hello again" nil (expand-file-name "src/util.py" temp-dir))
@@ -6890,103 +6909,20 @@
         (call-process "git" nil nil nil "init")
         (call-process "git" nil nil nil "add" ".")
         (call-process "git"
-                      nil
-                      nil
-                      nil
-                      "-c"
-                      "user.name=test"
-                      "-c"
-                      "user.email=test@test"
-                      "commit"
-                      "-m"
-                      "init"))
+                      nil nil nil
+                      "-c" "user.name=test"
+                      "-c" "user.email=test@test"
+                      "commit" "-m" "init"))
 
-      ;; Build mock remote file handler.  Paths prefixed with
-      ;; /mock-remote: are routed through this handler, which strips the
-      ;; prefix and delegates to the local filesystem — reproducing the
-      ;; key TRAMP behaviors (xref path stripping, per-file handler
-      ;; dispatch).
-      (let* ((prefix "/mock-remote:")
-             (rx "\\`/mock-remote:")
-             (strip
-              (lambda (path)
-                (if (string-match-p rx path)
-                    (substring path (length prefix))
-                  path))))
-
-        (setq remote-root (concat prefix (file-name-as-directory temp-dir)))
-        (setq remote-call-count 0)
-
-        (setq remote-handler
-              (lambda (operation &rest args)
-                ;; Count I/O operations that would be network round-trips.
-                (when (memq
-                       operation
-                       '(file-exists-p file-readable-p
-                                       file-attributes
-                                       insert-file-contents
-                                       process-file
-                                       start-file-process
-                                       directory-files
-                                       vc-registered))
-                  (setq remote-call-count (1+ remote-call-count)))
-                (cond
-                 ;; Report as remote so xref takes the remote code path.
-                 ((eq operation 'file-remote-p)
-                  (when (string-match-p rx (car args))
-                    (pcase (cadr args)
-                      ('nil prefix)
-                      ('localname (funcall strip (car args)))
-                      ('method "mock-remote")
-                      ('host "localhost")
-                      (_ nil))))
-                 ;; Preserve prefix through path expansion.
-                 ((eq operation 'expand-file-name)
-                  (concat
-                   prefix
-                   (expand-file-name (funcall strip (car args))
-                                     (and (cadr args) (funcall strip (cadr args))))))
-                 ((eq operation 'file-name-directory)
-                  (let ((dir (file-name-directory (funcall strip (car args)))))
-                    (and dir (concat prefix dir))))
-                 ((eq operation 'file-name-as-directory)
-                  (concat prefix (file-name-as-directory (funcall strip (car args)))))
-                 ((eq operation 'directory-file-name)
-                  (concat prefix (directory-file-name (funcall strip (car args)))))
-                 ((eq operation 'file-truename)
-                  (concat prefix (file-truename (funcall strip (car args)))))
-                 ;; Relativize by stripping the mock-remote prefix from
-                 ;; both paths and delegating to the real file-relative-name.
-                 ((eq operation 'file-relative-name)
-                  (file-relative-name (funcall strip (car args))
-                                      (and (cadr args) (funcall strip (cadr args)))))
-                 ;; Run processes locally.
-                 ((eq operation 'process-file)
-                  (let ((default-directory (funcall strip default-directory)))
-                    (apply #'call-process args)))
-                 ((eq operation 'start-file-process)
-                  (let ((default-directory (funcall strip default-directory)))
-                    (apply #'start-process args)))
-                 ((eq operation 'unhandled-file-name-directory)
-                  nil)
-                 ;; Default: strip prefix, delegate locally.
-                 (t
-                  (let ((file-name-handler-alist
-                         (cl-remove-if
-                          (lambda (e) (eq (cdr e) remote-handler)) file-name-handler-alist)))
-                    (apply operation
-                           (mapcar
-                            (lambda (a)
-                              (if (and (stringp a) (string-match-p rx a))
-                                  (funcall strip a)
-                                a))
-                            args)))))))
-
-        ;; Register handler.
-        (push (cons rx remote-handler) file-name-handler-alist)))
+      ;; Construct the remote root in TRAMP's normalized form
+      ;; (/mock:HOST:PATH/) and prime the connection so that the first
+      ;; real operation doesn't have to initialize it.
+      (setq remote-root
+            (format "/mock:%s:%s" (system-name) (file-name-as-directory temp-dir)))
+      (file-directory-p remote-root))
 
     (after-each
-      (setq file-name-handler-alist saved-handler-alist)
+      (tramp-cleanup-all-connections)
       (when (and temp-dir (file-exists-p temp-dir))
         (delete-directory temp-dir t)))
 
@@ -7002,47 +6938,38 @@
           (expect (file-name-absolute-p (car entry)) :to-be nil))))
 
     (it "search does not make O(N) remote calls for N workspace files"
-      ;; When each workspace file triggers individual I/O operations (e.g.
-      ;; per-file existence checks), every one becomes a round-trip over a
-      ;; remote connection.  The total I/O call count should stay sub-linear
-      ;; in the number of workspace files.
+      ;; When each workspace file triggers individual I/O operations
+      ;; (e.g. per-file existence checks), every one becomes a
+      ;; round-trip over a remote connection.  The per-file-stat count
+      ;; should stay sub-linear in the number of workspace files.
       (dotimes (i 20)
         (write-region
-         (format "hello from file %d" i) nil (expand-file-name (format "file_%d.txt" i) temp-dir)))
+         (format "hello from file %d" i) nil
+         (expand-file-name (format "file_%d.txt" i) temp-dir)))
       (let ((default-directory temp-dir))
         (call-process "git" nil nil nil "add" ".")
         (call-process "git"
-                      nil
-                      nil
-                      nil
-                      "-c"
-                      "user.name=test"
-                      "-c"
-                      "user.email=test@test"
-                      "commit"
-                      "-m"
-                      "add test files"))
+                      nil nil nil
+                      "-c" "user.name=test"
+                      "-c" "user.email=test@test"
+                      "commit" "-m" "add test files"))
 
-      (setq remote-call-count 0)
+      (spy-on 'file-attributes :and-call-through)
       (let ((context (macher--make-context :workspace (cons 'project remote-root))))
         (macher--tool-search context "hello" nil nil "files"))
-
-      ;; The total I/O call count should stay well below the number
-      ;; of workspace files — per-file remote calls (like file-exists-p)
-      ;; would push the count above 20.
-      (expect remote-call-count :to-be-less-than 20))
+      (expect (spy-calls-count 'file-attributes) :to-be-less-than 20))
 
     (it "macher--workspace-root does not trigger remote I/O"
-      ;; macher--workspace-root is a pure resolver: it should return the
-      ;; configured root without validating it, since any downstream file
-      ;; operation will fail naturally if the root is bad.  Over TRAMP,
-      ;; a validation like file-directory-p would be a remote round-trip
-      ;; every time the function is called (which may be many times per
-      ;; tool invocation).
-      (setq remote-call-count 0)
+      ;; macher--workspace-root is a pure resolver: it should return
+      ;; the configured root without validating it, since any
+      ;; downstream file operation will fail naturally if the root is
+      ;; bad.  Over TRAMP, a validation like file-directory-p would be
+      ;; a remote round-trip every time the function is called (which
+      ;; may be many times per tool invocation).
+      (spy-on 'file-attributes :and-call-through)
       (let ((workspace (cons 'project remote-root)))
         (expect (macher--workspace-root workspace) :not :to-be nil))
-      (expect remote-call-count :to-equal 0))
+      (expect (spy-calls-count 'file-attributes) :to-equal 0))
 
     (it "read-file does not trigger redundant project discovery"
       ;; project-current (called transitively via macher--project-files)
@@ -7058,9 +6985,9 @@
     (it "search does not trigger redundant project discovery"
       ;; The search tool resolves the search path via
       ;; macher--resolve-workspace-path and also reads workspace-files
-      ;; directly.  Both paths call macher--workspace-files internally,
-      ;; but project-current (and its directory-walk probes) should only
-      ;; happen once per tool invocation.
+      ;; directly.  Both paths call macher--workspace-files
+      ;; internally, but project-current (and its directory-walk
+      ;; probes) should only happen once per tool invocation.
       (spy-on 'project-current :and-call-through)
       (ignore-errors
         (let ((context (macher--make-context :workspace (cons 'project remote-root))))
@@ -7068,10 +6995,10 @@
       (expect (spy-calls-count 'project-current) :to-equal 1))
 
     (it "list-directory does not trigger redundant project discovery"
-      ;; Like search, list-directory resolves a path and separately reads
-      ;; workspace-files for entry collection.  Both should share the
-      ;; same workspace-files computation so project-current only runs
-      ;; once.
+      ;; Like search, list-directory resolves a path and separately
+      ;; reads workspace-files for entry collection.  Both should
+      ;; share the same workspace-files computation so project-current
+      ;; only runs once.
       (spy-on 'project-current :and-call-through)
       (ignore-errors
         (let ((context (macher--make-context :workspace (cons 'project remote-root))))
