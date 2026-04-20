@@ -3133,6 +3133,11 @@ piping the results through `head -N`."
           (let ((lines (split-string output "\n")))
             (when (> (length lines) parsed-head-limit)
               (setq output (string-join (seq-take lines parsed-head-limit) "\n")))))
+        (when (> (length output) macher--max-read-length)
+          (error
+           "Too many matches: %d bytes exceeds maximum read length of %d bytes"
+           (length output)
+           macher--max-read-length))
         output))))
 
 (defun macher--tool-search
