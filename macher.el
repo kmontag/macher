@@ -2210,9 +2210,14 @@ LLMs.
 
 Signals an error if the directory is not found in the workspace."
   (let* ((workspace (macher-context-workspace context))
-         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
-         (full-path (funcall resolve-workspace-path path))
          (workspace-root (macher--workspace-root workspace))
+         ;; Compute workspace-files once and reuse it for path resolution and entry collection
+         ;; below.  Each call transitively triggers `project-current', which is expensive over
+         ;; TRAMP (walks the directory tree probing for a VC root).
+         (workspace-files (macher--workspace-files workspace))
+         (resolve-workspace-path
+          (lambda (rel-path) (macher--resolve-workspace-path workspace rel-path workspace-files)))
+         (full-path (funcall resolve-workspace-path path))
          (results '())
          (context-contents (macher-context-contents context)))
 
@@ -2313,9 +2318,10 @@ Signals an error if the directory is not found in the workspace."
 
          (collect-entries
           (current-path current-rel-path depth)
-          ;; Build entries list by iterating through workspace files.
-          (let* ((workspace-files (macher--workspace-files workspace))
-                 (current-path-as-dir (file-name-as-directory current-path))
+          ;; Build entries list by iterating through workspace files.  Uses the
+          ;; already-computed `workspace-files' from the enclosing let to avoid another remote
+          ;; `project-current' walk.
+          (let* ((current-path-as-dir (file-name-as-directory current-path))
                  ;; Hash table to collect unique entries (both files and directories).
                  (entries-hash (make-hash-table :test 'equal))
 

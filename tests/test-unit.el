@@ -6977,6 +6977,24 @@
           (advice-remove 'project-current 'count-project-current-search))
         (expect project-current-count :to-equal 1)))
 
+    (it "list-directory does not trigger redundant project discovery"
+      ;; Like search, list-directory resolves a path and separately reads
+      ;; workspace-files for entry collection.  Both should share the
+      ;; same workspace-files computation so project-current only runs
+      ;; once.
+      (let ((project-current-count 0))
+        (advice-add 'project-current :before
+                    (lambda (&rest _args)
+                      (setq project-current-count (1+ project-current-count)))
+                    '((name . count-project-current-list)))
+        (unwind-protect
+            (ignore-errors
+              (let ((context (macher--make-context
+                              :workspace (cons 'project remote-root))))
+                (macher--tool-list-directory context ".")))
+          (advice-remove 'project-current 'count-project-current-list))
+        (expect project-current-count :to-equal 1)))
+
     (it "loading a file's contents into the context does a single remote read"
       ;; macher-context--contents-for-file should not check file-exists-p
       ;; before reading the file — that's a separate TRAMP round-trip.
