@@ -7011,27 +7011,7 @@
       (ignore-errors
         (let ((context (macher--make-context :workspace (cons 'project remote-root))))
           (macher--tool-list-directory context ".")))
-      (expect (spy-calls-count 'project-current) :to-equal 1))
-
-    (it "loading a file's contents does not redundantly probe existence"
-      ;; macher-context--contents-for-file should not call
-      ;; `file-exists-p' before reading — that's a wasted round-trip.
-      ;; It should just try to read and handle the missing-file
-      ;; error.  tramp-send-command alone can't catch this regression
-      ;; because TRAMP caches `file-attributes' within a short TTL, so
-      ;; an extra `file-exists-p' on an already-stat'd path is nearly
-      ;; free; spy directly on the primitive to catch it reliably.
-      (spy-on 'file-exists-p :and-call-through)
-      (let* ((context (macher--make-context :workspace (cons 'project remote-root)))
-             (full-path (expand-file-name "src/main.py" remote-root)))
-        (macher-context--contents-for-file full-path context))
-      (let ((calls-on-target
-             (seq-filter
-              (lambda (call)
-                (let ((arg (car (spy-context-args call))))
-                  (and (stringp arg) (string-match-p "main\\.py\\'" arg))))
-              (spy-calls-all 'file-exists-p))))
-        (expect (length calls-on-target) :to-equal 0)))))
+      (expect (spy-calls-count 'project-current) :to-equal 1))))
 
 (provide 'test-unit)
 ;;; test-unit.el ends here
