@@ -3192,6 +3192,12 @@
           (let ((result (macher--file-workspace)))
             (expect result :to-be nil)))))
 
+    (describe "macher--get-buffer with nil workspace"
+      (it "signals user-error when no workspace can be determined"
+        (with-temp-buffer
+          (let ((macher-workspace-functions nil))
+            (expect (macher--get-buffer nil nil t) :to-throw 'user-error)))))
+
     (describe "macher-workspace"
       (it "returns buffer-local workspace when set"
         (with-temp-buffer
