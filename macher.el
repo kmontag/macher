@@ -260,6 +260,14 @@ This function is used by the default actions in the
 You can use `macher--action-from-region-or-input' if you need to, but
 behavior is subject to change in the future.")
 
+(define-obsolete-function-alias 'macher--project-workspace #'macher-workspace-project "0.6.0"
+  "Renamed to `macher-workspace-project' for a consistent public API.
+All workspace detection functions now use the `macher-workspace-' prefix.")
+
+(define-obsolete-function-alias 'macher--file-workspace #'macher-workspace-file "0.6.0"
+  "Renamed to `macher-workspace-file' for a consistent public API.
+All workspace detection functions now use the `macher-workspace-' prefix.")
+
 (defconst macher--workspace-postfix
   (concat
    "\n\n"
@@ -1132,7 +1140,7 @@ macher tools in your custom presets, etc."
 
 ;;;; Workspace selection and configuration
 
-(defcustom macher-workspace-functions '(macher--project-workspace macher--file-workspace)
+(defcustom macher-workspace-functions '(macher-workspace-project macher-workspace-file)
   "Functions to determine the workspace for the current buffer.
 
 Each function in this list is called with no arguments in the current
@@ -1143,8 +1151,10 @@ Functions should return nil if they cannot determine a workspace for
 the current buffer, allowing other functions in the list to try.
 
 Built-in workspace functions:
-- `macher--project-workspace': Uses project.el to find project workspaces
-- `macher--file-workspace': Falls back to single-file workspaces
+- `macher-workspace-project': Uses project.el to find project workspaces
+- `macher-workspace-file': Falls back to single-file workspaces
+- `macher-workspace-directory': Uses `default-directory' as the
+  workspace root (opt-in, not included in the default value)
 
 The output and patch buffers will be shared among files in the same
 workspace (i.e. same type and ID).
@@ -1167,7 +1177,13 @@ Custom functions should return a cons cell (TYPE . ID) where:
       macher--project-root
       :get-name macher--project-name
       :get-files macher--project-files))
-    (file . (:get-root file-name-directory :get-name file-name-nondirectory :get-files list)))
+    (file . (:get-root file-name-directory :get-name file-name-nondirectory :get-files list))
+    (directory
+     .
+     (:get-root
+      macher--directory-root
+      :get-name macher--directory-name
+      :get-files macher--directory-files)))
   "Alist mapping workspace types to their defining functions.
 
 Each entry is of the form (TYPE . PLIST) where TYPE is a symbol
@@ -1294,18 +1310,38 @@ or is aborted.")
 ;;; Internal Functions
 
 ;; Built-in workspace detection functions
-(defun macher--project-workspace ()
+(defun macher-workspace-project ()
   "Detect project workspace for the current buffer.
 Returns (project . ROOT) if the buffer is in a project, nil otherwise."
   (require 'project)
   (when-let ((project (project-current nil default-directory)))
     (cons 'project (project-root project))))
 
-(defun macher--file-workspace ()
+(defun macher-workspace-file ()
   "Detect file workspace for the current buffer.
 Returns (file . FILENAME) if the buffer is visiting a file, nil otherwise."
   (when-let ((filename (buffer-file-name)))
     (cons 'file filename)))
+
+(defun macher-workspace-directory ()
+  "Detect directory workspace for the current buffer.
+Returns (directory . DIR) using the buffer's `default-directory'.
+
+All files under DIR are exposed to the LLM, including hidden files and
+directories.  This function is NOT included in
+`macher-workspace-functions' by default because it would expose all
+files under `default-directory' to the LLM, which could be intrusive
+for broad directories like the home directory.
+
+To enable, add to `macher-workspace-functions':
+
+  (setq macher-workspace-functions
+        \\='(macher-workspace-project macher-workspace-directory))"
+  (when-let ((dir
+              (and default-directory
+                   (file-directory-p default-directory)
+                   (expand-file-name default-directory))))
+    (cons 'directory dir)))
 
 ;; Built-in workspace type functions
 (defun macher--project-root (project-id)
@@ -1341,6 +1377,24 @@ Returns a list of relative file paths."
               (files (project-files proj)))
     ;; Return files relative to project root.
     (mapcar (lambda (f) (file-relative-name f project-id)) files)))
+
+(defun macher--directory-root (directory-id)
+  "Get the root for DIRECTORY-ID, validating it's a real directory."
+  (unless (and (stringp directory-id)
+               (file-name-absolute-p directory-id)
+               (file-directory-p directory-id))
+    (error "Directory ID '%s' is not a valid directory" directory-id))
+  directory-id)
+
+(defun macher--directory-name (directory-id)
+  "Get a descriptive name for DIRECTORY-ID."
+  (file-name-nondirectory (directory-file-name directory-id)))
+
+(defun macher--directory-files (directory-id)
+  "Get list of files in DIRECTORY-ID recursively.
+Returns a list of relative file paths."
+  (mapcar
+   (lambda (f) (file-relative-name f directory-id)) (directory-files-recursively directory-id "")))
 
 (defun macher-workspace (&optional buffer)
   "Get the workspace information for BUFFER.
@@ -1803,37 +1857,39 @@ by `macher-workspace'.
 Returns a cons cell (BUFFER . CREATED-P) where BUFFER is the target
 buffer and CREATED-P is t if the buffer was newly created, nil
 otherwise."
-  (let* ((workspace (or workspace (macher-workspace)))
-         (workspace-type (car workspace))
-         (workspace-name (macher--workspace-name workspace))
-         (buffer-type-segment
-          (if buffer-type
-              (format "-%s" buffer-type)
-            ""))
-         (buffer-name
-          (format "*macher%s:%s@%s<%s>*"
-                  buffer-type-segment workspace-type workspace-name
-                  ;; Use a shorter hash in buffer names.
-                  (macher--workspace-hash workspace 4)))
-         target-buffer
-         created-p)
+  (let* ((workspace (or workspace (macher-workspace))))
 
     (unless (consp workspace)
-      (error "Workspace must be a cons cell"))
+      (user-error
+       (concat
+        "No macher workspace found for the current buffer; " "see `macher-workspace-functions'")))
 
-    (setq target-buffer (and buffer-name (get-buffer buffer-name)))
-    (when (and (not target-buffer) create buffer-name)
-      (setq target-buffer (get-buffer-create buffer-name))
-      (setq created-p t)
-      (with-current-buffer target-buffer
-        ;; Track workspace for this buffer.
-        (setq-local macher--workspace workspace)
-        ;; Set the context directory for operations like diff application or 'project.el'
-        ;; lookups.
-        (let ((base-dir (macher--workspace-root workspace)))
-          (setq-local default-directory base-dir))))
-    (when target-buffer
-      (cons target-buffer created-p))))
+    (let* ((workspace-type (car workspace))
+           (workspace-name (macher--workspace-name workspace))
+           (buffer-type-segment
+            (if buffer-type
+                (format "-%s" buffer-type)
+              ""))
+           (buffer-name
+            (format "*macher%s:%s@%s<%s>*"
+                    buffer-type-segment workspace-type workspace-name
+                    ;; Use a shorter hash in buffer names.
+                    (macher--workspace-hash workspace 4)))
+           target-buffer
+           created-p)
+
+      (setq target-buffer (and buffer-name (get-buffer buffer-name)))
+      (when (and (not target-buffer) create buffer-name)
+        (setq target-buffer (get-buffer-create buffer-name))
+        (setq created-p t)
+        (with-current-buffer target-buffer
+          ;; Track workspace for this buffer.
+          (setq-local macher--workspace workspace)
+          ;; Set the context directory for operations like diff application or 'project.el' lookups.
+          (let ((base-dir (macher--workspace-root workspace)))
+            (setq-local default-directory base-dir))))
+      (when target-buffer
+        (cons target-buffer created-p)))))
 
 (defun macher-action-buffer (&optional workspace create)
   "Get the macher action buffer associated with WORKSPACE.

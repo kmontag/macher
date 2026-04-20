@@ -176,15 +176,23 @@ The workspace description can be customized by setting the `macher-context-strin
 
 ### Workspaces
 
-The **workspace** is the set of files macher can read and edit. By default, macher supports:
+The **workspace** is the set of files macher can read and edit.
+
+The workspace is determined by `macher-workspace-functions`. All file operations are restricted to
+the current workspace. By default, macher supports:
 
 - **`project`**: A project.el project
 - **`file`**: A single non-project file
 
-The workspace is determined by `macher-workspace-functions`. All file operations are restricted to
-the current workspace.
+A **`directory`** workspace type is also available for working in arbitrary directories (not managed
+by project.el). It is not enabled by default to avoid accidentally exposing broad directories to the
+LLM. To enable it, you can do something like:
 
-To add custom workspace types, extend `macher-workspace-types-alist` and
+```elisp
+(setq macher-workspace-functions '(macher-workspace-project macher-workspace-directory))
+```
+
+To add custom workspace types, customize `macher-workspace-types-alist` and
 `macher-workspace-functions`.
 
 ### Request lifecycle
