@@ -1975,7 +1975,12 @@ them in.
 Note also that paths outside the workspace root are allowed _if_ they
 appear in the workspace's files list.  This won't be the case for the
 built-in workspace types, but might be relevant for custom workspace
-types."
+types.
+
+If WORKSPACE-FILES is provided, it is used as the workspace files list
+instead of calling `macher--workspace-files'.  This lets callers that
+already have the list avoid a redundant computation, which can be
+expensive for remote workspaces."
   (let* (
          ;; We don't really want to deal with the `file-truename', as this would resolve symlinks
          ;; and might mess up the path structure when dealing with relative paths like
