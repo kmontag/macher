@@ -6946,16 +6946,13 @@
         (dolist (entry result)
           (expect (file-name-absolute-p (car entry)) :to-be nil))))
 
-    (it "search does not make O(N) remote calls for N workspace files"
-      ;; When each workspace file triggers individual I/O operations
-      ;; (e.g. per-file existence checks), every one becomes a
-      ;; round-trip over a remote connection.  The total remote-call
-      ;; count should stay roughly constant regardless of how many
-      ;; files are in the workspace.  The baseline for a small
-      ;; workspace is ~70 calls (xref temp-file dance, git
-      ;; submodule probe, grep invocation); a per-file regression
-      ;; would add ~9 extra calls per file.
-      (dotimes (i 20)
+    (it "search makes sub-linear remote calls in N workspace files"
+      ;; A regression that triggers per-file I/O (e.g. a
+      ;; `file-exists-p' check on each workspace file) would push the
+      ;; total remote-call count above the file count.  Create more
+      ;; than 100 files and assert that the total stays under 100 —
+      ;; that directly proves the operation is sub-linear.
+      (dotimes (i 120)
         (write-region
          (format "hello from file %d" i) nil
          (expand-file-name (format "file_%d.txt" i) temp-dir)))
@@ -7016,17 +7013,25 @@
           (macher--tool-list-directory context ".")))
       (expect (spy-calls-count 'project-current) :to-equal 1))
 
-    (it "loading a file's contents into the context makes at most one remote read"
-      ;; macher-context--contents-for-file should not do a separate
-      ;; file-exists-p probe before reading — that's a wasted
-      ;; round-trip.  It should just try to read and handle the
-      ;; missing-file error.  For a single small file, the total
-      ;; remote-call count should stay tight (~20 for one read and
-      ;; one local-copy; a redundant exists-check would push it up).
+    (it "loading a file's contents does not redundantly probe existence"
+      ;; macher-context--contents-for-file should not call
+      ;; `file-exists-p' before reading — that's a wasted round-trip.
+      ;; It should just try to read and handle the missing-file
+      ;; error.  tramp-send-command alone can't catch this regression
+      ;; because TRAMP caches `file-attributes' within a short TTL, so
+      ;; an extra `file-exists-p' on an already-stat'd path is nearly
+      ;; free; spy directly on the primitive to catch it reliably.
+      (spy-on 'file-exists-p :and-call-through)
       (let* ((context (macher--make-context :workspace (cons 'project remote-root)))
              (full-path (expand-file-name "src/main.py" remote-root)))
         (macher-context--contents-for-file full-path context))
-      (expect (spy-calls-count 'tramp-send-command) :to-be-less-than 25))))
+      (let ((calls-on-target
+             (seq-filter
+              (lambda (call)
+                (let ((arg (car (spy-context-args call))))
+                  (and (stringp arg) (string-match-p "main\\.py\\'" arg))))
+              (spy-calls-all 'file-exists-p))))
+        (expect (length calls-on-target) :to-equal 0)))))
 
 (provide 'test-unit)
 ;;; test-unit.el ends here
