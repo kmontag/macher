@@ -2172,7 +2172,8 @@ Returns the processed content as a string."
        (t
         (string-join selected-lines "\n"))))))
 
-(defun macher--with-workspace-file (context path callback &optional set-dirty-p)
+(defun macher--with-workspace-file (context path callback
+                                            &optional set-dirty-p workspace-files)
   "Helper function to execute CALLBACK with workspace file content.
 
 CONTEXT is a `macher-context' struct containing workspace information.
@@ -2183,9 +2184,14 @@ CALLBACK is called with arguments (full-path new-content) where:
 - full-path is the absolute path to the file
 - new-content is the current content string of the file
 
-If SET-DIRTY-P is non-nil, sets the dirty-p flag on the context."
+If SET-DIRTY-P is non-nil, sets the dirty-p flag on the context.
+
+WORKSPACE-FILES, if provided, is passed through to
+`macher--resolve-workspace-path' instead of having it compute the
+list itself.  Useful for callers that already have the list, to avoid
+a redundant computation over a remote connection."
   (let* ((workspace (macher-context-workspace context))
-         (full-path (macher--resolve-workspace-path workspace path))
+         (full-path (macher--resolve-workspace-path workspace path workspace-files))
          (contents (macher-context--contents-for-file full-path context))
          (new-content (cdr contents)))
     ;; Check if the file exists for editing.
@@ -2639,8 +2645,11 @@ Returns nil on success.  Signals an error if the source file is not found or
 if the destination already exists.  Sets the dirty-p flag on the context to
 indicate changes."
   (let* ((workspace (macher-context-workspace context))
-         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
-         (dest-full-path (funcall resolve-workspace-path destination-path)))
+         ;; Compute workspace-files once and share it with both resolve calls
+         ;; below, to avoid a redundant `project-current' walk over TRAMP.
+         (workspace-files (macher--workspace-files workspace))
+         (dest-full-path
+          (macher--resolve-workspace-path workspace destination-path workspace-files)))
     ;; Check if destination already exists.
     (let ((dest-contents (macher-context--contents-for-file dest-full-path context)))
       (when (cdr dest-contents)
@@ -2656,7 +2665,7 @@ indicate changes."
                                     source-full-path nil context)
                                    ;; Return nil to indicate success.
                                    nil)
-                                 t)))
+                                 t workspace-files)))
 
 (defun macher--tool-delete-file (context rel-path)
   "Delete a file specified by REL-PATH within the workspace.
