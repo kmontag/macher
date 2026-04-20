@@ -3162,11 +3162,11 @@
       (expect project-dir :to-be-truthy)
       (expect file :to-be-truthy))
 
-    (describe "macher--project-workspace"
+    (describe "macher-workspace-project"
       (it "returns project workspace when in a project"
         (with-temp-buffer
           (find-file project-file)
-          (let ((result (macher--project-workspace)))
+          (let ((result (macher-workspace-project)))
             (expect result :to-be-truthy)
             (expect (car result) :to-be 'project)
             (expect (file-truename (directory-file-name (cdr result)))
@@ -3175,24 +3175,122 @@
       (it "returns nil when not in a project"
         (with-temp-buffer
           (find-file file)
-          (let ((result (macher--project-workspace)))
+          (let ((result (macher-workspace-project)))
             (expect result :to-be nil)))))
 
-    (describe "macher--file-workspace"
+    (describe "macher-workspace-file"
       (it "returns file workspace when buffer visits a file"
         (with-temp-buffer
           (find-file file)
-          (let ((result (macher--file-workspace)))
+          (let ((result (macher-workspace-file)))
             (expect result :to-be-truthy)
             (expect (car result) :to-be 'file)
             (expect (cdr result) :to-equal file))))
 
       (it "returns nil when buffer doesn't visit a file"
         (with-temp-buffer
-          (let ((result (macher--file-workspace)))
+          (let ((result (macher-workspace-file)))
             (expect result :to-be nil)))))
 
-    (describe "macher--get-buffer with nil workspace"
+    (describe "macher-workspace-directory"
+      (it "returns directory workspace for any buffer with default-directory"
+        (with-temp-buffer
+          (let ((default-directory (expand-file-name "/tmp/")))
+            (let ((result (macher-workspace-directory)))
+              (expect result :to-be-truthy)
+              (expect (car result) :to-be 'directory)
+              (expect (cdr result) :to-equal (expand-file-name "/tmp/"))))))
+
+      (it "returns nil when default-directory is nil"
+        (with-temp-buffer
+          (let ((default-directory nil))
+            (expect (macher-workspace-directory) :to-be nil))))
+
+      (it "returns nil when default-directory is not a real directory"
+        (with-temp-buffer
+          (let ((default-directory "/nonexistent/path/that/does/not/exist/"))
+            (expect (macher-workspace-directory) :to-be nil))))
+
+      (it "is not used by default, but works when added to `macher-workspace-functions'"
+        (let ((tmp-dir (make-temp-file "macher-dir-ws-" t)))
+          (unwind-protect
+              (with-temp-buffer
+                (let ((default-directory (file-name-as-directory tmp-dir)))
+                  ;; With the default value, no workspace should be detected for a plain directory
+                  ;; buffer (no project, no file).
+                  (let ((macher-workspace-functions (default-value 'macher-workspace-functions)))
+                    (expect (macher-workspace) :to-be nil))
+                  ;; Adding `macher-workspace-directory' to the list makes a directory workspace
+                  ;; detectable.
+                  (let ((macher-workspace-functions
+                         (append
+                          (default-value
+                           'macher-workspace-functions)
+                          (list 'macher-workspace-directory))))
+                    (let ((workspace (macher-workspace)))
+                      (expect (car workspace) :to-be 'directory)
+                      (expect (cdr workspace)
+                              :to-equal (file-name-as-directory (expand-file-name tmp-dir)))))))
+            (delete-directory tmp-dir t)))))
+
+    (describe "macher--directory-root"
+      (it "returns the directory ID for valid directories"
+        (expect (macher--directory-root project-dir) :to-equal project-dir))
+
+      (it "throws error for non-existent directory"
+        (expect (macher--directory-root "/nonexistent/path") :to-throw 'error))
+
+      (it "throws error for non-string input"
+        (expect (macher--directory-root nil) :to-throw 'error)))
+
+    (describe "macher--directory-name"
+      (it "returns the directory basename"
+        (expect (macher--directory-name "/foo/bar/") :to-equal "bar")
+        (expect (macher--directory-name "/foo/bar") :to-equal "bar")))
+
+    (describe "macher--directory-files"
+      (it "returns relative file paths"
+        (let ((files (macher--directory-files project-dir)))
+          (expect files :to-be-truthy)
+          (dolist (f files)
+            (expect (file-name-absolute-p f) :to-be nil))))
+
+      (it "includes files from subdirectories"
+        (let ((files (macher--directory-files project-dir)))
+          (expect (member "subdir/file3.md" files) :to-be-truthy)))
+
+      (it "includes hidden files at the top level"
+        (let ((hidden-file (expand-file-name ".env" project-dir)))
+          (write-region "SECRET=1" nil hidden-file)
+          (let ((files (macher--directory-files project-dir)))
+            (expect (member ".env" files) :to-be-truthy))))
+
+      (it "includes hidden files in subdirectories"
+        (let* ((subdir (expand-file-name "sub" project-dir))
+               (hidden-file (expand-file-name ".env" subdir)))
+          (make-directory subdir)
+          (write-region "SECRET=1" nil hidden-file)
+          (let ((files (macher--directory-files project-dir)))
+            (expect (member "sub/.env" files) :to-be-truthy))))
+
+      (it "includes files inside hidden directories"
+        (let* ((hidden-dir (expand-file-name ".hidden" project-dir))
+               (hidden-file (expand-file-name "secret.txt" hidden-dir)))
+          (make-directory hidden-dir)
+          (write-region "secret" nil hidden-file)
+          (let ((files (macher--directory-files project-dir)))
+            (expect (member ".hidden/secret.txt" files) :to-be-truthy))))
+
+      (it "includes files inside hidden directories nested in normal directories"
+        (let* ((subdir (expand-file-name "sub" project-dir))
+               (nested-hidden-dir (expand-file-name ".cache" subdir))
+               (nested-hidden-file (expand-file-name "data.txt" nested-hidden-dir)))
+          (make-directory nested-hidden-dir t)
+          (write-region "cached" nil nested-hidden-file)
+          (let ((files (macher--directory-files project-dir)))
+            (expect (member "sub/.cache/data.txt" files) :to-be-truthy)))))
+
+    (describe "macher--get-buffer"
       (it "signals user-error when no workspace can be determined"
         (with-temp-buffer
           (let ((macher-workspace-functions nil))
