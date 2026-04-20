@@ -1802,37 +1802,40 @@ by `macher-workspace'.
 Returns a cons cell (BUFFER . CREATED-P) where BUFFER is the target
 buffer and CREATED-P is t if the buffer was newly created, nil
 otherwise."
-  (let* ((workspace (or workspace (macher-workspace)))
-         (workspace-type (car workspace))
-         (workspace-name (macher--workspace-name workspace))
-         (buffer-type-segment
-          (if buffer-type
-              (format "-%s" buffer-type)
-            ""))
-         (buffer-name
-          (format "*macher%s:%s@%s<%s>*"
-                  buffer-type-segment workspace-type workspace-name
-                  ;; Use a shorter hash in buffer names.
-                  (macher--workspace-hash workspace 4)))
-         target-buffer
-         created-p)
+  (let* ((workspace (or workspace (macher-workspace))))
 
     (unless (consp workspace)
-      (error "Workspace must be a cons cell"))
+      (user-error
+       (concat
+        "No macher workspace found for the current buffer; " "see `macher-workspace-functions'")))
 
-    (setq target-buffer (and buffer-name (get-buffer buffer-name)))
-    (when (and (not target-buffer) create buffer-name)
-      (setq target-buffer (get-buffer-create buffer-name))
-      (setq created-p t)
-      (with-current-buffer target-buffer
-        ;; Track workspace for this buffer.
-        (setq-local macher--workspace workspace)
-        ;; Set the context directory for operations like diff application or 'project.el'
-        ;; lookups.
-        (let ((base-dir (macher--workspace-root workspace)))
-          (setq-local default-directory base-dir))))
-    (when target-buffer
-      (cons target-buffer created-p))))
+    (let* ((workspace-type (car workspace))
+           (workspace-name (macher--workspace-name workspace))
+           (buffer-type-segment
+            (if buffer-type
+                (format "-%s" buffer-type)
+              ""))
+           (buffer-name
+            (format "*macher%s:%s@%s<%s>*"
+                    buffer-type-segment workspace-type workspace-name
+                    ;; Use a shorter hash in buffer names.
+                    (macher--workspace-hash workspace 4)))
+           target-buffer
+           created-p)
+
+      (setq target-buffer (and buffer-name (get-buffer buffer-name)))
+      (when (and (not target-buffer) create buffer-name)
+        (setq target-buffer (get-buffer-create buffer-name))
+        (setq created-p t)
+        (with-current-buffer target-buffer
+          ;; Track workspace for this buffer.
+          (setq-local macher--workspace workspace)
+          ;; Set the context directory for operations like diff application or 'project.el'
+          ;; lookups.
+          (let ((base-dir (macher--workspace-root workspace)))
+            (setq-local default-directory base-dir))))
+      (when target-buffer
+        (cons target-buffer created-p)))))
 
 (defun macher-action-buffer (&optional workspace create)
   "Get the macher action buffer associated with WORKSPACE.
