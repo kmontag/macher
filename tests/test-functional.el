@@ -375,7 +375,10 @@ CALLBACK-TEST is a function that verifies the result."
 
   (describe "inline presets"
     :var*
-    ((original-gptel--known-presets gptel--known-presets)
+    (;; `gptel-make-preset' uses `nconc' to append to `gptel--known-presets', which mutates the
+     ;; existing list.  Capture a copy of the list head so the after-each restoration actually
+     ;; reverts what `macher-install' does.
+     (original-gptel--known-presets (copy-sequence gptel--known-presets))
      (original-gptel-post-response-functions gptel-post-response-functions)
 
      (verify-delete-file
