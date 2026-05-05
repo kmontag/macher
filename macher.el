@@ -1345,14 +1345,15 @@ To enable, add to `macher-workspace-functions':
 
 ;; Built-in workspace type functions
 (defun macher--project-root (project-id)
-  "Get the project root for PROJECT-ID, validating it's a real project root."
-  (require 'project)
-  ;; Verify that project-id is actually a valid project root directory.
-  (unless (and (stringp project-id)
-               (file-name-absolute-p project-id)
-               (file-directory-p project-id)
-               (project-current nil project-id))
-    (error "Project ID '%s' is not a valid project root directory" project-id))
+  "Get the project root for PROJECT-ID.
+
+Validates only the shape of the ID (absolute path string).  A full
+`project-current' check is deliberately avoided here: it triggers a
+cascade of remote I/O (VC discovery, `.gitmodules' probing, etc.) that
+becomes very expensive over TRAMP, and `project-files' will re-validate
+the project when it's actually needed."
+  (unless (and (stringp project-id) (file-name-absolute-p project-id))
+    (error "Project ID '%s' is not a valid project root" project-id))
   project-id)
 
 (defun macher--project-name (project-id)
@@ -1429,11 +1430,11 @@ absolute path to a real directory."
                   (error
                    "Root function for workspace type %s failed to return a root" workspace-type))
             (error "No root function configured for workspace type %s" workspace-type))))
-    ;; Verify that the root is a real directory.
+    ;; Only validate the shape of the root.  A `file-directory-p' check would be a remote
+    ;; round-trip over TRAMP on every call; any real file operation downstream will fail with a
+    ;; reasonable error anyway if the root doesn't exist.
     (unless (and root (file-name-absolute-p root))
       (error "Workspace root '%s' is not an absolute path" root))
-    (unless (and root (file-directory-p root))
-      (error "Workspace root '%s' is not a valid directory" root))
     root))
 
 (defun macher--workspace-name (workspace)
@@ -1943,7 +1944,7 @@ Ensures paths are consistently handled throughout the codebase."
       (expand-file-name path)
     (error "PATH must be an absolute file path")))
 
-(defun macher--resolve-workspace-path (workspace rel-path)
+(defun macher--resolve-workspace-path (workspace rel-path &optional workspace-files)
   "Get the full path for REL-PATH within the WORKSPACE.
 
 The path will be resolved relative to the workspace root.  '.' and '..'
@@ -1974,7 +1975,12 @@ them in.
 Note also that paths outside the workspace root are allowed _if_ they
 appear in the workspace's files list.  This won't be the case for the
 built-in workspace types, but might be relevant for custom workspace
-types."
+types.
+
+If WORKSPACE-FILES is provided, it is used as the workspace files list
+instead of calling `macher--workspace-files'.  This lets callers that
+already have the list avoid a redundant computation, which can be
+expensive for remote workspaces."
   (let* (
          ;; We don't really want to deal with the `file-truename', as this would resolve symlinks
          ;; and might mess up the path structure when dealing with relative paths like
@@ -1994,22 +2000,32 @@ types."
              (path-components (file-name-split relative-path))
              (current-path workspace-root))
         ;; Check each component except the last one for files or symlinks (only below workspace
-        ;; root).
+        ;; root).  For performance (especially over remote connections), use a single
+        ;; file-attributes call per component instead of separate
+        ;; file-exists-p/file-symlink-p/file-directory-p calls.
         (when (> (length path-components) 1)
           (dolist (component (butlast path-components))
             (unless
                 ;; Skip empty components.
                 (string-empty-p component)
               (setq current-path (expand-file-name component current-path))
-              (when (file-exists-p current-path)
-                (cond
-                 ((file-symlink-p current-path)
-                  (error "Path '%s' contains a symbolic link in a non-final component" rel-path))
-                 ((not (file-directory-p current-path))
-                  (error "Path '%s' contains a file in a non-final component" rel-path)))))))))
+              (let ((attrs (file-attributes current-path)))
+                ;; attrs is nil when the path doesn't exist.
+                (when attrs
+                  (let ((type (file-attribute-type attrs)))
+                    (cond
+                     ;; type is a string when the path is a symlink (the string is the target).
+                     ((stringp type)
+                      (error
+                       "Path '%s' contains a symbolic link in a non-final component" rel-path))
+                     ;; type is t for directories, nil for regular files.
+                     ((not (eq t type))
+                      (error
+                       "Path '%s' contains a file in a non-final component" rel-path)))))))))))
 
-    ;; Validate access permissions.
-    (let* ((raw-workspace-files (macher--workspace-files workspace))
+    ;; Validate access permissions.  If WORKSPACE-FILES was passed in, use it instead of calling
+    ;; `macher--workspace-files' (which can trigger `project-current' over TRAMP).
+    (let* ((raw-workspace-files (or workspace-files (macher--workspace-files workspace)))
            ;; Process workspace files by expanding them relative to workspace root
            (workspace-files
             (when raw-workspace-files
@@ -2026,14 +2042,18 @@ types."
               (string= (directory-file-name workspace-root) full-path)
               ;; Check whether the path begins with the workspace root + the path separator.
               (string-prefix-p (file-name-as-directory workspace-root) full-path))))
-           (file-exists (file-exists-p full-path)))
+           ;; Use file-attributes once instead of separate file-exists-p and
+           ;; file-directory-p calls, since each is a TRAMP round-trip.
+           (path-attrs (file-attributes full-path))
+           (file-exists path-attrs)
+           (is-directory (eq t (file-attribute-type path-attrs))))
 
       (when (and is-outside-workspace (not (member full-path workspace-files)))
         (error "Path '%s' resolves outside the workspace" rel-path))
 
       (when (and file-exists
                  ;; Allow directories, but only within the workspace.
-                 (or is-outside-workspace (not (file-directory-p full-path)))
+                 (or is-outside-workspace (not is-directory))
                  (not (member full-path workspace-files)))
         (error "File '%s' is not in the workspace files list" rel-path)))
 
@@ -2152,7 +2172,7 @@ Returns the processed content as a string."
        (t
         (string-join selected-lines "\n"))))))
 
-(defun macher--with-workspace-file (context path callback &optional set-dirty-p)
+(defun macher--with-workspace-file (context path callback &optional set-dirty-p workspace-files)
   "Helper function to execute CALLBACK with workspace file content.
 
 CONTEXT is a `macher-context' struct containing workspace information.
@@ -2163,20 +2183,15 @@ CALLBACK is called with arguments (full-path new-content) where:
 - full-path is the absolute path to the file
 - new-content is the current content string of the file
 
-If SET-DIRTY-P is non-nil, sets the dirty-p flag on the context."
-  (let* ((workspace (macher-context-workspace context))
-         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
-         (get-or-create-file-contents
-          (lambda (file-path)
-            "Get or create contents for FILE-PATH in the current context.
+If SET-DIRTY-P is non-nil, sets the dirty-p flag on the context.
 
-Returns a cons cell (orig-content . new-content) of strings for the
-file.  Also updates the context's :contents alist."
-            (let ((full-path (funcall resolve-workspace-path file-path)))
-              (macher-context--contents-for-file full-path context))))
-         (full-path (funcall resolve-workspace-path path))
-         ;; Get implementation contents for this file.
-         (contents (funcall get-or-create-file-contents path))
+WORKSPACE-FILES, if provided, is passed through to
+`macher--resolve-workspace-path' instead of having it compute the
+list itself.  Useful for callers that already have the list, to avoid
+a redundant computation over a remote connection."
+  (let* ((workspace (macher-context-workspace context))
+         (full-path (macher--resolve-workspace-path workspace path workspace-files))
+         (contents (macher-context--contents-for-file full-path context))
          (new-content (cdr contents)))
     ;; Check if the file exists for editing.
     (if (not new-content)
@@ -2209,40 +2224,40 @@ offset/limit/show-line-numbers processing.  For symlinks, returns the target
 path instead of following the link.  Signals an error if the file is not
 found in the workspace."
   (let* ((workspace (macher-context-workspace context))
-         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
-         (full-path (funcall resolve-workspace-path path)))
+         (full-path (macher--resolve-workspace-path workspace path)))
 
     ;; Check if this is a symlink first (only for existing files).
-    (if (file-symlink-p full-path)
-        ;; For symlinks, return the target path instead of following the link.
-        (let ((target (file-symlink-p full-path)))
-          (format "Symlink target: %s" target))
+    (let ((symlink-target (file-symlink-p full-path)))
+      (if symlink-target
+          ;; For symlinks, return the target path instead of following the link.
+          (format "Symlink target: %s" symlink-target)
 
-      ;; Normal/non-symlink handling.
-      (macher--with-workspace-file
-       context
-       path
-       (lambda (_full-path new-content)
-         ;; Some LLMs (for example qwen3-coder at time of writing) seem to have trouble invoking
-         ;; tools with integer inputs - they'll always pass e.g. '1.0' instead of '1'.  Therefore we
-         ;; need to support float inputs, which in general we handle by rounding to the nearest
-         ;; integer.
-         (let* ((parsed-offset
-                 (when offset
-                   (round offset)))
-                (parsed-limit
-                 (when limit
-                   (round limit)))
-                (processed-content
-                 (macher--read-string new-content parsed-offset parsed-limit show-line-numbers)))
-           ;; Check if the processed content exceeds the maximum read length.
-           (when (> (length processed-content) macher--max-read-length)
-             (error
-              "File content too large: %d bytes exceeds maximum read length of %d bytes"
-              (length processed-content)
-              macher--max-read-length))
-           processed-content))
-       nil))))
+        ;; Fetch file contents directly using the already-resolved path,
+        ;; rather than going through macher--with-workspace-file which
+        ;; would resolve the path a second time.
+        (let* ((contents (macher-context--contents-for-file full-path context))
+               (new-content (cdr contents)))
+          (if (not new-content)
+              (error "File '%s' not found in workspace" path)
+            ;; Some LLMs (for example qwen3-coder at time of writing) seem to have trouble
+            ;; invoking tools with integer inputs - they'll always pass e.g. '1.0' instead of
+            ;; '1'.  Therefore we need to support float inputs, which in general we handle by
+            ;; rounding to the nearest integer.
+            (let* ((parsed-offset
+                    (when offset
+                      (round offset)))
+                   (parsed-limit
+                    (when limit
+                      (round limit)))
+                   (processed-content
+                    (macher--read-string new-content parsed-offset parsed-limit show-line-numbers)))
+              ;; Check if the processed content exceeds the maximum read length.
+              (when (> (length processed-content) macher--max-read-length)
+                (error
+                 "File content too large: %d bytes exceeds maximum read length of %d bytes"
+                 (length processed-content)
+                 macher--max-read-length))
+              processed-content)))))))
 
 (defun macher--tool-list-directory (context path &optional recursive sizes)
   "List directory contents at PATH within the workspace.
@@ -2261,9 +2276,14 @@ LLMs.
 
 Signals an error if the directory is not found in the workspace."
   (let* ((workspace (macher-context-workspace context))
-         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
-         (full-path (funcall resolve-workspace-path path))
          (workspace-root (macher--workspace-root workspace))
+         ;; Compute workspace-files once and reuse it for path resolution and entry collection
+         ;; below.  Each call transitively triggers `project-current', which is expensive over
+         ;; TRAMP (walks the directory tree probing for a VC root).
+         (workspace-files (macher--workspace-files workspace))
+         (resolve-workspace-path
+          (lambda (rel-path) (macher--resolve-workspace-path workspace rel-path workspace-files)))
+         (full-path (funcall resolve-workspace-path path))
          (results '())
          (context-contents (macher-context-contents context)))
 
@@ -2364,9 +2384,10 @@ Signals an error if the directory is not found in the workspace."
 
          (collect-entries
           (current-path current-rel-path depth)
-          ;; Build entries list by iterating through workspace files.
-          (let* ((workspace-files (macher--workspace-files workspace))
-                 (current-path-as-dir (file-name-as-directory current-path))
+          ;; Build entries list by iterating through workspace files.  Uses the
+          ;; already-computed `workspace-files' from the enclosing let to avoid another remote
+          ;; `project-current' walk.
+          (let* ((current-path-as-dir (file-name-as-directory current-path))
                  ;; Hash table to collect unique entries (both files and directories).
                  (entries-hash (make-hash-table :test 'equal))
 
@@ -2418,9 +2439,13 @@ Signals an error if the directory is not found in the workspace."
                             entry
                           (concat current-rel-path "/" entry)))
                        (entry-deleted-p (file-deleted-in-context-p entry-full-path))
-                       (entry-exists-on-disk-p (file-exists-p entry-full-path))
-                       (entry-is-symlink-p
-                        (and (not entry-deleted-p) (file-symlink-p entry-full-path)))
+                       ;; Use a single file-attributes call per entry instead of
+                       ;; separate file-exists-p / file-symlink-p / file-directory-p,
+                       ;; since each is a TRAMP round-trip.
+                       (entry-attrs (file-attributes entry-full-path))
+                       (entry-exists-on-disk-p entry-attrs)
+                       (entry-disk-type (and entry-attrs (file-attribute-type entry-attrs)))
+                       (entry-is-symlink-p (and (not entry-deleted-p) (stringp entry-disk-type)))
                        (entry-exists-in-context-p
                         (when-let ((entry
                                     (assoc
@@ -2438,8 +2463,7 @@ Signals an error if the directory is not found in the workspace."
                              (not entry-deleted-p) (not entry-is-symlink-p)
                              ;; A path is a directory if it exists on disk as a directory OR if it's
                              ;; in our context-new-directories list.
-                             (or (file-directory-p entry-full-path)
-                                 (member entry context-new-directories))))
+                             (or (eq t entry-disk-type) (member entry context-new-directories))))
                        (size-info "")
                        (indent (make-string (* depth 2) ?\s)))
 
@@ -2451,9 +2475,10 @@ Signals an error if the directory is not found in the workspace."
                         (setq size-info (format " (%s)" (macher--format-size file-size)))))
 
                     ;; Add symlink target info if it's a symlink.
+                    ;;
+                    ;; entry-disk-type is the symlink target string.
                     (when entry-is-symlink-p
-                      (let ((target (file-symlink-p entry-full-path)))
-                        (setq size-info (format " -> %s" target))))
+                      (setq size-info (format " -> %s" entry-disk-type)))
 
                     ;; Add entry to results.
                     (push (format "%s%s: %s%s"
@@ -2619,8 +2644,11 @@ Returns nil on success.  Signals an error if the source file is not found or
 if the destination already exists.  Sets the dirty-p flag on the context to
 indicate changes."
   (let* ((workspace (macher-context-workspace context))
-         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
-         (dest-full-path (funcall resolve-workspace-path destination-path)))
+         ;; Compute workspace-files once and share it with both resolve calls
+         ;; below, to avoid a redundant `project-current' walk over TRAMP.
+         (workspace-files (macher--workspace-files workspace))
+         (dest-full-path
+          (macher--resolve-workspace-path workspace destination-path workspace-files)))
     ;; Check if destination already exists.
     (let ((dest-contents (macher-context--contents-for-file dest-full-path context)))
       (when (cdr dest-contents)
@@ -2636,7 +2664,7 @@ indicate changes."
                                     source-full-path nil context)
                                    ;; Return nil to indicate success.
                                    nil)
-                                 t)))
+                                 t workspace-files)))
 
 (defun macher--tool-delete-file (context rel-path)
   "Delete a file specified by REL-PATH within the workspace.
@@ -2691,10 +2719,14 @@ the `xref-search-program' to perform the search."
          (case-fold-search case-insensitive)
          (workspace (macher-context-workspace context))
          (workspace-root (macher--workspace-root workspace))
-         (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
+         ;; Compute workspace-files once and reuse it for path resolution below.  Each call
+         ;; triggers `project-current' which is expensive over TRAMP (walks the directory tree
+         ;; looking for a VC root).
+         (workspace-files (macher--workspace-files workspace))
+         (resolve-workspace-path
+          (lambda (rel-path) (macher--resolve-workspace-path workspace rel-path workspace-files)))
          (search-path (funcall resolve-workspace-path (or path ".")))
          (context-contents (macher-context-contents context))
-         (workspace-files (macher--workspace-files workspace))
          (path
           (when path
             (expand-file-name path workspace-root)))
@@ -2713,6 +2745,9 @@ the `xref-search-program' to perform the search."
             (cl-remove-if-not
              (lambda (file-path)
                (let ((full-path (expand-file-name file-path workspace-root)))
+                 ;; Note - we don't check explicitly that `file-exists-p', since this is expensive
+                 ;; for remote files or large projects.  The search backend (grep/rg) should simply
+                 ;; be able to skip files that don't exist.
                  (and
                   ;; File is under the search path.
                   (string-prefix-p search-path full-path)
@@ -2723,11 +2758,7 @@ the `xref-search-program' to perform the search."
                                  (file-relative-name full-path search-path)
                                (file-relative-name full-path workspace-root))))
                         (string-match-p file-regexp rel-path))
-                    t)
-                  ;; File exists or has content in context.
-                  (or (file-exists-p full-path)
-                      (let ((entry (assoc (macher--normalize-path full-path) context-contents)))
-                        (and entry (cdr (cdr entry))))))))
+                    t))))
              workspace-files))
            ;; Add any context-only files that match our criteria.
            (context-only-files
@@ -2815,7 +2846,15 @@ the `xref-search-program' to perform the search."
                             ;; Path is a single file, use the original path parameter.
                             path
                           ;; Otherwise, always relative to workspace root.
-                          (file-relative-name original-file workspace-root))))
+                          ;; Strip any remote prefix from both paths so
+                          ;; file-relative-name can compare them even when
+                          ;; one has a TRAMP prefix and the other does not
+                          ;; (e.g. xref may return local paths while
+                          ;; workspace-root is remote).
+                          (file-relative-name (or (file-remote-p original-file 'localname)
+                                                  original-file)
+                                              (or (file-remote-p workspace-root 'localname)
+                                                  workspace-root)))))
 
                     ;; Group results by file for proper formatting.
                     (let ((file-entry (assoc rel-path results)))
@@ -3386,30 +3425,25 @@ otherwise returns (nil . nil)."
     (if existing-contents
         ;; Return the existing contents.
         (cdr existing-contents)
-      ;; Handle file existence check.
-      (if (not (file-exists-p normalized-path))
-          ;; For non-existent files, store (nil . nil) in context and return it.
-          (let ((context-contents (macher-context-contents context))
-                (content-pair (cons nil nil)))
-            ;; Add to context.
-            (push (cons normalized-path content-pair) context-contents)
-            (setf (macher-context-contents context) context-contents)
-            content-pair)
-        ;; For existing files, load the file content.
-        (let* ((file-content
-                (with-temp-buffer
-                  (insert-file-contents normalized-path)
-                  (buffer-substring-no-properties (point-min) (point-max))))
-               (context-contents (macher-context-contents context))
-               ;; Both original and new content start as the same.
-               (content-pair (cons file-content file-content)))
-
-          ;; Add to context.
-          (push (cons normalized-path content-pair) context-contents)
-          (setf (macher-context-contents context) context-contents)
-
-          ;; Return the content pair.
-          content-pair)))))
+      ;; Try to load the file content, treating a missing file as (nil . nil) rather than
+      ;; doing a separate `file-exists-p' round-trip over TRAMP before the actual read.  Only
+      ;; catch `file-missing' — broader `file-error' signals (permission denied, TRAMP
+      ;; connection failure, etc.) should propagate so the caller sees the real problem.
+      (let* ((file-content
+              (condition-case nil
+                  (with-temp-buffer
+                    (insert-file-contents normalized-path)
+                    (buffer-substring-no-properties (point-min) (point-max)))
+                (file-missing
+                 nil)))
+             ;; For non-existent files, store (nil . nil); for existing files, the original and
+             ;; new content start as the same.
+             (content-pair
+              (if file-content
+                  (cons file-content file-content)
+                (cons nil nil))))
+        (push (cons normalized-path content-pair) (macher-context-contents context))
+        content-pair))))
 
 ;;; Default Prompt Functions
 (defun macher--focus-string-default ()
@@ -3878,7 +3912,7 @@ CALLBACK and FSM are as described in the
 `gptel-prompt-transform-functions' documentation."
   (when-let* ((info (gptel-fsm-info fsm))
               (buffer (plist-get info :buffer))
-              (_ (buffer-live-p buffer)))
+              ((buffer-live-p buffer)))
     ;; The system message needs to be set in the temporary buffer where this prompt transform is
     ;; being invoked, but the context string needs to be generated in the buffer where the request
     ;; is actually being sent.  Pass the request buffer to the replace function.
@@ -4475,7 +4509,7 @@ BUF defaults to the current buffer if not specified."
   (interactive)
   (with-current-buffer (or buf (current-buffer))
     (when-let* ((action-buffer (macher-action-buffer))
-                (_ (buffer-live-p action-buffer)))
+                ((buffer-live-p action-buffer)))
       (gptel-abort action-buffer))))
 
 ;;;###autoload
