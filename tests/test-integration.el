@@ -720,9 +720,9 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             ;; Second request should contain numbered lines (cat -n style).
             (expect (cadr tool-messages) :to-equal '("1\tline1\n2\tline2\n3\tline3\n4\tline4"))))))
 
-    (it "returns error when file content exceeds max read length"
-      ;; Create a file with content that exceeds macher--max-read-length
-      (let* ((large-content (make-string (1+ macher--max-read-length) ?x))
+    (it "returns error when file content exceeds max tool output length"
+      ;; Create a file with content that exceeds macher-max-tool-output-length
+      (let* ((large-content (make-string (1+ macher-max-tool-output-length) ?x))
              (large-file-path (expand-file-name "large-file.txt" project-dir)))
         (unwind-protect
             (progn
@@ -762,7 +762,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                     (let ((error-message (cadr tool-messages)))
                       (expect (length error-message) :to-be 1)
                       (expect "File content too large" :to-appear-once-in (car error-message))
-                      (expect "exceeds maximum read length"
+                      (expect "exceeds maximum tool output length"
                               :to-appear-once-in (car error-message)))))))
           ;; Clean up the large file
           (when (file-exists-p large-file-path)

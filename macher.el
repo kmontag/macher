@@ -776,7 +776,7 @@ adding tools to this category directly; instead, customize
        "(offset/limit) and line numbering.\n"
        "\n"
        "Returns file contents on success. Fails if the file is not found in the workspace "
-       "or if the content exceeds the maximum read length."
+       "or if the content exceeds the maximum tool output length."
        macher--workspace-postfix)
      :confirm nil
      :include nil
@@ -1083,6 +1083,16 @@ Set to nil to disable the limit entirely."
   :type '(choice (natnum :tag "Maximum number of characters") (const :tag "No limit" nil))
   :group 'macher-tools)
 
+(defcustom macher-max-tool-output-length (* 1024 1024)
+  "Maximum number of bytes any macher tool may return to the LLM.
+
+Tools that produce text output (read, search, list-directory) signal an
+error if their result exceeds this length, rather than dumping a large
+payload into the LLM context.  Lower this if your model has a small
+context window."
+  :type 'natnum
+  :group 'macher-tools)
+
 (defcustom macher-presets-alist
   `(
     ;; Enable all macher tools.
@@ -1189,11 +1199,6 @@ To add a new workspace type, add an entry to this alist and update
 `macher-workspace-functions' to detect it."
   :type '(alist :key-type symbol :value-type (plist :key-type keyword :value-type function))
   :group 'macher-workspace)
-
-;;; Constants
-
-(defconst macher--max-read-length (* 1024 1024)
-  "Max number of bytes to return from the read tool.")
 
 ;;; Variables
 
@@ -2179,12 +2184,11 @@ found in the workspace."
                    (round limit)))
                 (processed-content
                  (macher--read-string new-content parsed-offset parsed-limit show-line-numbers)))
-           ;; Check if the processed content exceeds the maximum read length.
-           (when (> (length processed-content) macher--max-read-length)
+           (when (> (length processed-content) macher-max-tool-output-length)
              (error
-              "File content too large: %d bytes exceeds maximum read length of %d bytes"
+              "File content too large: %d bytes exceeds maximum tool output length of %d bytes"
               (length processed-content)
-              macher--max-read-length))
+              macher-max-tool-output-length))
            processed-content))
        nil))))
 
