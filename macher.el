@@ -2045,7 +2045,7 @@ expensive for remote workspaces."
            ;; Use file-attributes once instead of separate file-exists-p and
            ;; file-directory-p calls, since each is a TRAMP round-trip.
            (path-attrs (file-attributes full-path))
-           (file-exists (not (null path-attrs)))
+           (file-exists path-attrs)
            (is-directory (eq t (file-attribute-type path-attrs))))
 
       (when (and is-outside-workspace (not (member full-path workspace-files)))
@@ -2443,7 +2443,7 @@ Signals an error if the directory is not found in the workspace."
                        ;; separate file-exists-p / file-symlink-p / file-directory-p,
                        ;; since each is a TRAMP round-trip.
                        (entry-attrs (file-attributes entry-full-path))
-                       (entry-exists-on-disk-p (not (null entry-attrs)))
+                       (entry-exists-on-disk-p entry-attrs)
                        (entry-disk-type (and entry-attrs (file-attribute-type entry-attrs)))
                        (entry-is-symlink-p (and (not entry-deleted-p) (stringp entry-disk-type)))
                        (entry-exists-in-context-p
@@ -3912,7 +3912,7 @@ CALLBACK and FSM are as described in the
 `gptel-prompt-transform-functions' documentation."
   (when-let* ((info (gptel-fsm-info fsm))
               (buffer (plist-get info :buffer))
-              (_ (buffer-live-p buffer)))
+              ((buffer-live-p buffer)))
     ;; The system message needs to be set in the temporary buffer where this prompt transform is
     ;; being invoked, but the context string needs to be generated in the buffer where the request
     ;; is actually being sent.  Pass the request buffer to the replace function.
@@ -4509,7 +4509,7 @@ BUF defaults to the current buffer if not specified."
   (interactive)
   (with-current-buffer (or buf (current-buffer))
     (when-let* ((action-buffer (macher-action-buffer))
-                (_ (buffer-live-p action-buffer)))
+                ((buffer-live-p action-buffer)))
       (gptel-abort action-buffer))))
 
 ;;;###autoload
