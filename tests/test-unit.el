@@ -1338,7 +1338,12 @@
 
           ;; Clean up the external directory
           (when (file-exists-p external-dir)
-            (delete-directory external-dir t))))))
+            (delete-directory external-dir t)))))
+
+    (it "errors when output exceeds the configured max"
+      ;; Lower the cap so we don't need a huge directory to exercise the path.
+      (let ((macher-max-tool-output-length 5))
+        (expect (macher--tool-list-directory context ".") :to-throw 'error))))
 
   (describe "macher--search-get-xref-matches"
     :var (context temp-dir)
@@ -2785,7 +2790,12 @@
           ;; 0.4 should round to 0 (no extra lines).
           (expect result-0.4 :to-match "hello")
           ;; 0.6 should round to 1 (1 extra line).
-          (expect result-0.6 :to-match "hello")))))
+          (expect result-0.6 :to-match "hello"))))
+
+    (it "errors when output exceeds the configured max"
+      ;; Lower the cap to force the error without needing a huge fixture.
+      (let ((macher-max-tool-output-length 5))
+        (expect (macher--tool-search-helper context "hello") :to-throw 'error))))
 
   (describe "macher--tool-read-file"
     :var (context temp-dir)
