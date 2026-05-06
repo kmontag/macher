@@ -1091,8 +1091,8 @@ Set to nil to disable the limit entirely."
   :type '(choice (natnum :tag "Maximum number of characters") (const :tag "No limit" nil))
   :group 'macher-tools)
 
-(defcustom macher-max-tool-output-length (* 1024 1024)
-  "Maximum number of bytes any macher tool may return to the LLM.
+(defcustom macher-tool-output-max-length (* 1024 1024)
+  "Maximum number of characters any macher tool may return to the LLM.
 
 Tools that produce text output (e.g. read, search, directory listing)
 signal an error if their result exceeds this length, rather than
@@ -2211,24 +2211,24 @@ a redundant computation over a remote connection."
 ;; https://github.com/modelcontextprotocol/servers/blob/main/src/filesystem/README.md.
 
 (defun macher--check-output-length (output description)
-  "Signal an error if OUTPUT exceeds `macher-max-tool-output-length'.
+  "Signal an error if OUTPUT exceeds `macher-tool-output-max-length'.
 DESCRIPTION names what is being returned (e.g. \"File content\") and is
 included verbatim in the error message.  When the limit is exceeded,
 the error includes the leading and trailing portions of OUTPUT so the
 caller can see the structure of the truncated payload."
   (let ((len (length output)))
-    (when (> len macher-max-tool-output-length)
-      (let* ((preview-bytes (min 256 (/ len 2)))
-             (head (substring output 0 preview-bytes))
-             (tail (substring output (- len preview-bytes))))
+    (when (> len macher-tool-output-max-length)
+      (let* ((preview-chars (min 256 (/ len 2)))
+             (head (substring output 0 preview-chars))
+             (tail (substring output (- len preview-chars))))
         (error
-         "%s too large: %d bytes exceeds maximum tool output length of %d bytes\nFirst %d bytes:\n%s\n...\nLast %d bytes:\n%s"
+         "%s too large: %d characters exceeds maximum tool output length of %d characters\nFirst %d characters:\n%s\n...\nLast %d characters:\n%s"
          description
          len
-         macher-max-tool-output-length
-         preview-bytes
+         macher-tool-output-max-length
+         preview-chars
          head
-         preview-bytes
+         preview-chars
          tail)))))
 
 (defun macher--tool-read-file (context path &optional offset limit show-line-numbers)

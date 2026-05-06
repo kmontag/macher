@@ -905,19 +905,19 @@
 
   (describe "macher--check-output-length"
     (it "returns nil when output is within the limit"
-      (let ((macher-max-tool-output-length 100))
+      (let ((macher-tool-output-max-length 100))
         (expect (macher--check-output-length "short" "Thing") :to-be nil)
         ;; Boundary: exactly at the limit is allowed.
         (expect (macher--check-output-length (make-string 100 ?x) "Thing") :to-be nil)))
 
     (it "signals an error when output exceeds the limit"
-      (let ((macher-max-tool-output-length 10)
+      (let ((macher-tool-output-max-length 10)
             (output (make-string 11 ?x)))
         (expect (macher--check-output-length output "Thing") :to-throw 'error)))
 
     (it "includes description, sizes, and head/tail previews in the error"
       ;; Use a large-enough payload that the preview is capped at 256 bytes.
-      (let* ((macher-max-tool-output-length 10)
+      (let* ((macher-tool-output-max-length 10)
              (head (make-string 256 ?A))
              (mid (make-string 600 ?M))
              (tail (make-string 256 ?Z))
@@ -928,10 +928,10 @@
                 (error
                  e)))
              (msg (error-message-string err)))
-        (expect msg :to-match "\\`Search output too large: 1112 bytes")
-        (expect msg :to-match "maximum tool output length of 10 bytes")
-        (expect msg :to-match "First 256 bytes:\n")
-        (expect msg :to-match "Last 256 bytes:\n")
+        (expect msg :to-match "\\`Search output too large: 1112 characters")
+        (expect msg :to-match "maximum tool output length of 10 characters")
+        (expect msg :to-match "First 256 characters:\n")
+        (expect msg :to-match "Last 256 characters:\n")
         ;; Previews reflect the actual head/tail of the payload.
         (expect msg :to-match (regexp-quote head))
         (expect msg :to-match (regexp-quote tail))
@@ -940,7 +940,7 @@
 
     (it "shrinks the preview to half the payload for small over-length outputs"
       ;; A 5-byte payload over a 1-byte cap previews 2 bytes (= 5/2) on each end.
-      (let* ((macher-max-tool-output-length 1)
+      (let* ((macher-tool-output-max-length 1)
              (output "abcde")
              (err
               (condition-case e
@@ -948,8 +948,8 @@
                 (error
                  e)))
              (msg (error-message-string err)))
-        (expect msg :to-match "First 2 bytes:\nab")
-        (expect msg :to-match "Last 2 bytes:\nde"))))
+        (expect msg :to-match "First 2 characters:\nab")
+        (expect msg :to-match "Last 2 characters:\nde"))))
 
   (describe "macher--format-size"
     (it "formats bytes correctly"
@@ -1413,7 +1413,7 @@
 
     (it "errors when output exceeds the configured max"
       ;; Lower the cap so we don't need a huge directory to exercise the path.
-      (let ((macher-max-tool-output-length 5))
+      (let ((macher-tool-output-max-length 5))
         (expect (macher--tool-list-directory context ".") :to-throw 'error))))
 
   (describe "macher--search-get-xref-matches"
@@ -2879,7 +2879,7 @@
 
     (it "errors when output exceeds the configured max"
       ;; Lower the cap to force the error without needing a huge fixture.
-      (let ((macher-max-tool-output-length 5))
+      (let ((macher-tool-output-max-length 5))
         (expect (macher--tool-search-helper context "hello") :to-throw 'error)))
 
     (it "search handles nonexistent files in workspace gracefully"

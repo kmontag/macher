@@ -721,8 +721,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (expect (cadr tool-messages) :to-equal '("1\tline1\n2\tline2\n3\tline3\n4\tline4"))))))
 
     (it "returns error when file content exceeds max tool output length"
-      ;; Create a file with content that exceeds macher-max-tool-output-length
-      (let* ((large-content (make-string (1+ macher-max-tool-output-length) ?x))
+      ;; Create a file with content that exceeds macher-tool-output-max-length
+      (let* ((large-content (make-string (1+ macher-tool-output-max-length) ?x))
              (large-file-path (expand-file-name "large-file.txt" project-dir)))
         (unwind-protect
             (progn
