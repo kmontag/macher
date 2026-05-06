@@ -784,7 +784,7 @@ adding tools to this category directly; instead, customize
        "(offset/limit) and line numbering.\n"
        "\n"
        "Returns file contents on success. Fails if the file is not found in the workspace "
-       "or if the content exceeds the maximum read length."
+       "or if the content exceeds the maximum tool output length."
        macher--workspace-postfix)
      :confirm nil
      :include nil
@@ -1091,6 +1091,16 @@ Set to nil to disable the limit entirely."
   :type '(choice (natnum :tag "Maximum number of characters") (const :tag "No limit" nil))
   :group 'macher-tools)
 
+(defcustom macher-tool-output-max-length (* 1024 1024)
+  "Maximum number of characters any macher tool may return to the LLM.
+
+Tools that produce text output (e.g. read, search, directory listing)
+signal an error if their result exceeds this length, rather than
+dumping a large payload into the LLM context.  Lower this if your
+model has a small context window."
+  :type 'natnum
+  :group 'macher-tools)
+
 (defcustom macher-presets-alist
   `(
     ;; Enable all macher tools.
@@ -1205,11 +1215,6 @@ To add a new workspace type, add an entry to this alist and update
 `macher-workspace-functions' to detect it."
   :type '(alist :key-type symbol :value-type (plist :key-type keyword :value-type function))
   :group 'macher-workspace)
-
-;;; Constants
-
-(defconst macher--max-read-length (* 1024 1024)
-  "Max number of bytes to return from the read tool.")
 
 ;;; Variables
 
@@ -2205,6 +2210,27 @@ a redundant computation over a remote connection."
 ;; The workspace tools are somewhat inspired by the reference filesystem MCP.  See
 ;; https://github.com/modelcontextprotocol/servers/blob/main/src/filesystem/README.md.
 
+(defun macher--check-output-length (output description)
+  "Signal an error if OUTPUT exceeds `macher-tool-output-max-length'.
+DESCRIPTION names what is being returned (e.g. \"File content\") and is
+included verbatim in the error message.  When the limit is exceeded,
+the error includes the leading and trailing portions of OUTPUT so the
+caller can see the structure of the truncated payload."
+  (let ((len (length output)))
+    (when (> len macher-tool-output-max-length)
+      (let* ((preview-chars (min 256 (/ len 2)))
+             (head (substring output 0 preview-chars))
+             (tail (substring output (- len preview-chars))))
+        (error
+         "%s too large: %d characters exceeds maximum tool output length of %d characters\nFirst %d characters:\n%s\n...\nLast %d characters:\n%s"
+         description
+         len
+         macher-tool-output-max-length
+         preview-chars
+         head
+         preview-chars
+         tail)))))
+
 (defun macher--tool-read-file (context path &optional offset limit show-line-numbers)
   "Read the contents of a file specified by PATH within the workspace.
 
@@ -2251,12 +2277,7 @@ found in the workspace."
                       (round limit)))
                    (processed-content
                     (macher--read-string new-content parsed-offset parsed-limit show-line-numbers)))
-              ;; Check if the processed content exceeds the maximum read length.
-              (when (> (length processed-content) macher--max-read-length)
-                (error
-                 "File content too large: %d bytes exceeds maximum read length of %d bytes"
-                 (length processed-content)
-                 macher--max-read-length))
+              (macher--check-output-length processed-content "File content")
               processed-content)))))))
 
 (defun macher--tool-list-directory (context path &optional recursive sizes)
@@ -2502,9 +2523,12 @@ Signals an error if the directory is not found in the workspace."
       (collect-entries full-path "" 0))
 
     ;; Return formatted results.
-    (if results
-        (string-join (reverse results) "\n")
-      "Directory is empty")))
+    (let ((output
+           (if results
+               (string-join (reverse results) "\n")
+             "Directory is empty")))
+      (macher--check-output-length output "Directory listing")
+      output)))
 
 (defun macher--tool-edit-file (context path old-text new-text &optional replace-all)
   "Edit file specified by PATH within the workspace.
@@ -3172,6 +3196,7 @@ piping the results through `head -N`."
           (let ((lines (split-string output "\n")))
             (when (> (length lines) parsed-head-limit)
               (setq output (string-join (seq-take lines parsed-head-limit) "\n")))))
+        (macher--check-output-length output "Search output")
         output))))
 
 (defun macher--tool-search
