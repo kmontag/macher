@@ -279,8 +279,6 @@ You can see customizable variables/sub-groups with `M-x customize-group RET mach
 
 | Variable                        | Description                                                        |
 | ------------------------------- | ------------------------------------------------------------------ |
-| Variable                        | Description                                                        |
-| ------------------------------- | ------------------------------------------------------------       |
 | `macher-tools`                  | Tool definitions for reading/editing files                         |
 | `macher-presets-alist`          | Preset definitions (macher, macher-ro, etc.)                       |
 | `macher-tool-category`          | Category for macher tools in gptel registry                        |
