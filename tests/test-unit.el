@@ -105,7 +105,15 @@
         (expect (cdr non-existent-contents) :to-be nil) ;; New content should be nil.
         ;; Should be added to context's contents list.
         (expect (assoc (macher--normalize-path non-existent) (macher-context-contents context))
-                :to-be-truthy))))
+                :to-be-truthy)))
+
+    (it "propagates non-file-missing read errors (e.g. permission denied)"
+      ;; `contents-for-file' should catch `file-missing' to avoid a separate existence
+      ;; probe, but broader `file-error' signals must propagate so real problems
+      ;; (permission denied, TRAMP connection failure, etc.) aren't silently hidden.
+      (cl-letf (((symbol-function 'insert-file-contents)
+                 (lambda (&rest _) (signal 'file-error '("Permission denied")))))
+        (expect (macher-context--contents-for-file temp-file context) :to-throw 'file-error))))
 
   (describe "macher-context--set-new-content-for-file"
     :var (context temp-file original-contents)
@@ -235,7 +243,22 @@
                   :to-equal '("hello world hello universe" . "hi world hi universe"))))
       (it "sets the dirty-p flag"
         (macher--tool-edit-file context temp-file "original" "modified" nil)
-        (expect (macher-context-dirty-p context) :to-be-truthy))))
+        (expect (macher-context-dirty-p context) :to-be-truthy))
+      (it "errors when workspace-files includes a file not on disk"
+        (let ((proj-dir (make-temp-file "macher-test-edit-proj" t)))
+          (write-region "" nil (expand-file-name ".project" proj-dir))
+          (write-region "real" nil (expand-file-name "real.txt" proj-dir))
+          (let ((ctx
+                 (macher--make-context
+                  :workspace (cons 'project (file-name-as-directory proj-dir)))))
+            (spy-on 'macher--workspace-files
+                    :and-return-value
+                    (list
+                     (expand-file-name "real.txt" proj-dir)
+                     (expand-file-name "ghost.txt" proj-dir)))
+            (unwind-protect
+                (expect (macher--tool-edit-file ctx "ghost.txt" "old" "new" nil) :to-throw)
+              (delete-directory proj-dir t)))))))
 
   (describe "macher--process-request"
     :var (context fsm temp-file build-patch-called)
@@ -1093,7 +1116,7 @@
                   (append (macher--project-files (cdr workspace)) (list symlink-path))))
 
         (let ((result (macher--tool-list-directory context ".")))
-          (expect result :to-match "link: file-symlink ->")
+          (expect result :to-match (format "link: file-symlink -> %s" target-path))
           (expect result :to-match "file: file1.txt")
           (expect result :to-match "file: file2.el"))
 
@@ -1112,7 +1135,7 @@
                   (append (macher--project-files (cdr workspace)) (list dir-symlink-path))))
 
         (let ((result (macher--tool-list-directory context ".")))
-          (expect result :to-match "link: dir-symlink ->")
+          (expect result :to-match (format "link: dir-symlink -> %s" target-dir))
           (expect result :to-match "dir: subdir"))
 
         ;; Clean up.
@@ -1459,6 +1482,20 @@
          context)
         (let ((result (macher--search-get-xref-matches context "modified")))
           (expect (assoc "file1.txt" result) :to-be-truthy)))
+
+      (it "tolerates stale workspace-files entries pointing at missing files"
+        ;; `macher--search-get-xref-matches' no longer filters workspace-files through
+        ;; `file-exists-p' up-front (that was expensive over TRAMP); it relies on the
+        ;; search backend to skip missing files.  Simulate a stale project cache by
+        ;; adding a non-existent path to the workspace-files list and ensure search
+        ;; doesn't crash and still returns matches for the real files.
+        (let ((stale-path (expand-file-name "ghost.txt" temp-dir)))
+          (spy-on
+           'macher--workspace-files
+           :and-call-fake (lambda (workspace) (cons stale-path (macher--project-files (cdr workspace)))))
+          (let ((result (macher--search-get-xref-matches context "hello")))
+            (expect (assoc "file1.txt" result) :to-be-truthy)
+            (expect (assoc "ghost.txt" result) :to-be nil))))
 
       (it "shows paths relative to workspace root even when path is specified"
         (let ((result (macher--search-get-xref-matches context "hello" :path "subdir")))
@@ -2843,7 +2880,18 @@
     (it "errors when output exceeds the configured max"
       ;; Lower the cap to force the error without needing a huge fixture.
       (let ((macher-max-tool-output-length 5))
-        (expect (macher--tool-search-helper context "hello") :to-throw 'error))))
+        (expect (macher--tool-search-helper context "hello") :to-throw 'error)))
+
+    (it "search handles nonexistent files in workspace gracefully"
+      ;; When workspace-files includes a file that doesn't exist on disk,
+      ;; search should still work, treating the missing file as empty.
+      (spy-on 'macher--workspace-files
+              :and-return-value
+              (list
+               (expand-file-name "file1.txt" temp-dir) (expand-file-name "ghost.txt" temp-dir)))
+      (let ((result (macher--tool-search-helper context "hello")))
+        (expect result :to-match "file1.txt")
+        (expect result :not :to-match "ghost.txt"))))
 
   (describe "macher--tool-read-file"
     :var (context temp-dir)
@@ -2878,8 +2926,7 @@
                   (append (macher--project-files (cdr workspace)) (list symlink-path))))
 
         (let ((result (macher--tool-read-file context "test-symlink")))
-          (expect result :to-match "Symlink target:")
-          (expect result :to-match target-path))
+          (expect result :to-equal (format "Symlink target: %s" target-path)))
 
         ;; Clean up.
         (delete-file symlink-path))
@@ -2895,8 +2942,7 @@
                   (append (macher--project-files (cdr workspace)) (list broken-symlink-path))))
 
         (let ((result (macher--tool-read-file context "broken-symlink")))
-          (expect result :to-match "Symlink target:")
-          (expect result :to-match "/nonexistent/target"))
+          (expect result :to-equal "Symlink target: /nonexistent/target"))
 
         ;; Clean up.
         (delete-file broken-symlink-path))
@@ -2912,14 +2958,22 @@
                   (append (macher--project-files (cdr workspace)) (list rel-symlink-path))))
 
         (let ((result (macher--tool-read-file context "rel-symlink")))
-          (expect result :to-match "Symlink target:")
-          (expect result :to-match "./test-file.txt"))
+          (expect result :to-equal "Symlink target: ./test-file.txt"))
 
         ;; Clean up.
         (delete-file rel-symlink-path)))
 
     (it "signals error for non-existent files"
       (expect (macher--tool-read-file context "nonexistent.txt") :to-throw))
+
+    (it "errors when workspace-files includes a file not on disk"
+      ;; When a custom workspace type's :get-files returns stale entries,
+      ;; read-file should error rather than silently returning nil.
+      (spy-on 'macher--workspace-files
+              :and-return-value
+              (list
+               (expand-file-name "test-file.txt" temp-dir) (expand-file-name "ghost.txt" temp-dir)))
+      (expect (macher--tool-read-file context "ghost.txt") :to-throw))
 
     (describe "float parameter handling"
       (it "handles float offset values by rounding them"
@@ -3220,11 +3274,11 @@
       (expect project-dir :to-be-truthy)
       (expect file :to-be-truthy))
 
-    (describe "macher--project-workspace"
+    (describe "macher-workspace-project"
       (it "returns project workspace when in a project"
         (with-temp-buffer
           (find-file project-file)
-          (let ((result (macher--project-workspace)))
+          (let ((result (macher-workspace-project)))
             (expect result :to-be-truthy)
             (expect (car result) :to-be 'project)
             (expect (file-truename (directory-file-name (cdr result)))
@@ -3233,22 +3287,126 @@
       (it "returns nil when not in a project"
         (with-temp-buffer
           (find-file file)
-          (let ((result (macher--project-workspace)))
+          (let ((result (macher-workspace-project)))
             (expect result :to-be nil)))))
 
-    (describe "macher--file-workspace"
+    (describe "macher-workspace-file"
       (it "returns file workspace when buffer visits a file"
         (with-temp-buffer
           (find-file file)
-          (let ((result (macher--file-workspace)))
+          (let ((result (macher-workspace-file)))
             (expect result :to-be-truthy)
             (expect (car result) :to-be 'file)
             (expect (cdr result) :to-equal file))))
 
       (it "returns nil when buffer doesn't visit a file"
         (with-temp-buffer
-          (let ((result (macher--file-workspace)))
+          (let ((result (macher-workspace-file)))
             (expect result :to-be nil)))))
+
+    (describe "macher-workspace-directory"
+      (it "returns directory workspace for any buffer with default-directory"
+        (with-temp-buffer
+          (let ((default-directory (expand-file-name "/tmp/")))
+            (let ((result (macher-workspace-directory)))
+              (expect result :to-be-truthy)
+              (expect (car result) :to-be 'directory)
+              (expect (cdr result) :to-equal (expand-file-name "/tmp/"))))))
+
+      (it "returns nil when default-directory is nil"
+        (with-temp-buffer
+          (let ((default-directory nil))
+            (expect (macher-workspace-directory) :to-be nil))))
+
+      (it "returns nil when default-directory is not a real directory"
+        (with-temp-buffer
+          (let ((default-directory "/nonexistent/path/that/does/not/exist/"))
+            (expect (macher-workspace-directory) :to-be nil))))
+
+      (it "is not used by default, but works when added to `macher-workspace-functions'"
+        (let ((tmp-dir (make-temp-file "macher-dir-ws-" t)))
+          (unwind-protect
+              (with-temp-buffer
+                (let ((default-directory (file-name-as-directory tmp-dir)))
+                  ;; With the default value, no workspace should be detected for a plain directory
+                  ;; buffer (no project, no file).
+                  (let ((macher-workspace-functions (default-value 'macher-workspace-functions)))
+                    (expect (macher-workspace) :to-be nil))
+                  ;; Adding `macher-workspace-directory' to the list makes a directory workspace
+                  ;; detectable.
+                  (let ((macher-workspace-functions
+                         (append
+                          (default-value
+                           'macher-workspace-functions)
+                          (list 'macher-workspace-directory))))
+                    (let ((workspace (macher-workspace)))
+                      (expect (car workspace) :to-be 'directory)
+                      (expect (cdr workspace)
+                              :to-equal (file-name-as-directory (expand-file-name tmp-dir)))))))
+            (delete-directory tmp-dir t)))))
+
+    (describe "macher--directory-root"
+      (it "returns the directory ID for valid directories"
+        (expect (macher--directory-root project-dir) :to-equal project-dir))
+
+      (it "throws error for non-existent directory"
+        (expect (macher--directory-root "/nonexistent/path") :to-throw 'error))
+
+      (it "throws error for non-string input"
+        (expect (macher--directory-root nil) :to-throw 'error)))
+
+    (describe "macher--directory-name"
+      (it "returns the directory basename"
+        (expect (macher--directory-name "/foo/bar/") :to-equal "bar")
+        (expect (macher--directory-name "/foo/bar") :to-equal "bar")))
+
+    (describe "macher--directory-files"
+      (it "returns relative file paths"
+        (let ((files (macher--directory-files project-dir)))
+          (expect files :to-be-truthy)
+          (dolist (f files)
+            (expect (file-name-absolute-p f) :to-be nil))))
+
+      (it "includes files from subdirectories"
+        (let ((files (macher--directory-files project-dir)))
+          (expect (member "subdir/file3.md" files) :to-be-truthy)))
+
+      (it "includes hidden files at the top level"
+        (let ((hidden-file (expand-file-name ".env" project-dir)))
+          (write-region "SECRET=1" nil hidden-file)
+          (let ((files (macher--directory-files project-dir)))
+            (expect (member ".env" files) :to-be-truthy))))
+
+      (it "includes hidden files in subdirectories"
+        (let* ((subdir (expand-file-name "sub" project-dir))
+               (hidden-file (expand-file-name ".env" subdir)))
+          (make-directory subdir)
+          (write-region "SECRET=1" nil hidden-file)
+          (let ((files (macher--directory-files project-dir)))
+            (expect (member "sub/.env" files) :to-be-truthy))))
+
+      (it "includes files inside hidden directories"
+        (let* ((hidden-dir (expand-file-name ".hidden" project-dir))
+               (hidden-file (expand-file-name "secret.txt" hidden-dir)))
+          (make-directory hidden-dir)
+          (write-region "secret" nil hidden-file)
+          (let ((files (macher--directory-files project-dir)))
+            (expect (member ".hidden/secret.txt" files) :to-be-truthy))))
+
+      (it "includes files inside hidden directories nested in normal directories"
+        (let* ((subdir (expand-file-name "sub" project-dir))
+               (nested-hidden-dir (expand-file-name ".cache" subdir))
+               (nested-hidden-file (expand-file-name "data.txt" nested-hidden-dir)))
+          (make-directory nested-hidden-dir t)
+          (write-region "cached" nil nested-hidden-file)
+          (let ((files (macher--directory-files project-dir)))
+            (expect (member "sub/.cache/data.txt" files) :to-be-truthy)))))
+
+    (describe "macher--get-buffer"
+      (it "signals user-error when no workspace can be determined"
+        (with-temp-buffer
+          (let ((macher-workspace-functions nil))
+            (expect (macher--get-buffer nil nil t) :to-throw 'user-error)))))
 
     (describe "macher-workspace"
       (it "returns buffer-local workspace when set"
@@ -3397,33 +3555,6 @@
                    :get-files (lambda (id) nil)))))
               (test-workspace '(test-type . "/some/path")))
           (expect (macher--workspace-root test-workspace) :to-throw 'error)))
-
-      (it "throws error when root function returns path to non-existent directory"
-        (let ((macher-workspace-types-alist
-               '((test-type
-                  .
-                  (:get-root
-                   (lambda (id) "/nonexistent/directory")
-                   :get-name (lambda (id) "test")
-                   :get-files (lambda (id) nil)))))
-              (test-workspace '(test-type . "/some/path")))
-          (expect (macher--workspace-root test-workspace) :to-throw 'error)))
-
-      (it "throws error when root function returns path to a file instead of directory"
-        (let* ((temp-file (make-temp-file "macher-test-file"))
-               (macher-workspace-types-alist
-                `((test-type
-                   .
-                   (:get-root
-                    (lambda (id) ,temp-file)
-                    :get-name (lambda (id) "test")
-                    :get-files (lambda (id) nil)))))
-               (test-workspace '(test-type . "/some/path")))
-          (unwind-protect
-              (expect (macher--workspace-root test-workspace) :to-throw 'error)
-            ;; Clean up
-            (when (file-exists-p temp-file)
-              (delete-file temp-file)))))
 
       (it "works correctly with valid workspace type configuration"
         (let* ((temp-dir (make-temp-file "macher-test-workspace" t))
@@ -6821,7 +6952,148 @@
                     (goto-char (point-min))
                     (while (search-forward macher-context-string-marker-start nil t)
                       (setq marker-count (1+ marker-count))))
-                  (expect marker-count :to-equal 1))))))))))
+                  (expect marker-count :to-equal 1)))))))))
+
+  (describe "remote workspace compatibility"
+    :var (temp-dir remote-root)
+
+    (before-all
+      ;; Register a custom TRAMP method that uses a local /bin/sh as its "login program".  This
+      ;; exercises real TRAMP code paths — path parsing, handler dispatch, caching, xref temp-file
+      ;; management — without needing a network connection.  The same trick is used by TRAMP's own
+      ;; test suite.
+      (require 'tramp)
+      (require 'tramp-sh)
+      ;; Suppress chatty "File is missing: .gitmodules" log lines that TRAMP emits when project.el
+      ;; probes for submodules.
+      (setq tramp-verbose 0)
+      (unless (assoc "mock" tramp-methods)
+        (add-to-list
+         'tramp-methods
+         `("mock"
+           (tramp-login-program ,(executable-find "sh"))
+           (tramp-login-args (("-i")))
+           (tramp-remote-shell "/bin/sh")
+           (tramp-remote-shell-args ("-c"))
+           (tramp-connection-timeout 10)))))
+
+    (before-each
+      (setq temp-dir (make-temp-file "macher-test-remote" t))
+
+      ;; Create test files and initialize a git repo so project-vc discovers the project through
+      ;; TRAMP.
+      (make-directory (expand-file-name "src" temp-dir))
+      (write-region "hello world" nil (expand-file-name "src/main.py" temp-dir))
+      (write-region "hello again" nil (expand-file-name "src/util.py" temp-dir))
+      (let ((default-directory temp-dir))
+        (call-process "git" nil nil nil "init")
+        (call-process "git" nil nil nil "add" ".")
+        (call-process "git"
+                      nil
+                      nil
+                      nil
+                      "-c"
+                      "user.name=test"
+                      "-c"
+                      "user.email=test@test"
+                      "commit"
+                      "-m"
+                      "init"))
+
+      ;; Construct the remote root in TRAMP's normalized form (/mock:HOST:PATH/) and prime the
+      ;; connection so that the first real operation doesn't have to initialize it.
+      (setq remote-root (format "/mock:%s:%s" (system-name) (file-name-as-directory temp-dir)))
+      (file-directory-p remote-root)
+
+      ;; Spy on tramp-send-command to count remote round-trips.  Every actual command sent to the
+      ;; remote shell goes through this function, so it gives a uniform, backend-agnostic measure of
+      ;; "remote I/O" regardless of which primitive (file-attributes, file-exists-p, process-file,
+      ;; etc.) triggered it.  Installed after warm-up so connection-setup commands aren't counted.
+      (spy-on 'tramp-send-command :and-call-through))
+
+    (after-each
+      (tramp-cleanup-all-connections)
+      (when (and temp-dir (file-exists-p temp-dir))
+        (delete-directory temp-dir t)))
+
+    (it "search produces correct relative paths over a remote connection"
+      ;; The search function must produce correct relative paths when the
+      ;; workspace root is a remote (TRAMP) path.
+      (let* ((context (macher--make-context :workspace (cons 'project remote-root)))
+             (result (macher--search-get-xref-matches context "hello")))
+        (expect result :to-be-truthy)
+        (expect (assoc "src/main.py" result) :to-be-truthy)
+        (expect (assoc "src/util.py" result) :to-be-truthy)
+        (dolist (entry result)
+          (expect (file-name-absolute-p (car entry)) :to-be nil))))
+
+    (it "search makes sub-linear remote calls in N workspace files"
+      ;; A regression that triggers per-file I/O (e.g. a `file-exists-p' check on each workspace
+      ;; file) would push the total remote-call count above the file count.  Create more than 100
+      ;; files and assert that the total stays under 100 — that directly proves the operation is
+      ;; sub-linear.  Note we expect a somewhat large baseline of remote operations, for
+      ;; e.g. project.el project detection; but we want to make sure it doesn't grow linearly with
+      ;; the number of files in the project.
+      (dotimes (i 120)
+        (write-region
+         (format "hello from file %d" i) nil (expand-file-name (format "file_%d.txt" i) temp-dir)))
+      (let ((default-directory temp-dir))
+        (call-process "git" nil nil nil "add" ".")
+        (call-process "git"
+                      nil
+                      nil
+                      nil
+                      "-c"
+                      "user.name=test"
+                      "-c"
+                      "user.email=test@test"
+                      "commit"
+                      "-m"
+                      "add test files"))
+
+      (let ((context (macher--make-context :workspace (cons 'project remote-root))))
+        (macher--tool-search context "hello" nil nil "files"))
+      (expect (spy-calls-count 'tramp-send-command) :to-be-less-than 100))
+
+    (it "macher--workspace-root does not trigger remote I/O"
+      ;; `macher--workspace-root' is a pure resolver: it should return the configured root without
+      ;; validating it, since any downstream file operation will fail naturally if the root is bad.
+      ;; Over TRAMP, a validation like file-directory-p would be a remote round-trip every time the
+      ;; function is called (which may be many times per tool invocation).
+      (let ((workspace (cons 'project remote-root)))
+        (expect (macher--workspace-root workspace) :not :to-be nil))
+      (expect (spy-calls-count 'tramp-send-command) :to-equal 0))
+
+    (it "read-file does not trigger redundant project discovery"
+      ;; `project-current' (called transitively via `macher--project-files') triggers project-try-vc
+      ;; which walks the directory tree probing for .git/.gitmodules.  It's expensive over TRAMP and
+      ;; should be called at most once per tool invocation.
+      (spy-on 'project-current :and-call-through)
+      (ignore-errors
+        (let ((context (macher--make-context :workspace (cons 'project remote-root))))
+          (macher--tool-read-file context "src/main.py")))
+      (expect (spy-calls-count 'project-current) :to-equal 1))
+
+    (it "search does not trigger redundant project discovery"
+      ;; The search tool resolves the search path via `macher--resolve-workspace-path' and also reads
+      ;; workspace-files directly.  Both paths call `macher--workspace-files' internally, but
+      ;; project-current (and its directory-walk probes) should only happen once per tool
+      ;; invocation.
+      (spy-on 'project-current :and-call-through)
+      (ignore-errors
+        (let ((context (macher--make-context :workspace (cons 'project remote-root))))
+          (macher--tool-search context "hello" nil nil "files")))
+      (expect (spy-calls-count 'project-current) :to-equal 1))
+
+    (it "list-directory does not trigger redundant project discovery"
+      ;; Like search, list-directory resolves a path and separately reads workspace-files for entry
+      ;; collection.  Both should share the same workspace-files computation so project-current only
+      ;; runs once.
+      (spy-on 'project-current :and-call-through)
+      (ignore-errors
+        (let ((context (macher--make-context :workspace (cons 'project remote-root))))
+          (macher--tool-list-directory context ".")))
+      (expect (spy-calls-count 'project-current) :to-equal 1))))
 
 (provide 'test-unit)
 ;;; test-unit.el ends here
