@@ -759,6 +759,20 @@ run."
   :type 'hook
   :group 'macher-processing)
 
+(defcustom macher-context-resolved-functions nil
+  "Hook called when a macher context is lazily resolved for a request.
+
+Each function is called with two arguments: CONTEXT and FSM.
+CONTEXT is the newly resolved `macher-context' struct.
+FSM is the `gptel-fsm' (state machine) for the request.
+
+Functions can be used to modify the CONTEXT object, trigger side-effects,
+or update the FSM state. If a hook function replaces the context in the
+FSM (e.g., via `plist-put' on the `gptel-fsm-info'), that new context
+will be utilized by the request."
+  :type 'hook
+  :group 'macher-processing)
+
 ;;;; Tools, Presets, and Tool Settings
 
 (defcustom macher-tool-category "macher"
@@ -4043,27 +4057,31 @@ CALLBACK and FSM are as described in the
                 ;; We always expect the request buffer to be non-nil.
                 (unless buffer
                   (error "Trying to set up macher tools, but coudn't determine request buffer"))
-                (setq context-or-t
-                      (if (buffer-live-p buffer)
-                          (if-let ((workspace (macher-workspace buffer)))
-                              ;; If we found a workspace, perform context initialization.
-                              (let ((context
-                                     (macher--make-context
-                                      :workspace workspace
-                                      :prompt prompt
-                                      :process-request-function process-request-function)))
-                                ;; Store the context on the FSM, so we can look it up e.g. for
-                                ;; processing later.
-                                (setq info (plist-put info :macher--context context))
-                                (setf (gptel-fsm-info fsm) info)
-                                ;; Mark this FSM as the most recent macher request.
-                                (with-current-buffer buffer
-                                  (setq macher--fsm-latest fsm))
-                                context)
-                            ;; Request buffer live but no workspace found.
-                            t)
-                        ;; Request buffer not live - no workspace can be found.
-                        t))))
+                (setq
+                 context-or-t
+                 (if (buffer-live-p buffer)
+                     (if-let ((workspace (macher-workspace buffer)))
+                         ;; If we found a workspace, perform context initialization.
+                         (let ((context
+                                (macher--make-context
+                                 :workspace workspace
+                                 :prompt prompt
+                                 :process-request-function process-request-function)))
+                           ;; Store the context on the FSM, so we can look it up e.g. for
+                           ;; processing later.
+                           (setq info (plist-put info :macher--context context))
+                           (setf (gptel-fsm-info fsm) info)
+                           ;; Mark this FSM as the most recent macher request.
+                           (with-current-buffer buffer
+                             (setq macher--fsm-latest fsm))
+                           ;; Run resolution hooks, allowing them to mutate or swap the context.
+                           (run-hook-with-args 'macher-context-resolved-functions context fsm)
+                           ;; Return the context from the FSM in case a hook swapped it out.
+                           (plist-get (gptel-fsm-info fsm) :macher--context))
+                       ;; Request buffer live but no workspace found.
+                       t)
+                   ;; Request buffer not live - no workspace can be found.
+                   t))))
             ;; Now return the cached context.
             (if (eq context-or-t t)
                 ;; t actually means "no workspace found".
