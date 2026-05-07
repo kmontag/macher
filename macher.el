@@ -759,6 +759,20 @@ run."
   :type 'hook
   :group 'macher-processing)
 
+(defcustom macher-context-resolved-functions nil
+  "Hook called when a macher context is lazily resolved for a request.
+
+Each function is called with two arguments: CONTEXT and FSM.
+CONTEXT is the newly resolved `macher-context' struct.
+FSM is the `gptel-fsm' (state machine) for the request.
+
+Functions can be used to modify the CONTEXT object, trigger side-effects,
+or update the FSM state. If a hook function replaces the context in the
+FSM (e.g., via `plist-put' on the `gptel-fsm-info'), that new context
+will be utilized by the request."
+  :type 'hook
+  :group 'macher-processing)
+
 ;;;; Tools, Presets, and Tool Settings
 
 (defcustom macher-tool-category "macher"
@@ -4059,7 +4073,10 @@ CALLBACK and FSM are as described in the
                                 ;; Mark this FSM as the most recent macher request.
                                 (with-current-buffer buffer
                                   (setq macher--fsm-latest fsm))
-                                context)
+                                ;; Run resolution hooks, allowing them to mutate or swap the context.
+                                (run-hook-with-args 'macher-context-resolved-functions context fsm)
+                                ;; Return the context from the FSM in case a hook swapped it out.
+                                (plist-get (gptel-fsm-info fsm) :macher--context))
                             ;; Request buffer live but no workspace found.
                             t)
                         ;; Request buffer not live - no workspace can be found.
