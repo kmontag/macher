@@ -1,4 +1,9 @@
-NPM := npm
+# Detect available JavaScript package manager (ie npm, yarn, pnpm, bun, deno)
+JS_PM := $(shell command -v npm 2>/dev/null || command -v yarn 2>/dev/null || command -v pnpm 2>/dev/null || command -v bun 2>/dev/null || command -v deno 2>/dev/null)
+
+# Prepend local binaries to PATH for node shim
+export PATH := $(CURDIR)/node_modules/.bin:$(PATH)
+
 EASK := node_modules/.bin/eask
 PRETTIER := node_modules/.bin/prettier
 
@@ -8,9 +13,32 @@ ASCIINEMA := asciinema
 FFMPEG := ffmpeg
 
 # Note this also installs eask dependencies via the package's postinstall script.
-$(EASK) $(PRETTIER) .eask: package.json package-lock.json Eask
-	"$(NPM)" install
-	[ -f "$(EASK)" ] && touch "$(EASK)" && touch "$(PRETTIER)" && touch .eask/
+$(EASK) $(PRETTIER) .eask: package.json Eask
+	@if [ -n "$(JS_PM)" ]; then \
+		echo "Installing dependencies using $(JS_PM)..."; \
+		"$(JS_PM)" install; \
+	else \
+		echo "Error: No recognised JavaScript package manager found."; \
+		echo "Please install the missing packages manually (ie eask and prettier)."; \
+		exit 1; \
+	fi
+	@[ -f "$(EASK)" ] && touch "$(EASK)" && touch "$(PRETTIER)" && mkdir -p .eask && touch .eask/
+	@if ! command -v node >/dev/null 2>&1; then \
+		PM_NAME=$$(basename "$(JS_PM)"); \
+		if [ "$$PM_NAME" = "deno" ]; then \
+			printf '#!/bin/sh\nexec deno run -A "$$@"\n' > node_modules/.bin/node; \
+			chmod +x node_modules/.bin/node; \
+		elif [ "$$PM_NAME" = "bun" ]; then \
+			printf '#!/bin/sh\nexec bun "$$@"\n' > node_modules/.bin/node; \
+			chmod +x node_modules/.bin/node; \
+		fi; \
+	fi
+	@echo "Fetching Emacs development dependencies via Eask..."
+	@$(EASK) install-deps --dev || true
+	@echo "Copying macro definitions for the formatter..."
+	@cp .eask/*/elpa/buttercup-*/buttercup.el .eask/buttercup.el || true
+	@cp .eask/*/elpa/gptel-*/gptel.el .eask/gptel.el || true
+	@cp .eask/*/elpa/gptel-*/gptel-ollama.el .eask/gptel-ollama.el || true
 
 # Analyze the Eask file itself for inconsistencies, and exit unsuccessfully if any are found.
 .PHONY: analyze
@@ -133,7 +161,12 @@ test.%: $(EASK) .eask
 
 .PHONY: test
 test: $(EASK) .eask
-	$(NPM) test
+	@if [ -n "$(JS_PM)" ]; then \
+		"$(JS_PM)" test; \
+	else \
+		echo "Error: Cannot run tests because no JavaScript package manager was found."; \
+		exit 1; \
+	fi
 
 .PHONY: demos
 demos: $(patsubst demo/demo-%.el,demo/output/%.mp4,$(wildcard demo/demo-*.el))
@@ -160,3 +193,8 @@ demo/output/%.mkv: demo/output/%.gif
 # blank-at-beginning issue. mp4's can be included inline in READMEs on GitHub.
 demo/output/%.mp4: demo/output/%.mkv
 	$(FFMPEG) -y -i "$<" "$@"
+
+# Simple clean up method
+.PHONY: clean
+clean:
+	rm -rf node_modules/ .eask/ *.elc demo/output/
