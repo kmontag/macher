@@ -4046,13 +4046,13 @@
         (with-temp-buffer
           (find-file project-file)
           (let ((macher-context-string-function (lambda () "foobar"))
-                (gptel--system-message (concat "System prompt" macher-context-string-placeholder)))
+                (gptel-system-prompt (concat "System prompt" macher-context-string-placeholder)))
             (macher--with-preset
              'macher-system-commit
              (lambda ()
                ;; Should have replaced placeholder with actual context.
                (expect (string-match-p
-                        (regexp-quote macher-context-string-placeholder) gptel--system-message)
+                        (regexp-quote macher-context-string-placeholder) gptel-system-prompt)
                        :to-be nil)
                ;; Should contain the marker start (indicating context was injected).
                (expect (string-match-p
@@ -4061,18 +4061,18 @@
                           macher-context-string-marker-start
                           "foobar"
                           macher-context-string-marker-end))
-                        gptel--system-message)
+                        gptel-system-prompt)
                        :to-be-truthy))))))
 
       (it "is a no-op when system prompt has no placeholder"
         (with-temp-buffer
           (find-file project-file)
-          (let ((gptel--system-message "System prompt without placeholder"))
+          (let ((gptel-system-prompt "System prompt without placeholder"))
             (macher--with-preset
              'macher-system-commit
              (lambda ()
                ;; System message should be unchanged.
-               (expect gptel--system-message :to-equal "System prompt without placeholder")))))))
+               (expect gptel-system-prompt :to-equal "System prompt without placeholder")))))))
 
     (describe "macher-tools preset"
       (it "adds all macher tools to gptel-tools"
@@ -4104,12 +4104,12 @@
       (it "does not add system prompt modifications"
         (with-temp-buffer
           (find-file project-file)
-          (let ((gptel--system-message "Original system prompt"))
+          (let ((gptel-system-prompt "Original system prompt"))
             (macher--with-preset
              'macher-tools
              (lambda ()
                ;; System prompt should be unchanged (no placeholder added).
-               (expect gptel--system-message :to-equal "Original system prompt"))))))
+               (expect gptel-system-prompt :to-equal "Original system prompt"))))))
 
       (it "adds macher--transform-setup-tools transform"
         (with-temp-buffer
@@ -4766,41 +4766,41 @@
 
     (it "sets buffer-local variables from a plist preset"
       (with-temp-buffer
-        (let ((gptel--system-message "original"))
+        (let ((gptel-system-prompt "original"))
           (macher--apply-preset-locally '(:system "from-preset"))
-          (expect (buffer-local-value 'gptel--system-message (current-buffer))
+          (expect (buffer-local-value 'gptel-system-prompt (current-buffer))
                   :to-equal "from-preset")
           ;; Global value should be unchanged.
           (with-temp-buffer
-            (expect gptel--system-message :to-equal "original")))))
+            (expect gptel-system-prompt :to-equal "original")))))
 
     (it "sets buffer-local variables from a registered symbol preset"
       (gptel-make-preset 'test-local-preset :description "Test" :system "preset-system")
       (with-temp-buffer
         (macher--apply-preset-locally 'test-local-preset)
-        (expect (buffer-local-value 'gptel--system-message (current-buffer))
+        (expect (buffer-local-value 'gptel-system-prompt (current-buffer))
                 :to-equal "preset-system")))
 
     (it "falls back to macher-presets-alist for unregistered symbols"
       (with-temp-buffer
         (let ((macher-presets-alist `((test-macher-preset . (:system "macher-system")))))
           (macher--apply-preset-locally 'test-macher-preset)
-          (expect (buffer-local-value 'gptel--system-message (current-buffer))
+          (expect (buffer-local-value 'gptel-system-prompt (current-buffer))
                   :to-equal "macher-system"))))
 
     (it "does nothing for nil preset-spec"
       (with-temp-buffer
-        (let ((gptel--system-message "original"))
+        (let ((gptel-system-prompt "original"))
           (macher--apply-preset-locally 'nonexistent-symbol)
           ;; Should not have changed anything.
-          (expect gptel--system-message :to-equal "original"))))
+          (expect gptel-system-prompt :to-equal "original"))))
 
     (it "applies parent presets"
       (gptel-make-preset 'parent-preset :description "Parent" :system "parent-system")
       (with-temp-buffer
         (macher--apply-preset-locally '(:parents (parent-preset) :use-tools t))
         ;; Parent's system message should be applied.
-        (expect (buffer-local-value 'gptel--system-message (current-buffer))
+        (expect (buffer-local-value 'gptel-system-prompt (current-buffer))
                 :to-equal "parent-system")
         ;; Child's use-tools should also be applied.
         (expect (buffer-local-value 'gptel-use-tools (current-buffer)) :to-be t)))
@@ -4808,7 +4808,7 @@
     (it "applies anonymous plist parents"
       (with-temp-buffer
         (macher--apply-preset-locally '(:parents ((:system "anon-parent-system")) :use-tools t))
-        (expect (buffer-local-value 'gptel--system-message (current-buffer))
+        (expect (buffer-local-value 'gptel-system-prompt (current-buffer))
                 :to-equal "anon-parent-system")
         (expect (buffer-local-value 'gptel-use-tools (current-buffer)) :to-be t))))
 
@@ -6823,9 +6823,9 @@
       (setq macher-context-string-placeholder original-placeholder)
       (setq macher-context-string-function original-context-fn))
 
-    (it "replaces placeholder in gptel--system-message"
+    (it "replaces placeholder in gptel-system-prompt"
       (let* ((macher-context-string-function (lambda () "INJECTED CONTEXT"))
-             (gptel--system-message (concat "You are helpful." macher-context-string-placeholder))
+             (gptel-system-prompt (concat "You are helpful." macher-context-string-placeholder))
              (callback-called nil)
              (callback (lambda () (setq callback-called t)))
              (fsm (gptel-make-fsm)))
@@ -6834,14 +6834,14 @@
             (setf (gptel-fsm-info fsm) (list :buffer test-buffer))
             (macher--transform-system-replace-placeholder callback fsm)
             (expect callback-called :to-be t)
-            (expect gptel--system-message :to-match "INJECTED CONTEXT")
-            (expect gptel--system-message
+            (expect gptel-system-prompt :to-match "INJECTED CONTEXT")
+            (expect gptel-system-prompt
                     :not
                     :to-match (regexp-quote macher-context-string-placeholder))))))
 
     (it "always calls callback even when no replacement needed"
       (let* ((macher-context-string-function (lambda () "CTX"))
-             (gptel--system-message "No placeholder here")
+             (gptel-system-prompt "No placeholder here")
              (callback-called nil)
              (callback (lambda () (setq callback-called t)))
              (fsm (gptel-make-fsm)))
@@ -6849,10 +6849,10 @@
           (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
           (macher--transform-system-replace-placeholder callback fsm)
           (expect callback-called :to-be t)
-          (expect gptel--system-message :to-equal "No placeholder here"))))
+          (expect gptel-system-prompt :to-equal "No placeholder here"))))
 
     (it "handles nil buffer gracefully"
-      (let* ((gptel--system-message "Test message")
+      (let* ((gptel-system-prompt "Test message")
              (callback-called nil)
              (callback (lambda () (setq callback-called t)))
              (fsm (gptel-make-fsm)))
@@ -6861,7 +6861,7 @@
         (expect callback-called :to-be t)))
 
     (it "handles dead buffer gracefully"
-      (let* ((gptel--system-message "Test message")
+      (let* ((gptel-system-prompt "Test message")
              (callback-called nil)
              (callback (lambda () (setq callback-called t)))
              (fsm (gptel-make-fsm))
@@ -6872,7 +6872,7 @@
         (expect callback-called :to-be t)))
 
     (it "handles nil fsm info gracefully"
-      (let* ((gptel--system-message "Test message")
+      (let* ((gptel-system-prompt "Test message")
              (callback-called nil)
              (callback (lambda () (setq callback-called t)))
              (fsm (gptel-make-fsm)))
@@ -6886,7 +6886,7 @@
               (lambda ()
                 (setq captured-buffer (current-buffer))
                 "CTX"))
-             (gptel--system-message (concat "Message" macher-context-string-placeholder))
+             (gptel-system-prompt (concat "Message" macher-context-string-placeholder))
              (callback (lambda ()))
              (fsm (gptel-make-fsm)))
         (with-temp-buffer
@@ -6897,16 +6897,16 @@
               (macher--transform-system-replace-placeholder callback fsm))
             (expect captured-buffer :to-be request-buffer)))))
 
-    (it "modifies gptel--system-message in transform buffer"
+    (it "modifies gptel-system-prompt in transform buffer"
       (let* ((macher-context-string-function (lambda () "CTX"))
-             (gptel--system-message (concat "Original" macher-context-string-placeholder))
+             (gptel-system-prompt (concat "Original" macher-context-string-placeholder))
              (callback (lambda ()))
              (fsm (gptel-make-fsm)))
         (with-temp-buffer
           (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
           (macher--transform-system-replace-placeholder callback fsm)
-          ;; gptel--system-message should be modified.
-          (expect gptel--system-message :to-match "CTX"))))
+          ;; gptel-system-prompt should be modified.
+          (expect gptel-system-prompt :to-match "CTX"))))
 
     (describe "called multiple times"
       (it "is safe to call multiple times"
@@ -6915,7 +6915,7 @@
                 (lambda ()
                   (setq call-count (1+ call-count))
                   "CTX"))
-               (gptel--system-message (concat "Message" macher-context-string-placeholder))
+               (gptel-system-prompt (concat "Message" macher-context-string-placeholder))
                (callback (lambda ()))
                (fsm (gptel-make-fsm)))
           (with-temp-buffer
@@ -6926,23 +6926,23 @@
             (expect call-count :to-be 3)
             ;; Context function called once per transform call, but replacement only happens
             ;; when placeholder is present.
-            (expect gptel--system-message :to-match "CTX")
-            (expect gptel--system-message
+            (expect gptel-system-prompt :to-match "CTX")
+            (expect gptel-system-prompt
                     :not
                     :to-match (regexp-quote macher-context-string-placeholder)))))
 
       (it "does not accumulate context strings when called multiple times"
         (let* ((macher-context-string-function (lambda () "CTX"))
-               (gptel--system-message (concat "Message" macher-context-string-placeholder))
+               (gptel-system-prompt (concat "Message" macher-context-string-placeholder))
                (callback (lambda ()))
                (fsm (gptel-make-fsm)))
           (with-temp-buffer
             (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
             ;; Call multiple times.
             (macher--transform-system-replace-placeholder callback fsm)
-            (let ((first-result gptel--system-message))
+            (let ((first-result gptel-system-prompt))
               (macher--transform-system-replace-placeholder callback fsm)
-              (let ((second-result gptel--system-message))
+              (let ((second-result gptel-system-prompt))
                 ;; Results should be identical.
                 (expect first-result :to-equal second-result)
                 ;; Should only have one context string marker.

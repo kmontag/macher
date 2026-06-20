@@ -2052,14 +2052,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
     ;; work correctly with all directive formats supported by gptel.
 
     (it "handles function directive that returns a string"
-      ;; When gptel--system-message is a function returning a string, macher should evaluate it and
+      ;; When gptel-system-prompt is a function returning a string, macher should evaluate it and
       ;; inject the workspace context into the result.
       (funcall setup-backend '("Function directive works"))
       (funcall setup-project "fn-directive-string" '(("src/main.el" . "main content")))
       (let ((callback-called nil)
             (response-received nil)
             ;; Create a function directive that returns a string.
-            (gptel--system-message (lambda () "DYNAMIC_FUNCTION_DIRECTIVE_CONTENT")))
+            (gptel-system-prompt (lambda () "DYNAMIC_FUNCTION_DIRECTIVE_CONTENT")))
 
         (with-temp-buffer
           (set-visited-file-name project-file)
@@ -2098,14 +2098,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                       :to-match "The user is currently working on a project named:"))))))
 
     (it "handles function directive that returns a list"
-      ;; When gptel--system-message is a function returning a list (few-shot template), macher
+      ;; When gptel-system-prompt is a function returning a list (few-shot template), macher
       ;; should inject workspace context into the first element.
       (funcall setup-backend '("Function returning list works"))
       (funcall setup-project "fn-directive-list" '(("src/main.el" . "main content")))
       (let ((callback-called nil)
             (response-received nil)
             ;; Create a function directive that returns a list (few-shot template).
-            (gptel--system-message
+            (gptel-system-prompt
              (lambda ()
                '("FEW_SHOT_SYSTEM_FROM_FUNCTION"
                  "Example user message"
@@ -2146,14 +2146,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect all-content :to-match "Example assistant response"))))))
 
     (it "handles list directive (few-shot template)"
-      ;; When gptel--system-message is a list, macher should inject workspace context into the
+      ;; When gptel-system-prompt is a list, macher should inject workspace context into the
       ;; first element only.
       (funcall setup-backend '("List directive works"))
       (funcall setup-project "list-directive" '(("src/main.el" . "main content")))
       (let ((callback-called nil)
             (response-received nil)
             ;; Create a list directive (few-shot template).
-            (gptel--system-message
+            (gptel-system-prompt
              '("LIST_BASED_SYSTEM_PROMPT"
                "User example for few-shot"
                "Assistant example response")))
@@ -2203,7 +2203,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           ;; Set up a buffer-local variable that the function will access.
           (setq-local my-dynamic-value "BUFFER_LOCAL_DYNAMIC_VALUE")
           ;; Create a function directive that reads from the buffer.
-          (setq-local gptel--system-message
+          (setq-local gptel-system-prompt
                       (lambda () (format "System with dynamic: %s" my-dynamic-value)))
 
           (macher-test--send
@@ -2247,7 +2247,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (let ((callback-called nil)
             (response-received nil)
             ;; Create a list directive with placeholder in the first element.
-            (gptel--system-message
+            (gptel-system-prompt
              (list
               (concat
                "SYSTEM_WITH_PLACEHOLDER" macher-context-string-placeholder "END_MARKER")
@@ -2303,7 +2303,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (let ((callback-called nil)
             (response-received nil)
             ;; Create a nested function directive.
-            (gptel--system-message (lambda () (lambda () "INNER_RESULT"))))
+            (gptel-system-prompt (lambda () (lambda () "INNER_RESULT"))))
 
         (with-temp-buffer
           (set-visited-file-name project-file)
@@ -4085,14 +4085,12 @@ Sets `test-patch-content' to the generated patch content for additional assertio
 
             ;; The preset should be applied buffer-locally in the action buffer.
             (with-current-buffer action-buffer
-              (expect (buffer-local-value 'gptel--system-message action-buffer)
+              (expect (buffer-local-value 'gptel-system-prompt action-buffer)
                       :to-match "BUFFER_LOCAL_PRESET_SYSTEM_MESSAGE"))
 
             ;; The global value should be unchanged.
             (with-temp-buffer
-              (expect gptel--system-message
-                      :not
-                      :to-match "BUFFER_LOCAL_PRESET_SYSTEM_MESSAGE")))))))
+              (expect gptel-system-prompt :not :to-match "BUFFER_LOCAL_PRESET_SYSTEM_MESSAGE")))))))
 
   ;; Tests ensuring that action conversations can be continued/resumed directly from the action
   ;; buffer.
