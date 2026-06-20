@@ -244,6 +244,18 @@ This function is used by the default actions in the
            ;; If there's an active region, use its contents.
            ((use-region-p)
             (buffer-substring-no-properties (region-beginning) (region-end)))
+           ;; With a prefix arg, skip the minibuffer prompt and treat the request as a blank string,
+           ;; so that `macher-action' populates the action buffer with an editable prompt instead of
+           ;; sending immediately.
+           ;;
+           ;; NOTE: this is a slight hack. Reading `current-prefix-arg' here ties this helper to the
+           ;; interactive command state rather than receiving the intent explicitly through the
+           ;; action API. It's fine for the current interactive-only workflow, but if this behavior
+           ;; needs to grow (e.g. programmatic control, or per-action customization), it'd be worth
+           ;; threading a well-scoped "edit"/"no-send" signal through `macher-action' and
+           ;; `macher-actions-alist' instead.
+           (current-prefix-arg
+            "")
            ;; Otherwise, prompt the user.
            (t
             (read-string input-prompt))))
@@ -4423,6 +4435,23 @@ simply ignored if the action is defined as a plain plist.
 When called interactively, prompts the user to select an ACTION from
 those available in the `macher-actions-alist'.
 
+With a prefix argument (e.g. \[universal-argument]), the request is not
+sent.  The `macher-before-action-functions' still run as usual (so, for
+example, the default action buffer UI still populates and displays the
+buffer); the prompt is simply left in the action buffer for you to edit
+and send manually.  In this mode the built-in actions skip the
+minibuffer prompt, using the selected region if there is one or an empty
+request otherwise.
+
+When sending an edited prompt manually, `gptel-send' should \"just
+work\" in an org-mode action buffer with any of the built-in non-nil
+`macher-action-buffer-ui' options: the populated prompt contains an
+appropriate preset @-prefix (as long as the presets have been installed)
+and a structural org separator.  Note, however, that nothing
+macher-specific happens when you call `gptel-send', so non-built-in UIs
+or non-org-mode action buffers may require more care to send an edited
+prompt correctly.
+
 Note that macher tools/presets can be used with any gptel request, and
 you don't need to use this function to use macher.  This function simply
 implements one possible workflow."
@@ -4504,21 +4533,26 @@ implements one possible workflow."
           (run-hook-with-args 'macher-before-action-functions execution))
         ;; It's possible for the before-action hook to change the current buffer, so re-enter the
         ;; shared buffer explicitly.
-        (with-current-buffer action-buffer
-          (macher--with-preset
-           (macher-action-execution-preset execution)
-           (lambda ()
-             ;; Just like `gptel-send', but with a prompt specified directly, and with the callback on
-             ;; termination.  Use the potentially modified prompt and context from the execution
-             ;; object.
-             (macher--gptel-request request-callback
-                                    (macher-action-execution-prompt execution)
-                                    :context (macher-action-execution-context execution)
-                                    ;; Insert at the end of the buffer.
-                                    :position (point-max)
-                                    :stream gptel-stream
-                                    :transforms gptel-prompt-transform-functions
-                                    :fsm (gptel-make-fsm :handlers gptel-send--handlers)))))))))
+        ;;
+        ;; With a prefix arg, the before-action hooks above have already populated the action buffer
+        ;; with the prompt; leave it there for the user to edit and send manually rather than sending
+        ;; now.
+        (unless current-prefix-arg
+          (with-current-buffer action-buffer
+            (macher--with-preset
+             (macher-action-execution-preset execution)
+             (lambda ()
+               ;; Just like `gptel-send', but with a prompt specified directly, and with the callback on
+               ;; termination.  Use the potentially modified prompt and context from the execution
+               ;; object.
+               (macher--gptel-request request-callback
+                                      (macher-action-execution-prompt execution)
+                                      :context (macher-action-execution-context execution)
+                                      ;; Insert at the end of the buffer.
+                                      :position (point-max)
+                                      :stream gptel-stream
+                                      :transforms gptel-prompt-transform-functions
+                                      :fsm (gptel-make-fsm :handlers gptel-send--handlers))))))))))
 
 ;;;###autoload
 (defun macher-abort (&optional buf)

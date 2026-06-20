@@ -5212,7 +5212,29 @@
                  (call-plist (cdr call-args))
                  (passed-context (plist-get call-plist :context)))
             ;; The :context key should contain our test context.
-            (expect passed-context :to-equal test-context))))))
+            (expect passed-context :to-equal test-context)))))
+
+    (it "does not send the request when called with a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let ((current-prefix-arg '(4)))
+          (macher-action 'implement nil "test prompt"))
+        ;; In edit mode the request is not sent; the prompt is left in the buffer for manual editing.
+        (expect 'gptel-request :not :to-have-been-called)
+        (let ((action-buffer (macher-action-buffer)))
+          (expect (buffer-live-p action-buffer) :to-be-truthy)
+          (expect (with-current-buffer action-buffer
+                    (buffer-string))
+                  :to-match "test prompt"))))
+
+    (it "still runs the before-action functions when called with a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let* ((before-called nil)
+               (macher-before-action-functions (list (lambda (_execution) (setq before-called t))))
+               (current-prefix-arg '(4)))
+          (macher-action 'implement nil "test prompt")
+          ;; The before-action functions run even though the request is not sent.
+          (expect before-called :to-be-truthy)
+          (expect 'gptel-request :not :to-have-been-called)))))
 
   (describe "macher--add-transition-handler"
     :var (fsm test-handler handler-calls)
@@ -5635,6 +5657,43 @@
             (kill-ring nil))
         (macher-focus-string t)
         (expect (car kill-ring) :to-equal "interactive-test"))))
+
+  (describe "macher--action-from-region-or-input"
+    (it "uses a blank request without prompting when called with a prefix argument"
+      (spy-on 'read-string :and-return-value "from-minibuffer")
+      (let* ((current-prefix-arg '(4))
+             (transform (lambda (input is-selected) (cons input is-selected)))
+             (result (macher--action-from-region-or-input "To implement: " transform 'macher)))
+        (expect 'read-string :not :to-have-been-called)
+        (expect (plist-get result :summary) :to-equal "")
+        (expect (car (plist-get result :prompt)) :to-equal "")
+        (expect (cdr (plist-get result :prompt)) :to-be nil)))
+
+    (it "prefers an active region over a blank request with a prefix argument"
+      (spy-on 'read-string :and-return-value "from-minibuffer")
+      (with-temp-buffer
+        (insert "selected region text")
+        (goto-char (point-min))
+        (set-mark (point))
+        (goto-char (point-max))
+        (activate-mark)
+        (let* ((current-prefix-arg '(4))
+               (transform (lambda (input is-selected) (cons input is-selected)))
+               (result (macher--action-from-region-or-input "To implement: " transform 'macher)))
+          (expect 'read-string :not :to-have-been-called)
+          (expect (plist-get result :summary) :to-equal "selected region text")
+          (expect (car (plist-get result :prompt)) :to-equal "selected region text")
+          (expect (cdr (plist-get result :prompt)) :to-be-truthy))))
+
+    (it "prompts in the minibuffer with no region and no prefix argument"
+      (spy-on 'read-string :and-return-value "typed input")
+      (let* ((current-prefix-arg nil)
+             (transform (lambda (input is-selected) (cons input is-selected)))
+             (result (macher--action-from-region-or-input "To implement: " transform 'macher)))
+        (expect 'read-string :to-have-been-called)
+        (expect (plist-get result :summary) :to-equal "typed input")
+        (expect (car (plist-get result :prompt)) :to-equal "typed input")
+        (expect (cdr (plist-get result :prompt)) :to-be nil))))
 
   (describe "macher--implement-prompt"
     :var (temp-file)
