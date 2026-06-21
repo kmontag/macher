@@ -4682,6 +4682,24 @@
           ;; Check that gptel-mode is NOT enabled (basic doesn't enable it).
           (expect (bound-and-true-p gptel-mode) :to-be nil))))
 
+    (it "scrolls after inserting and displaying in the basic UI"
+      (let ((macher-action-buffer-ui 'basic))
+        (with-temp-buffer
+          (setq-local macher--workspace '(test . "/tmp/test"))
+          (macher--action-buffer-setup)
+          ;; The scroll hook should be registered for the basic UI.
+          (expect (member #'macher--before-action-scroll macher-before-action-functions)
+                  :to-be-truthy)
+          ;; It must run after the insert and display hooks (before-action functions run in list
+          ;; order, so scroll must appear later in the list to show the just-inserted prompt).
+          (let ((funcs (remq t macher-before-action-functions)))
+            (expect (> (seq-position funcs #'macher--before-action-scroll)
+                       (seq-position funcs #'macher--before-action-insert-prompt))
+                    :to-be-truthy)
+            (expect (> (seq-position funcs #'macher--before-action-scroll)
+                       (seq-position funcs #'macher--before-action-display-buffer))
+                    :to-be-truthy)))))
+
     (it "sets up default UI correctly"
       (let ((macher-action-buffer-ui 'default))
         (with-temp-buffer
@@ -5234,7 +5252,19 @@
           (macher-action 'implement nil "test prompt")
           ;; The before-action functions run even though the request is not sent.
           (expect before-called :to-be-truthy)
-          (expect 'gptel-request :not :to-have-been-called)))))
+          (expect 'gptel-request :not :to-have-been-called))))
+
+    (it "selects the action buffer window when called with a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let ((current-prefix-arg '(4)))
+          ;; Start from a single window so the action buffer gets a fresh one.
+          (delete-other-windows)
+          (macher-action 'implement nil "test prompt")
+          (let ((action-buffer (macher-action-buffer)))
+            ;; The action buffer should be displayed and its window selected, so the user can edit
+            ;; the populated prompt right away.
+            (expect (get-buffer-window action-buffer t) :to-be-truthy)
+            (expect (selected-window) :to-equal (get-buffer-window action-buffer t)))))))
 
   (describe "macher--add-transition-handler"
     :var (fsm test-handler handler-calls)
