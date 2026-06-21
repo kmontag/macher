@@ -4,7 +4,7 @@
 
 ;; Author: Kevin Montag
 ;; Version: 0.5.2
-;; Package-Requires: ((emacs "30.1") (gptel "0.9.9.3"))
+;; Package-Requires: ((emacs "30.1") (gptel "0.9.9.6"))
 ;; Keywords: convenience, gptel, llm
 ;; URL: https://github.com/kmontag/macher
 
@@ -3953,7 +3953,7 @@ CALLBACK and FSM are as described in the
     ;; The system message needs to be set in the temporary buffer where this prompt transform is
     ;; being invoked, but the context string needs to be generated in the buffer where the request
     ;; is actually being sent.  Pass the request buffer to the replace function.
-    (setq gptel--system-message (macher--system-replace-placeholder gptel--system-message buffer)))
+    (setq gptel-system-prompt (macher--system-replace-placeholder gptel-system-prompt buffer)))
   (funcall callback))
 
 (defun macher--setup-tools (fsm get-context)
