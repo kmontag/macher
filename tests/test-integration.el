@@ -2525,7 +2525,37 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect
                buffer-content
                ;; No response text. No trailing prefix.
-               :to-equal (funcall action-buffer-content "Test abort request" "" 'discuss nil))))))))
+               :to-equal (funcall action-buffer-content "Test abort request" "" 'discuss nil)))))))
+
+    (it "populates and focuses the action buffer without sending, with a prefix argument"
+      ;; A backend is set up but should never be hit: in edit mode the request is not sent.
+      (funcall setup-backend '("Response that should never be sent"))
+      (with-current-buffer project-file-buffer
+        ;; Start from a single window so the action buffer is displayed in a fresh one.
+        (delete-other-windows)
+        ;; A prefix argument puts the action into edit mode: populate the buffer but don't send.
+        (let ((current-prefix-arg '(4)))
+          (macher-implement nil callback))
+
+        (let ((action-buffer (macher-action-buffer)))
+          (expect action-buffer :to-be-truthy)
+          ;; In edit mode the request is never sent, so the backend receives nothing and the
+          ;; callback never fires.
+          (expect (funcall received-requests) :to-equal '())
+          (expect callback-called :to-be nil)
+
+          ;; The action buffer's window should be displayed and selected, so the user can start
+          ;; editing the populated prompt right away.
+          (let ((win (get-buffer-window action-buffer t)))
+            (expect win :to-be-truthy)
+            (expect (selected-window) :to-equal win))
+
+          ;; The populated prompt should contain the focus string and the implement instruction.
+          (with-current-buffer action-buffer
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect content :to-match (regexp-quote macher--action-focus-prefix))
+              (expect content :to-match "\\[focus\\]")
+              (expect content :to-match "use workspace tools to implement")))))))
 
   (describe "search_in_workspace"
     (before-each
