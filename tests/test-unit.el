@@ -4706,6 +4706,17 @@
           (expect (member #'macher--before-action-insert-prompt macher-before-action-functions)
                   :to-be-truthy))))
 
+    (it "registers the focus hook in all built-in UIs"
+      ;; Focusing is paired with displaying the buffer, so every built-in UI (including basic) sets
+      ;; it up.
+      (dolist (ui '(basic default org))
+        (let ((macher-action-buffer-ui ui))
+          (with-temp-buffer
+            (setq-local macher--workspace '(test . "/tmp/test"))
+            (macher--action-buffer-setup)
+            (expect (member #'macher--before-action-focus macher-before-action-functions)
+                    :to-be-truthy)))))
+
     (it "performs no setup when UI is nil"
       (let ((macher-action-buffer-ui nil))
         (with-temp-buffer
@@ -5127,6 +5138,44 @@
         ;; Should not error when there's no window.
         (expect (macher--before-action-scroll nil) :not :to-throw))))
 
+  (describe "macher--before-action-focus"
+    (it "selects the buffer's window when the execution is a draft"
+      (let ((buf (generate-new-buffer "*test-focus*")))
+        (unwind-protect
+            (progn
+              (delete-other-windows)
+              (let ((win (display-buffer buf))
+                    (execution (macher--make-action-execution :draft t)))
+                (expect win :to-be-truthy)
+                ;; `display-buffer' does not select the new window, so it starts unselected.
+                (expect (selected-window) :not :to-equal win)
+                (with-current-buffer buf
+                  (macher--before-action-focus execution))
+                ;; A draft selects the action buffer's window.
+                (expect (selected-window) :to-equal win)))
+          (kill-buffer buf))))
+
+    (it "does nothing when the execution is not a draft"
+      (let ((buf (generate-new-buffer "*test-focus*")))
+        (unwind-protect
+            (progn
+              (delete-other-windows)
+              (let ((original-window (selected-window))
+                    (win (display-buffer buf))
+                    (execution (macher--make-action-execution :draft nil)))
+                (expect win :to-be-truthy)
+                (with-current-buffer buf
+                  (macher--before-action-focus execution))
+                ;; Not a draft: the selection is left untouched.
+                (expect (selected-window) :to-equal original-window)
+                (expect (selected-window) :not :to-equal win)))
+          (kill-buffer buf))))
+
+    (it "is a no-op for a draft when the buffer has no window"
+      (with-temp-buffer
+        (let ((execution (macher--make-action-execution :draft t)))
+          (expect (macher--before-action-focus execution) :not :to-throw)))))
+
   (describe "macher-action"
     :var ((original-action-buffer-setup-hook macher-action-buffer-setup-hook) project-file-buffer)
 
@@ -5225,6 +5274,32 @@
           (expect (with-current-buffer action-buffer
                     (buffer-string))
                   :to-match "test prompt"))))
+
+    (it "exposes draft mode on the execution when called with a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let* ((captured-draft 'unset)
+               (macher-before-action-functions
+                (list
+                 (lambda (execution)
+                   (setq captured-draft (macher-action-execution-draft execution)))))
+               (current-prefix-arg '(4)))
+          (macher-action 'implement nil "test prompt")
+          ;; Before-action functions can see that this is a draft request.
+          (expect captured-draft :to-be-truthy)
+          (expect 'gptel-request :not :to-have-been-called))))
+
+    (it "does not mark the execution as a draft without a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let* ((captured-draft 'unset)
+               (macher-before-action-functions
+                (list
+                 (lambda (execution)
+                   (setq captured-draft (macher-action-execution-draft execution)))))
+               (current-prefix-arg nil))
+          (macher-action 'implement nil "test prompt")
+          ;; Not a draft: the field is nil and the request is sent.
+          (expect captured-draft :to-be nil)
+          (expect 'gptel-request :to-have-been-called))))
 
     (it "still runs the before-action functions when called with a prefix argument"
       (with-current-buffer project-file-buffer

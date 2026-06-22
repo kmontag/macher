@@ -248,12 +248,12 @@ This function is used by the default actions in the
            ;; so that `macher-action' populates the action buffer with an editable prompt instead of
            ;; sending immediately.
            ;;
-           ;; NOTE: this is a slight hack. Reading `current-prefix-arg' here ties this helper to the
-           ;; interactive command state rather than receiving the intent explicitly through the
-           ;; action API. It's fine for the current interactive-only workflow, but if this behavior
-           ;; needs to grow (e.g. programmatic control, or per-action customization), it'd be worth
-           ;; threading a well-scoped "edit"/"no-send" signal through `macher-action' and
-           ;; `macher-actions-alist' instead.
+           ;; NOTE: this input-gathering step still reads `current-prefix-arg' directly because it
+           ;; runs in the source buffer, before the `macher-action-execution' exists.  The send and
+           ;; focus decisions in `macher-action' use the execution's `draft' field instead;
+           ;; threading the draft intent all the way into this helper (and the
+           ;; `macher-actions-alist' API)
+           ;; would be a cleaner but larger change.
            (current-prefix-arg
             "")
            ;; Otherwise, prompt the user.
@@ -1315,14 +1315,23 @@ or is aborted.")
 - CONTEXT will be passed as the :context key when calling
   `gptel-request'.  This is a user-defined object that can be read from
   the `gptel-fsm' (state machine) associated with the request.  Functions
-  in `macher-before-action-functions' can modify this field."
+  in `macher-before-action-functions' can modify this field.
+
+- DRAFT, when non-nil, indicates that the request should be populated
+  for manual editing (a draft) rather than sent automatically.
+  `macher-action' sets this from the prefix argument and skips sending
+  the request when it's non-nil.  Functions in
+  `macher-before-action-functions' can read it to adjust their behavior
+  (e.g. the built-in UIs select the action buffer window so the prompt
+  can be edited right away), or modify it to force or suppress sending."
   (action)
   (prompt)
   (preset)
   (summary)
   (buffer)
   (source)
-  (context nil))
+  (context nil)
+  (draft nil))
 
 ;;; Internal Functions
 
@@ -1548,12 +1557,17 @@ without needing to put the full path in the buffer name."
   "Set up basic common behavior for action buffers.
 
 This adds local hooks to `macher-before-action-functions' to
-format/insert prompts sent by the user, and to display the action
-buffer when actions are performed."
+format/insert prompts sent by the user, to display the action buffer
+when actions are performed, and to select its window when populating a
+draft."
   ;; Set up the buffer-local hook to insert prompts and headings.
   (add-hook 'macher-before-action-functions #'macher--before-action-insert-prompt nil t)
   ;; Display the action buffer.
-  (add-hook 'macher-before-action-functions #'macher--before-action-display-buffer nil t))
+  (add-hook 'macher-before-action-functions #'macher--before-action-display-buffer nil t)
+  ;; For a draft, select the action buffer window so the user can edit the prompt.  Append (rather
+  ;; than the default prepend) so this runs after the insert/display hooks, which set up the window
+  ;; and leave point at the end of the prompt.
+  (add-hook 'macher-before-action-functions #'macher--before-action-focus t t))
 
 (defun macher--action-buffer-setup-ui ()
   "Set up a slightly more opinionated action buffer UI.
@@ -1590,6 +1604,20 @@ This is added buffer-locally to `macher-before-action-functions' by
 `macher--action-buffer-setup-ui'."
   (when-let ((win (get-buffer-window (current-buffer))))
     (set-window-point win (point))))
+
+(defun macher--before-action-focus (execution)
+  "Select the action buffer window when EXECUTION is a draft.
+
+For a draft (the `draft' field of EXECUTION is non-nil), the request is
+not sent; the populated prompt is left in the action buffer for manual
+editing.  This selects the buffer's window, if it's displayed, so the
+user can start editing right away.
+
+This is added buffer-locally to `macher-before-action-functions' by
+`macher--action-buffer-setup-basic'."
+  (when (macher-action-execution-draft execution)
+    (when-let ((win (get-buffer-window (current-buffer) t)))
+      (select-window win))))
 
 (defun macher--action-buffer-setup ()
   "Apply the base UI configuration based on `macher-action-buffer-ui'.
@@ -4496,7 +4524,11 @@ implements one possible workflow."
                :preset preset
                :summary summary
                :buffer action-buffer
-               :source source-buffer))
+               :source source-buffer
+               ;; A prefix argument makes the request a draft: populate the buffer but don't send.
+               ;; This is exposed on the execution so `macher-before-action-functions' (and the
+               ;; built-in UIs) can react to it.
+               :draft (and current-prefix-arg t)))
              ;; Create a callback wrapper that includes the action hooks.
              (request-callback
               (lambda (exit-code fsm)
@@ -4535,13 +4567,11 @@ implements one possible workflow."
         ;; It's possible for the before-action hook to change the current buffer, so re-enter the
         ;; shared buffer explicitly.
         ;;
-        ;; With a prefix arg, the before-action hooks above have already populated the action buffer
-        ;; with the prompt; rather than sending, leave it for the user to edit and send manually.
-        (if current-prefix-arg
-            ;; Edit mode: focus the action buffer's window (if it's visible) so the user can start
-            ;; editing the populated prompt right away.
-            (when-let ((win (get-buffer-window action-buffer t)))
-              (select-window win))
+        ;; For a draft, the before-action hooks above have already populated the action buffer with
+        ;; the prompt; rather than sending, leave it for the user to edit and send manually.  The
+        ;; built-in UIs also select the action buffer window in this case - see
+        ;; `macher--before-action-focus'.
+        (unless (macher-action-execution-draft execution)
           (with-current-buffer action-buffer
             (macher--with-preset
              (macher-action-execution-preset execution)
