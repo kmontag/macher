@@ -1548,17 +1548,12 @@ without needing to put the full path in the buffer name."
   "Set up basic common behavior for action buffers.
 
 This adds local hooks to `macher-before-action-functions' to
-format/insert prompts sent by the user, to display the action buffer
-when actions are performed, and to scroll the buffer so the inserted
-prompt is visible."
+format/insert prompts sent by the user, and to display the action
+buffer when actions are performed."
   ;; Set up the buffer-local hook to insert prompts and headings.
   (add-hook 'macher-before-action-functions #'macher--before-action-insert-prompt nil t)
   ;; Display the action buffer.
-  (add-hook 'macher-before-action-functions #'macher--before-action-display-buffer nil t)
-  ;; Scroll to show the inserted prompt.  Append (rather than the default prepend) so this runs
-  ;; *after* the insert/display hooks above - buffer-local `add-hook' prepends by default, so the
-  ;; most-recently-added function would otherwise run first.
-  (add-hook 'macher-before-action-functions #'macher--before-action-scroll t t))
+  (add-hook 'macher-before-action-functions #'macher--before-action-display-buffer nil t))
 
 (defun macher--action-buffer-setup-ui ()
   "Set up a slightly more opinionated action buffer UI.
@@ -1572,7 +1567,9 @@ buffer-locally."
   ;; Enable gptel-mode for a nice header and LLM interaction feedback.
   (gptel-mode 1)
   ;; Apply the action's preset buffer-locally before each request.
-  (add-hook 'macher-before-action-functions #'macher--before-action-apply-preset nil t))
+  (add-hook 'macher-before-action-functions #'macher--before-action-apply-preset nil t)
+  ;; Scroll the action buffer window to the current cursor position.
+  (add-hook 'macher-before-action-functions #'macher--before-action-scroll nil t))
 
 (defun macher--before-action-apply-preset (execution)
   "Apply the current action's preset buffer-locally.
@@ -1590,7 +1587,7 @@ end of the just-inserted prompt.  This function updates the window to
 show that position.
 
 This is added buffer-locally to `macher-before-action-functions' by
-`macher--action-buffer-setup-basic'."
+`macher--action-buffer-setup-ui'."
   (when-let ((win (get-buffer-window (current-buffer))))
     (set-window-point win (point))))
 

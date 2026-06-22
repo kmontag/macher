@@ -4682,24 +4682,6 @@
           ;; Check that gptel-mode is NOT enabled (basic doesn't enable it).
           (expect (bound-and-true-p gptel-mode) :to-be nil))))
 
-    (it "scrolls after inserting and displaying in the basic UI"
-      (let ((macher-action-buffer-ui 'basic))
-        (with-temp-buffer
-          (setq-local macher--workspace '(test . "/tmp/test"))
-          (macher--action-buffer-setup)
-          ;; The scroll hook should be registered for the basic UI.
-          (expect (member #'macher--before-action-scroll macher-before-action-functions)
-                  :to-be-truthy)
-          ;; It must run after the insert and display hooks (before-action functions run in list
-          ;; order, so scroll must appear later in the list to show the just-inserted prompt).
-          (let ((funcs (remq t macher-before-action-functions)))
-            (expect (> (seq-position funcs #'macher--before-action-scroll)
-                       (seq-position funcs #'macher--before-action-insert-prompt))
-                    :to-be-truthy)
-            (expect (> (seq-position funcs #'macher--before-action-scroll)
-                       (seq-position funcs #'macher--before-action-display-buffer))
-                    :to-be-truthy)))))
-
     (it "sets up default UI correctly"
       (let ((macher-action-buffer-ui 'default))
         (with-temp-buffer
