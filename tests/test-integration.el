@@ -2555,7 +2555,10 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (let ((content (buffer-substring-no-properties (point-min) (point-max))))
               (expect content :to-match (regexp-quote macher--action-focus-prefix))
               (expect content :to-match "\\[focus\\]")
-              (expect content :to-match "use workspace tools to implement")))))))
+              (expect content :to-match "use workspace tools to implement"))
+            ;; Point should be left at the end of the inserted prompt, ready for editing.
+            (expect (point) :to-equal (point-max))
+            (expect (window-point (get-buffer-window action-buffer t)) :to-equal (point-max)))))))
 
   (describe "search_in_workspace"
     (before-each

@@ -1610,13 +1610,19 @@ This is added buffer-locally to `macher-before-action-functions' by
 
 For a draft (the `draft' field of EXECUTION is non-nil), the request is
 not sent; the populated prompt is left in the action buffer for manual
-editing.  This selects the buffer's window, if it's displayed, so the
-user can start editing right away.
+editing.  This selects the buffer's window, if it's displayed, and
+places point at the end of the inserted prompt so the user can start
+editing right away.
 
 This is added buffer-locally to `macher-before-action-functions' by
 `macher--action-buffer-setup-basic'."
   (when (macher-action-execution-draft execution)
     (when-let ((win (get-buffer-window (current-buffer) t)))
+      ;; `macher--before-action-insert-prompt' left point at the end of the prompt, but the window
+      ;; was displayed before that, so its stored point is stale.  Sync it before selecting;
+      ;; otherwise `select-window' would restore the stale window point into the buffer, moving
+      ;; point away from the prompt.
+      (set-window-point win (point))
       (select-window win))))
 
 (defun macher--action-buffer-setup ()

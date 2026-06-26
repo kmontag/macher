@@ -5174,7 +5174,31 @@
     (it "is a no-op for a draft when the buffer has no window"
       (with-temp-buffer
         (let ((execution (macher--make-action-execution :draft t)))
-          (expect (macher--before-action-focus execution) :not :to-throw)))))
+          (expect (macher--before-action-focus execution) :not :to-throw))))
+
+    (it "leaves point at the end of the prompt after selecting the window"
+      (let ((buf (generate-new-buffer "*test-focus*")))
+        (unwind-protect
+            (progn
+              (delete-other-windows)
+              (with-current-buffer buf
+                (dotimes (_ 50)
+                  (insert "filler line\n")))
+              ;; Display the buffer before "inserting the prompt", so the window's stored point is
+              ;; stale (at the top), mirroring the real before-action ordering.
+              (let ((win (display-buffer buf))
+                    (execution (macher--make-action-execution :draft t)))
+                (set-window-point win (point-min))
+                (with-current-buffer buf
+                  ;; Move point to the end, as `macher--before-action-insert-prompt' would.
+                  (goto-char (point-max))
+                  (let ((prompt-end (point)))
+                    (macher--before-action-focus execution)
+                    ;; Point should remain at the end of the prompt, not jump to the stale window
+                    ;; point.
+                    (expect (point) :to-equal prompt-end)
+                    (expect (window-point win) :to-equal prompt-end)))))
+          (kill-buffer buf)))))
 
   (describe "macher-action"
     :var ((original-action-buffer-setup-hook macher-action-buffer-setup-hook) project-file-buffer)
