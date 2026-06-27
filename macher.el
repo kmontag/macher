@@ -1558,11 +1558,17 @@ without needing to put the full path in the buffer name."
 
 This adds local hooks to `macher-before-action-functions' to
 format/insert prompts sent by the user and to display the action buffer
-when actions are performed."
-  ;; Set up the buffer-local hook to insert prompts and headings.
-  (add-hook 'macher-before-action-functions #'macher--before-action-insert-prompt nil t)
+when actions are performed.
+
+The hooks are added with the APPEND flag so they run in the order
+written here: buffer-local `add-hook' prepends by default, which would
+otherwise reverse the run order.  Adding in run order keeps the sequence
+readable and lets the default/org UI append further hooks (scroll,
+focus) that must run after these."
+  ;; Insert the prompt and any headings.
+  (add-hook 'macher-before-action-functions #'macher--before-action-insert-prompt t t)
   ;; Display the action buffer.
-  (add-hook 'macher-before-action-functions #'macher--before-action-display-buffer nil t))
+  (add-hook 'macher-before-action-functions #'macher--before-action-display-buffer t t))
 
 (defun macher--action-buffer-setup-ui ()
   "Set up a slightly more opinionated action buffer UI.
@@ -1576,13 +1582,15 @@ select the action buffer window so the prompt can be edited."
   (setq-local gptel-include-tool-results t)
   ;; Enable gptel-mode for a nice header and LLM interaction feedback.
   (gptel-mode 1)
+  ;; Like `macher--action-buffer-setup-basic', these hooks are appended so they run in the order
+  ;; written, after the insert/display hooks set up there.  The window/point hooks (scroll, focus)
+  ;; depend on the prompt having been inserted and the buffer displayed first.
+  ;;
   ;; Apply the action's preset buffer-locally before each request.
-  (add-hook 'macher-before-action-functions #'macher--before-action-apply-preset nil t)
-  ;; Scroll the action buffer window to the current cursor position.
-  (add-hook 'macher-before-action-functions #'macher--before-action-scroll nil t)
-  ;; For a draft, select the action buffer window so the user can edit the prompt.  Append (rather
-  ;; than the default prepend) so this runs after the insert/display hooks, which set up the window
-  ;; and leave point at the end of the prompt.
+  (add-hook 'macher-before-action-functions #'macher--before-action-apply-preset t t)
+  ;; Scroll the action buffer window to the inserted prompt.
+  (add-hook 'macher-before-action-functions #'macher--before-action-scroll t t)
+  ;; For a draft, select the action buffer window so the user can edit the prompt.
   (add-hook 'macher-before-action-functions #'macher--before-action-focus t t))
 
 (defun macher--before-action-apply-preset (execution)
@@ -1618,10 +1626,10 @@ This is added buffer-locally to `macher-before-action-functions' by
 `macher--action-buffer-setup-ui'."
   (when (macher-action-execution-draft execution)
     (when-let ((win (get-buffer-window (current-buffer) t)))
-      ;; `macher--before-action-insert-prompt' left point at the end of the prompt, but the window
-      ;; was displayed before that, so its stored point is stale.  Sync it before selecting;
-      ;; otherwise `select-window' would restore the stale window point into the buffer, moving
-      ;; point away from the prompt.
+      ;; `macher--before-action-insert-prompt' left point at the end of the prompt, but the window's
+      ;; stored point can be stale (e.g. a reused action buffer window left over from a previous
+      ;; request).  Sync it before selecting; otherwise `select-window' would restore the stale
+      ;; window point into the buffer, moving point away from the prompt.
       (set-window-point win (point))
       (select-window win))))
 
