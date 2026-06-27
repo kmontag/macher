@@ -417,8 +417,8 @@ predefined \"pre\" function for the `macher-action-buffer-setup-hook'.
 The choices are:
 
 - ='basic' - sets up buffer-local hooks in
-  `macher-before-action-functions' and `macher-after-action-functions'
-  to display the action buffer and insert a nicely-formatted prompt.
+  `macher-before-action-functions' to display the action buffer and
+  insert a nicely-formatted prompt.
 
 - ='default' - like ='basic', but also enables `gptel-mode' and the
   global `gptel-default-mode' (e.g. markdown or org), and ensures tool
@@ -1557,25 +1557,21 @@ without needing to put the full path in the buffer name."
   "Set up basic common behavior for action buffers.
 
 This adds local hooks to `macher-before-action-functions' to
-format/insert prompts sent by the user, to display the action buffer
-when actions are performed, and to select its window when populating a
-draft."
+format/insert prompts sent by the user and to display the action buffer
+when actions are performed."
   ;; Set up the buffer-local hook to insert prompts and headings.
   (add-hook 'macher-before-action-functions #'macher--before-action-insert-prompt nil t)
   ;; Display the action buffer.
-  (add-hook 'macher-before-action-functions #'macher--before-action-display-buffer nil t)
-  ;; For a draft, select the action buffer window so the user can edit the prompt.  Append (rather
-  ;; than the default prepend) so this runs after the insert/display hooks, which set up the window
-  ;; and leave point at the end of the prompt.
-  (add-hook 'macher-before-action-functions #'macher--before-action-focus t t))
+  (add-hook 'macher-before-action-functions #'macher--before-action-display-buffer nil t))
 
 (defun macher--action-buffer-setup-ui ()
   "Set up a slightly more opinionated action buffer UI.
 
 This setup is shared among the symbol `default' and symbol `org' UI
 configurations.  The function enables `gptel-mode', ensures tool results
-are included in output, and sets up a hook to apply the action's preset
-buffer-locally."
+are included in output, sets up a hook to apply the action's preset
+buffer-locally, and sets up hooks to scroll the window and, for a draft,
+select the action buffer window so the prompt can be edited."
   ;; Include tool calls in output.
   (setq-local gptel-include-tool-results t)
   ;; Enable gptel-mode for a nice header and LLM interaction feedback.
@@ -1583,7 +1579,11 @@ buffer-locally."
   ;; Apply the action's preset buffer-locally before each request.
   (add-hook 'macher-before-action-functions #'macher--before-action-apply-preset nil t)
   ;; Scroll the action buffer window to the current cursor position.
-  (add-hook 'macher-before-action-functions #'macher--before-action-scroll nil t))
+  (add-hook 'macher-before-action-functions #'macher--before-action-scroll nil t)
+  ;; For a draft, select the action buffer window so the user can edit the prompt.  Append (rather
+  ;; than the default prepend) so this runs after the insert/display hooks, which set up the window
+  ;; and leave point at the end of the prompt.
+  (add-hook 'macher-before-action-functions #'macher--before-action-focus t t))
 
 (defun macher--before-action-apply-preset (execution)
   "Apply the current action's preset buffer-locally.
@@ -1615,7 +1615,7 @@ places point at the end of the inserted prompt so the user can start
 editing right away.
 
 This is added buffer-locally to `macher-before-action-functions' by
-`macher--action-buffer-setup-basic'."
+`macher--action-buffer-setup-ui'."
   (when (macher-action-execution-draft execution)
     (when-let ((win (get-buffer-window (current-buffer) t)))
       ;; `macher--before-action-insert-prompt' left point at the end of the prompt, but the window
@@ -4473,10 +4473,11 @@ With a prefix argument (e.g. \[universal-argument]), the request is not
 sent.  The `macher-before-action-functions' still run as usual (so, for
 example, the default action buffer UI still populates and displays the
 buffer); the prompt is simply left in the action buffer for you to edit
-and send manually.  If the action buffer is visible, its window is
-selected so you can start editing right away.  In this mode the built-in
-actions skip the minibuffer prompt, using the selected region if there
-is one or an empty request otherwise.
+and send manually.  With the `default' or `org' action buffer UI, the
+action buffer's window is also selected (if visible) so you can start
+editing right away.  In this mode the built-in actions skip the
+minibuffer prompt, using the selected region if there is one or an empty
+request otherwise.
 
 When sending an edited prompt manually, `gptel-send' should \"just
 work\" in an org-mode action buffer with any of the built-in non-nil

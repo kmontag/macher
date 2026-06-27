@@ -4706,16 +4706,24 @@
           (expect (member #'macher--before-action-insert-prompt macher-before-action-functions)
                   :to-be-truthy))))
 
-    (it "registers the focus hook in all built-in UIs"
-      ;; Focusing is paired with displaying the buffer, so every built-in UI (including basic) sets
-      ;; it up.
-      (dolist (ui '(basic default org))
+    (it "registers the focus hook only in the default and org UIs"
+      ;; Selecting the action buffer window is an opinionated behavior, so it lives with the other
+      ;; default/org UI setup rather than the basic UI.
+      (dolist (ui '(default org))
         (let ((macher-action-buffer-ui ui))
           (with-temp-buffer
             (setq-local macher--workspace '(test . "/tmp/test"))
             (macher--action-buffer-setup)
             (expect (member #'macher--before-action-focus macher-before-action-functions)
-                    :to-be-truthy)))))
+                    :to-be-truthy))))
+      ;; The basic UI is intentionally passive: it displays the buffer but does not select its
+      ;; window.
+      (let ((macher-action-buffer-ui 'basic))
+        (with-temp-buffer
+          (setq-local macher--workspace '(test . "/tmp/test"))
+          (macher--action-buffer-setup)
+          (expect (member #'macher--before-action-focus macher-before-action-functions)
+                  :to-be nil))))
 
     (it "performs no setup when UI is nil"
       (let ((macher-action-buffer-ui nil))
