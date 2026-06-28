@@ -4706,6 +4706,25 @@
           (expect (member #'macher--before-action-insert-prompt macher-before-action-functions)
                   :to-be-truthy))))
 
+    (it "registers the focus hook only in the default and org UIs"
+      ;; Selecting the action buffer window is an opinionated behavior, so it lives with the other
+      ;; default/org UI setup rather than the basic UI.
+      (dolist (ui '(default org))
+        (let ((macher-action-buffer-ui ui))
+          (with-temp-buffer
+            (setq-local macher--workspace '(test . "/tmp/test"))
+            (macher--action-buffer-setup)
+            (expect (member #'macher--before-action-focus macher-before-action-functions)
+                    :to-be-truthy))))
+      ;; The basic UI is intentionally passive: it displays the buffer but does not select its
+      ;; window.
+      (let ((macher-action-buffer-ui 'basic))
+        (with-temp-buffer
+          (setq-local macher--workspace '(test . "/tmp/test"))
+          (macher--action-buffer-setup)
+          (expect (member #'macher--before-action-focus macher-before-action-functions)
+                  :to-be nil))))
+
     (it "performs no setup when UI is nil"
       (let ((macher-action-buffer-ui nil))
         (with-temp-buffer
@@ -5127,6 +5146,68 @@
         ;; Should not error when there's no window.
         (expect (macher--before-action-scroll nil) :not :to-throw))))
 
+  (describe "macher--before-action-focus"
+    (it "selects the buffer's window when the execution is a draft"
+      (let ((buf (generate-new-buffer "*test-focus*")))
+        (unwind-protect
+            (progn
+              (delete-other-windows)
+              (let ((win (display-buffer buf))
+                    (execution (macher--make-action-execution :draft t)))
+                (expect win :to-be-truthy)
+                ;; `display-buffer' does not select the new window, so it starts unselected.
+                (expect (selected-window) :not :to-equal win)
+                (with-current-buffer buf
+                  (macher--before-action-focus execution))
+                ;; A draft selects the action buffer's window.
+                (expect (selected-window) :to-equal win)))
+          (kill-buffer buf))))
+
+    (it "does nothing when the execution is not a draft"
+      (let ((buf (generate-new-buffer "*test-focus*")))
+        (unwind-protect
+            (progn
+              (delete-other-windows)
+              (let ((original-window (selected-window))
+                    (win (display-buffer buf))
+                    (execution (macher--make-action-execution :draft nil)))
+                (expect win :to-be-truthy)
+                (with-current-buffer buf
+                  (macher--before-action-focus execution))
+                ;; Not a draft: the selection is left untouched.
+                (expect (selected-window) :to-equal original-window)
+                (expect (selected-window) :not :to-equal win)))
+          (kill-buffer buf))))
+
+    (it "is a no-op for a draft when the buffer has no window"
+      (with-temp-buffer
+        (let ((execution (macher--make-action-execution :draft t)))
+          (expect (macher--before-action-focus execution) :not :to-throw))))
+
+    (it "leaves point at the end of the prompt after selecting the window"
+      (let ((buf (generate-new-buffer "*test-focus*")))
+        (unwind-protect
+            (progn
+              (delete-other-windows)
+              (with-current-buffer buf
+                (dotimes (_ 50)
+                  (insert "filler line\n")))
+              ;; Display the buffer before "inserting the prompt", so the window's stored point is
+              ;; stale (at the top), mirroring the real before-action ordering.
+              (let ((win (display-buffer buf))
+                    (execution (macher--make-action-execution :draft t)))
+                (set-window-point win (point-min))
+                (with-current-buffer buf
+                  ;; Move point to the end, as `macher--before-action-insert-prompt' would.
+                  (goto-char (point-max))
+                  (let ((prompt-end (point)))
+                    (macher--before-action-focus execution)
+                    ;; Point should remain at the end of the prompt, not jump to the stale window
+                    ;; point.
+                    (expect (point) :to-equal prompt-end)
+                    (expect (window-point win) :to-equal prompt-end)))))
+          (kill-buffer buf)))))
+
   (describe "macher-action"
     :var ((original-action-buffer-setup-hook macher-action-buffer-setup-hook) project-file-buffer)
 
@@ -5226,6 +5307,32 @@
                     (buffer-string))
                   :to-match "test prompt"))))
 
+    (it "exposes draft mode on the execution when called with a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let* ((captured-draft 'unset)
+               (macher-before-action-functions
+                (list
+                 (lambda (execution)
+                   (setq captured-draft (macher-action-execution-draft execution)))))
+               (current-prefix-arg '(4)))
+          (macher-action 'implement nil "test prompt")
+          ;; Before-action functions can see that this is a draft request.
+          (expect captured-draft :to-be-truthy)
+          (expect 'gptel-request :not :to-have-been-called))))
+
+    (it "does not mark the execution as a draft without a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let* ((captured-draft 'unset)
+               (macher-before-action-functions
+                (list
+                 (lambda (execution)
+                   (setq captured-draft (macher-action-execution-draft execution)))))
+               (current-prefix-arg nil))
+          (macher-action 'implement nil "test prompt")
+          ;; Not a draft: the field is nil and the request is sent.
+          (expect captured-draft :to-be nil)
+          (expect 'gptel-request :to-have-been-called))))
+
     (it "still runs the before-action functions when called with a prefix argument"
       (with-current-buffer project-file-buffer
         (let* ((before-called nil)
@@ -5234,7 +5341,19 @@
           (macher-action 'implement nil "test prompt")
           ;; The before-action functions run even though the request is not sent.
           (expect before-called :to-be-truthy)
-          (expect 'gptel-request :not :to-have-been-called)))))
+          (expect 'gptel-request :not :to-have-been-called))))
+
+    (it "selects the action buffer window when called with a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let ((current-prefix-arg '(4)))
+          ;; Start from a single window so the action buffer gets a fresh one.
+          (delete-other-windows)
+          (macher-action 'implement nil "test prompt")
+          (let ((action-buffer (macher-action-buffer)))
+            ;; The action buffer should be displayed and its window selected, so the user can edit
+            ;; the populated prompt right away.
+            (expect (get-buffer-window action-buffer t) :to-be-truthy)
+            (expect (selected-window) :to-equal (get-buffer-window action-buffer t)))))))
 
   (describe "macher--add-transition-handler"
     :var (fsm test-handler handler-calls)
