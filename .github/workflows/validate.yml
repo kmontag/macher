@@ -29,23 +29,51 @@ jobs:
       - name: Lint
         run: make lint
 
-  compile:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      emacs-versions: ${{ steps.versions.outputs.emacs-versions }}
+    steps:
+      - id: versions
+        run: |
+          # "release-snapshot" is the pretest build of the current release branch (Emacs 31 as of
+          # writing). There's no tagged Emacs 31 in nix-emacs-ci yet; swap this for the version
+          # number once one exists.
+          echo "emacs-versions=[\"30.1\",\"release-snapshot\"]" >> "$GITHUB_OUTPUT"
+
+  compile:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emacs-version: ${{ fromJson(needs.prepare.outputs.emacs-versions) }}
+    name: compile (emacs ${{ matrix.emacs-version }})
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
+        with:
+          emacs-version: ${{ matrix.emacs-version }}
 
       - name: Check for compilation errors
         run: make compile
 
   test:
+    needs: prepare
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emacs-version: ${{ fromJson(needs.prepare.outputs.emacs-versions) }}
+    name: test (emacs ${{ matrix.emacs-version }})
     permissions:
       contents: read
       models: read
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
+        with:
+          emacs-version: ${{ matrix.emacs-version }}
 
       # If GitHub Models are down due to rate limiting or service issues, functional tests can fall
       # back to using ollama, it'll just be rather slow.

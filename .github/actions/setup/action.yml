@@ -2,6 +2,14 @@
 ---
 name: Setup dev environment
 description: Installs Emacs, Eask, Eask dependencies, and other npm packages
+inputs:
+  emacs-version:
+    description: >-
+      Emacs version to install, as accepted by purcell/setup-emacs. Any version named in
+      https://github.com/purcell/nix-emacs-ci works, plus "release-snapshot" (current release-branch
+      pretest) and "snapshot" (master).
+    required: false
+    default: "30.1"
 runs:
   using: composite
   steps:
@@ -10,7 +18,7 @@ runs:
     - name: Setup Emacs
       uses: purcell/setup-emacs@8415786a52b3a84babd7ffc92a802b06e3780c17
       with:
-        version: 30.1
+        version: ${{ inputs.emacs-version }}
 
     # Install python for elisp-autofmt invocations.
     - name: Setup Python
