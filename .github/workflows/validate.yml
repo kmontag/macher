@@ -69,70 +69,32 @@ jobs:
     permissions:
       contents: read
       models: read
+    # Serialize test jobs so only one is hitting the GitHub Models API at a
+    # time. The matrix legs and concurrent pushes can otherwise pile up and
+    # trigger rate limiting (HTTP 429).
+    concurrency:
+      group: test-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           emacs-version: ${{ matrix.emacs-version }}
 
-      # If GitHub Models are down due to rate limiting or service issues, functional tests can fall
-      # back to using ollama, it'll just be rather slow.
-      - name: Check GitHub Models availability
-        id: check-github-models
-        continue-on-error: true
-        run: |
-          # Test if GitHub Models API is accessible by sending a minimal request.
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{"messages":[{"role":"user","content":"test"}],"model":"gpt-4o-mini","max_tokens":1}' \
-            "https://models.github.ai/inference/chat/completions")
-
-          if [ "$HTTP_CODE" = "429" ] || [ "$HTTP_CODE" = "503" ] || [ "$HTTP_CODE" = "500" ]; then
-            echo "GitHub Models API returned $HTTP_CODE, will fall back to Ollama"
-            echo "available=false" >> $GITHUB_OUTPUT
-            exit 0
-          else
-            echo "GitHub Models API is available (HTTP $HTTP_CODE)"
-            echo "available=true" >> $GITHUB_OUTPUT
-          fi
-
-      # Note this also starts the ollama server.
-      - name: Install Ollama
-        if: steps.check-github-models.outputs.available == 'false'
-        uses: ai-action/setup-ollama@v2
-
-      # See https://github.com/ai-action/setup-ollama/issues/40.
-      - name: Cache Ollama
-        if: steps.check-github-models.outputs.available == 'false'
-        id: cache-artifacts
-        uses: actions/cache@v6
-        with:
-          path: ~/.ollama
-          key: ${{ runner.os }}-ollama
-
-      - name: Pull Ollama model
-        if: steps.check-github-models.outputs.available == 'false'
-        run: |
-          MODEL_NAME=$(grep -o 'ollama-model "[^"]*"' tests/test-functional.el | cut -d'"' -f2)
-          ollama pull "$MODEL_NAME"
-
       - name: Run tests
         uses: nick-fields/retry@v4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Disable GitHub Models in tests if the API is not available.
-          MACHER_DISABLE_GITHUB_MODELS: ${{ steps.check-github-models.outputs.available == 'false' && '1' || '' }}
         with:
           timeout_minutes: 10
           max_attempts: 3
           retry_wait_seconds: 60
-          # Only retry on transient rate-limiting from the GitHub Models API. The
-          # command below runs `make test` and inspects the output for an HTTP 429;
-          # a genuine test failure exits with a different code and fails the job
-          # immediately rather than being retried. `retry_on_exit_code` makes the
-          # retry action only re-run for that specific exit code (75).
+          # Only retry on transient rate-limiting from the GitHub Models API.
+          # The command below runs `make test` and inspects the output for an
+          # HTTP 429; a genuine test failure exits with a different code and
+          # fails the job immediately rather than being retried.
+          # `retry_on_exit_code` makes the retry action only re-run for that
+          # specific exit code (75).
           retry_on_exit_code: 75
           command: |
             set +e
