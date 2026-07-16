@@ -20,7 +20,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
 
       - name: Check formatting
@@ -50,7 +50,7 @@ jobs:
         emacs-version: ${{ fromJson(needs.prepare.outputs.emacs-versions) }}
     name: compile (emacs ${{ matrix.emacs-version }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           emacs-version: ${{ matrix.emacs-version }}
@@ -70,7 +70,7 @@ jobs:
       contents: read
       models: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           emacs-version: ${{ matrix.emacs-version }}
@@ -101,13 +101,13 @@ jobs:
       # Note this also starts the ollama server.
       - name: Install Ollama
         if: steps.check-github-models.outputs.available == 'false'
-        uses: ai-action/setup-ollama@v1
+        uses: ai-action/setup-ollama@v2
 
       # See https://github.com/ai-action/setup-ollama/issues/40.
       - name: Cache Ollama
         if: steps.check-github-models.outputs.available == 'false'
         id: cache-artifacts
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.ollama
           key: ${{ runner.os }}-ollama
