@@ -119,8 +119,31 @@ jobs:
           ollama pull "$MODEL_NAME"
 
       - name: Run tests
+        uses: nick-fields/retry@v4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Disable GitHub Models in tests if the API is not available.
           MACHER_DISABLE_GITHUB_MODELS: ${{ steps.check-github-models.outputs.available == 'false' && '1' || '' }}
-        run: make test
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_wait_seconds: 60
+          # Only retry on transient rate-limiting from the GitHub Models API. The
+          # command below runs `make test` and inspects the output for an HTTP 429;
+          # a genuine test failure exits with a different code and fails the job
+          # immediately rather than being retried. `retry_on_exit_code` makes the
+          # retry action only re-run for that specific exit code (75).
+          retry_on_exit_code: 75
+          command: |
+            set +e
+            set -o pipefail
+            make test 2>&1 | tee /tmp/macher-test-output.log
+            status=${PIPESTATUS[0]}
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+            if grep -Eq "HTTP/[0-9.]+ 429" /tmp/macher-test-output.log; then
+              echo "::warning::Test failure involved an HTTP 429 (rate limit); retrying."
+              exit 75
+            fi
+            exit "$status"
