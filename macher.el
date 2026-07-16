@@ -1340,13 +1340,13 @@ or is aborted.")
   "Detect project workspace for the current buffer.
 Returns (project . ROOT) if the buffer is in a project, nil otherwise."
   (require 'project)
-  (when-let ((project (project-current nil default-directory)))
+  (when-let* ((project (project-current nil default-directory)))
     (cons 'project (project-root project))))
 
 (defun macher-workspace-file ()
   "Detect file workspace for the current buffer.
 Returns (file . FILENAME) if the buffer is visiting a file, nil otherwise."
-  (when-let ((filename (buffer-file-name)))
+  (when-let* ((filename (buffer-file-name)))
     (cons 'file filename)))
 
 (defun macher-workspace-directory ()
@@ -1363,10 +1363,10 @@ To enable, add to `macher-workspace-functions':
 
   (setq macher-workspace-functions
         \\='(macher-workspace-project macher-workspace-directory))"
-  (when-let ((dir
-              (and default-directory
-                   (file-directory-p default-directory)
-                   (expand-file-name default-directory))))
+  (when-let* ((dir
+               (and default-directory
+                    (file-directory-p default-directory)
+                    (expand-file-name default-directory))))
     (cons 'directory dir)))
 
 ;; Built-in workspace type functions
@@ -1385,7 +1385,7 @@ the project when it's actually needed."
 (defun macher--project-name (project-id)
   "Get the project name for PROJECT-ID using project.el."
   (require 'project)
-  (if-let ((project (project-current nil project-id)))
+  (if-let* ((project (project-current nil project-id)))
       (project-name project)
     ;; Get the last directory name from the root (trailing slash removed).
     (file-name-nondirectory (directory-file-name project-id))))
@@ -1499,7 +1499,7 @@ Returns a list of absolute file paths."
   "Generate workspace information string for the current workspace.
 
 Returns a workspace information string to be added to the request."
-  (when-let ((workspace (macher-workspace)))
+  (when-let* ((workspace (macher-workspace)))
     (let* ((workspace-name (macher--workspace-name workspace))
            (workspace-files (macher--workspace-files workspace))
            ;; This might get trimmed if there are too many files.
@@ -1610,7 +1610,7 @@ show that position.
 
 This is added buffer-locally to `macher-before-action-functions' by
 `macher--action-buffer-setup-ui'."
-  (when-let ((win (get-buffer-window (current-buffer))))
+  (when-let* ((win (get-buffer-window (current-buffer))))
     (set-window-point win (point))))
 
 (defun macher--before-action-focus (execution)
@@ -1625,7 +1625,7 @@ editing right away.
 This is added buffer-locally to `macher-before-action-functions' by
 `macher--action-buffer-setup-ui'."
   (when (macher-action-execution-draft execution)
-    (when-let ((win (get-buffer-window (current-buffer) t)))
+    (when-let* ((win (get-buffer-window (current-buffer) t)))
       ;; `macher--before-action-insert-prompt' left point at the end of the prompt, but the window's
       ;; stored point can be stale (e.g. a reused action buffer window left over from a previous
       ;; request).  Sync it before selecting; otherwise `select-window' would restore the stale
@@ -1737,7 +1737,7 @@ This is added buffer-locally to `macher-before-action-functions' by
         (goto-char (point-max))))
 
     ;; Insert the prefix if point isn't immediately preceded by it.
-    (when-let ((prefix (alist-get major-mode gptel-prompt-prefix-alist)))
+    (when-let* ((prefix (alist-get major-mode gptel-prompt-prefix-alist)))
       (let ((prefix-length (length prefix)))
         (unless (and (>= (point) (+ (point-min) prefix-length))
                      (string=
@@ -2363,7 +2363,7 @@ Signals an error if the directory is not found in the workspace."
          (context-contents (macher-context-contents context)))
 
     ;; Check if this path exists as a file in our context (would indicate it's not a directory).
-    (when-let ((existing-entry (assoc (macher--normalize-path full-path) context-contents)))
+    (when-let* ((existing-entry (assoc (macher--normalize-path full-path) context-contents)))
       (let ((contents (cdr existing-entry)))
         ;; Has new-content, so it's a file.
         (when (cdr contents)
@@ -2393,7 +2393,7 @@ Signals an error if the directory is not found in the workspace."
     (cl-labels
         ((file-deleted-in-context-p
           (file-path) "Check if FILE-PATH is marked as deleted in the context."
-          (when-let ((entry (assoc (macher--normalize-path file-path) context-contents)))
+          (when-let* ((entry (assoc (macher--normalize-path file-path) context-contents)))
             (let ((contents (cdr entry)))
               (and
                ;; Has original content...
@@ -2403,7 +2403,7 @@ Signals an error if the directory is not found in the workspace."
 
          (get-file-content-size
           (file-path) "Get the size of FILE-PATH, considering context modifications."
-          (if-let ((entry (assoc (macher--normalize-path file-path) context-contents)))
+          (if-let* ((entry (assoc (macher--normalize-path file-path) context-contents)))
               (let* ((contents (cdr entry))
                      (new-content (cdr contents)))
                 (if new-content
@@ -2522,9 +2522,9 @@ Signals an error if the directory is not found in the workspace."
                        (entry-disk-type (and entry-attrs (file-attribute-type entry-attrs)))
                        (entry-is-symlink-p (and (not entry-deleted-p) (stringp entry-disk-type)))
                        (entry-exists-in-context-p
-                        (when-let ((entry
-                                    (assoc
-                                     (macher--normalize-path entry-full-path) context-contents)))
+                        (when-let* ((entry
+                                     (assoc
+                                      (macher--normalize-path entry-full-path) context-contents)))
                           (let ((contents (cdr entry)))
                             ;; Has new content.
                             (cdr contents))))
@@ -3796,7 +3796,7 @@ CALLBACK takes no arguments."
     ;; Once the nconc bug is fixed upstream, this can be simplified to just:
     ;;
     ;;   (gptel-with-preset preset-for-gptel (funcall callback))
-    (if-let ((parents (plist-get preset-for-gptel :parents)))
+    (if-let* ((parents (plist-get preset-for-gptel :parents)))
         ;; If the current preset has any parents, apply them and call this function recursively with
         ;; one parent popped from the front of the list.
         (let* ((first-parent (car parents))
@@ -3814,7 +3814,7 @@ CALLBACK takes no arguments."
 PRESET can be a symbol or a raw preset spec plist (as with
 `macher--with-preset').  If PRESET is a symbol, it is looked up from the
 global gptel registry, or if not found there, from `macher-presets-alist'."
-  (when-let ((preset-spec (macher--resolve-preset preset)))
+  (when-let* ((preset-spec (macher--resolve-preset preset)))
     (gptel--apply-preset preset-spec (lambda (sym val) (set (make-local-variable sym) val)))))
 
 (defun macher--parse-directive (directive)
@@ -4099,7 +4099,7 @@ CALLBACK and FSM are as described in the
                   (error "Trying to set up macher tools, but coudn't determine request buffer"))
                 (setq context-or-t
                       (if (buffer-live-p buffer)
-                          (if-let ((workspace (macher-workspace buffer)))
+                          (if-let* ((workspace (macher-workspace buffer)))
                               ;; If we found a workspace, perform context initialization.
                               (let ((context
                                      (macher--make-context
@@ -4657,7 +4657,7 @@ associated with the current workspace."
   (interactive (list 'interactive))
   (let ((fsm
          (or macher--fsm-latest
-             (when-let ((action-buffer (macher-action-buffer)))
+             (when-let* ((action-buffer (macher-action-buffer)))
                (buffer-local-value 'macher--fsm-latest action-buffer)))))
     (macher-process-request reason fsm)))
 

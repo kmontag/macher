@@ -226,7 +226,7 @@ CALLBACK-TEST is a function that verifies the result."
               (expect test-result :to-be t))
           ;; Cleanup: abort any ongoing requests and kill buffers
           ;; (temp files will be cleaned up by after-each).
-          (when-let ((action-buffer (macher-action-buffer)))
+          (when-let* ((action-buffer (macher-action-buffer)))
             (when (buffer-live-p action-buffer)
               ;; If there are any running requests - assume that they would be happening in the
               ;; action buffer, since the additional after-each expectation will catch issues if
@@ -415,7 +415,7 @@ CALLBACK-TEST is a function that verifies the result."
                     (sit-for 0.1))))
 
               ;; Validate the displayed diff.
-              (when-let ((patch-buffer (macher-patch-buffer)))
+              (when-let* ((patch-buffer (macher-patch-buffer)))
                 (expect (buffer-live-p patch-buffer) :to-be-truthy)
                 (with-current-buffer patch-buffer
                   (let ((content (buffer-substring-no-properties (point-min) (point-max))))
@@ -454,7 +454,7 @@ CALLBACK-TEST is a function that verifies the result."
               ;; Helper function to check if a request is active for the action buffer.
               (request-is-active-in-action-buffer
                (lambda ()
-                 (when-let ((action-buffer (macher-action-buffer)))
+                 (when-let* ((action-buffer (macher-action-buffer)))
                    (cl-some
                     (lambda (entry)
                       ;; Each entry has the form (PROC . (FSM ABORT-FN)). Check if the FSM's :buffer
@@ -506,7 +506,7 @@ CALLBACK-TEST is a function that verifies the result."
 
           ;; Cleanup: ensure all requests are terminated and kill buffers
           ;; (temp files will be cleaned up by after-each).
-          (when-let ((action-buffer (macher-action-buffer)))
+          (when-let* ((action-buffer (macher-action-buffer)))
             (when (buffer-live-p action-buffer)
               (gptel-abort action-buffer)))
           (when (buffer-live-p (get-file-buffer temp-file))
