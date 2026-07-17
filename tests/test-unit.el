@@ -4540,6 +4540,112 @@
           (expect (funcall (gptel-tool-function processed-tool) ".") :to-throw)
           (expect warn-called :to-be-truthy)))))
 
+  (describe "macher--last-user-prompt"
+    (it "returns the whole buffer text when there is no conversation history"
+      (with-temp-buffer
+        (insert "implement the thing")
+        (expect (macher--last-user-prompt) :to-equal "implement the thing")))
+
+    (it "returns only the trailing user message in a multi-turn buffer"
+      (with-temp-buffer
+        (insert "first message\n\n")
+        (insert (propertize "first response" 'gptel 'response))
+        (insert "\n\nsecond message")
+        (expect (macher--last-user-prompt) :to-equal "second message")))
+
+    (it "returns nil when the buffer ends with response text"
+      (with-temp-buffer
+        (insert "message\n\n")
+        (insert (propertize "response" 'gptel 'response))
+        (expect (macher--last-user-prompt) :to-be nil)))
+
+    (it "returns nil for an empty buffer"
+      (with-temp-buffer
+        (expect (macher--last-user-prompt) :to-be nil)))
+
+    (it "treats text after tool-call regions as the user message"
+      (with-temp-buffer
+        (insert "message\n\n")
+        (insert (propertize "tool output" 'gptel '(tool . "id")))
+        (insert "\n\nfollowup")
+        (expect (macher--last-user-prompt) :to-equal "followup")))
+
+    (it "treats the whole buffer as user input when response tracking is disabled"
+      (with-temp-buffer
+        (setq-local gptel-track-response nil)
+        (insert "message\n\n")
+        (insert (propertize "response" 'gptel 'response))
+        (insert "\n\nfollowup")
+        (expect (macher--last-user-prompt) :to-equal "message\n\nresponse\n\nfollowup")))
+
+    (it "strips prompt prefixes from the captured message"
+      (with-temp-buffer
+        (let ((gptel-prompt-prefix-alist '((fundamental-mode . "### "))))
+          (insert "first message\n\n")
+          (insert (propertize "first response" 'gptel 'response))
+          (insert "\n\n### second message")
+          (expect (macher--last-user-prompt) :to-equal "second message")))))
+
+  (describe "macher--transform-setup-tools"
+    :var (original-tools request-buffer)
+
+    (before-each
+      (funcall setup-project)
+      (setq original-tools gptel--known-tools)
+      (setq gptel--known-tools nil)
+      (macher--install-tools)
+      (setq request-buffer (find-file-noselect project-file)))
+
+    (after-each
+      (kill-buffer request-buffer)
+      (setq gptel--known-tools original-tools))
+
+    ;; Helper logic shared by the capture tests: run the transform against the current buffer's
+    ;; content, simulate the first state transition (which wraps tools with the context injector),
+    ;; and invoke a wrapped tool to force lazy context creation.  Returns the created context.
+    (cl-flet ((capture-context
+               (fsm)
+               (dolist (handler (cdr (assq 'WAIT (gptel-fsm-handlers fsm))))
+                 (funcall handler fsm))
+               (let ((processed-tool (car (plist-get (gptel-fsm-info fsm) :tools))))
+                 (ignore-errors
+                   (funcall (gptel-tool-function processed-tool) "file1.txt")))
+               (macher--context-for-fsm fsm)))
+
+      (it "captures only the most recent user message as the context prompt"
+        (let* ((read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+               ;; No handlers: we only want the transition handlers that the transform itself
+               ;; installs, not gptel's own request-sending handlers.
+               (fsm (gptel-make-fsm :table gptel-request--transitions :handlers nil))
+               (callback-called nil))
+          (setf (gptel-fsm-info fsm)
+                (plist-put
+                 (plist-put (gptel-fsm-info fsm) :buffer request-buffer)
+                 :tools (list read-tool)))
+          (with-temp-buffer
+            (insert "first message\n\n")
+            (insert (propertize "first response" 'gptel 'response))
+            (insert "\n\nsecond message")
+            (macher--transform-setup-tools (lambda () (setq callback-called t)) fsm))
+          (expect callback-called :to-be-truthy)
+          (let ((context (capture-context fsm)))
+            (expect context :to-be-truthy)
+            (expect (macher-context-prompt context) :to-equal "second message"))))
+
+      (it "captures the whole buffer text when there is no conversation history"
+        (let* ((read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+               (fsm (gptel-make-fsm :table gptel-request--transitions :handlers nil)))
+          (setf (gptel-fsm-info fsm)
+                (plist-put
+                 (plist-put (gptel-fsm-info fsm) :buffer request-buffer)
+                 :tools (list read-tool)))
+          (with-temp-buffer
+            (insert "implement the thing")
+            (macher--transform-setup-tools #'ignore fsm))
+          (let ((context (capture-context fsm)))
+            (expect context :to-be-truthy)
+            (expect (macher-context-prompt context) :to-equal "implement the thing"))))))
+
   (describe "macher--context-for-fsm"
     (before-each
       (funcall setup-project))

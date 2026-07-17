@@ -1264,9 +1264,10 @@ or is aborted.")
 
 - WORKSPACE is the workspace information (same format as `macher--workspace').
 
-- PROMPT is the raw prompt text sent to the LLM (not including any
-  conversation history/prior messages that might also have been
-  included).
+- PROMPT is the most recent user message at the time the request was
+  sent, i.e. the text that actually initiated the request (not
+  including any conversation history/prior messages that might also
+  have been included).
 
   Note the prompt is captured via a prompt transform that gets appended
   to 'gptel-prompt-transform-functions' when applying macher presets.  If
@@ -4059,6 +4060,28 @@ they're accessible on the FSM."
     ;; Update the tools list that the FSM will actually use for tool calls.
     (setf (gptel-fsm-info fsm) (plist-put info :tools processed-tools))))
 
+(defun macher--last-user-prompt ()
+  "Extract the most recent user message from the current buffer.
+
+This is meant to be called from within a gptel prompt transform, where
+the current buffer is a temporary buffer containing the full request
+text.  Text from prior LLM responses and tool calls carries a non-nil
+`gptel' text property, while user-entered text does not.  Returns the
+text after the final response/tool region, with prompt/response
+prefixes stripped, or nil if there's no trailing user text.
+
+As with gptel's own request parsing, if neither `gptel-mode' nor
+`gptel-track-response' is enabled, the entire buffer is treated as user
+input."
+  (let ((start
+         (if (or gptel-mode gptel-track-response)
+             (if (and (> (point-max) (point-min)) (get-text-property (1- (point-max)) 'gptel))
+                 ;; The buffer ends with response/tool text, so there's no trailing user message.
+                 (point-max)
+               (or (previous-single-property-change (point-max) 'gptel) (point-min)))
+           (point-min))))
+    (gptel--trim-prefixes (buffer-substring-no-properties start (point-max)))))
+
 (defun macher--transform-setup-tools (callback fsm)
   "A gptel prompt transform to set up macher tools and behavior.
 
@@ -4080,7 +4103,8 @@ CALLBACK and FSM are as described in the
 `gptel-prompt-transform-functions' documentation."
   (let* (
          ;; Capture information that needs to be included in the macher context if it gets created.
-         (prompt (buffer-string))
+         ;; Note we only capture the most recent user message, not the full conversation text.
+         (prompt (macher--last-user-prompt))
          (process-request-function macher-process-request-function)
          ;; Shared context object for this request, with a lazy initializer.  The context will only
          ;; be initialized if macher tools are invoked during the request.  We use t as a flag that
