@@ -6,7 +6,7 @@
   "scripts": {
     "test": "eask exec buttercup --stale-file-error tests/",
     "//": "postinstall copies package files so elisp-autofmt can read macro definitions even when packages aren't installed in the user's Emacs",
-    "postinstall": "eask install-deps --dev && cp .eask/*/elpa/buttercup-*/buttercup.el .eask/buttercup.el && cp .eask/*/elpa/gptel-*/gptel.el .eask/gptel.el && cp .eask/*/elpa/gptel-*/gptel-ollama.el .eask/gptel-ollama.el"
+    "postinstall": "eask install-deps --dev && cp $(ls .eask/*/elpa/buttercup-*/buttercup.el | head -1) .eask/buttercup.el && cp $(ls .eask/*/elpa/gptel-*/gptel.el | head -1) .eask/gptel.el && cp $(ls .eask/*/elpa/gptel-*/gptel-ollama.el | head -1) .eask/gptel-ollama.el"
   },
   "devDependencies": {
     "@emacs-eask/cli": "^0.11.1",

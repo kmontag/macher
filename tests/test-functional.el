@@ -12,7 +12,7 @@
 ;;   MACHER_TEST_OPENAI_MODEL to configure an OpenAI-compatible endpoint.
 ;;   If MACHER_TEST_OPENAI_BASE_URL is unset, all functional tests are
 ;;   skipped (registered but marked pending via `assume').
-;; - In CI, these are set in the workflow file. Locally, they can be set
+;; - In CI, these are set in the workflow file.  Locally, they can be set
 ;;   in a gitignored Makefile.local that the Makefile auto-includes.
 
 ;;; Code:
@@ -239,8 +239,7 @@ CALLBACK-TEST is a function that verifies the result."
     ;; Skip all functional tests if no test endpoint is configured. This
     ;; registers the specs but marks them as pending so they show up in
     ;; the test output without running.
-    (assume test-base-url
-            "MACHER_TEST_OPENAI_BASE_URL not set; skipping functional tests")
+    (assume test-base-url "MACHER_TEST_OPENAI_BASE_URL not set; skipping functional tests")
 
     ;; Allow project.el to detect projects with .project marker file in the root.
     (setq project-vc-extra-root-markers '(".project"))
@@ -253,16 +252,19 @@ CALLBACK-TEST is a function that verifies the result."
     ;; Configure gptel to use an OpenAI-compatible test endpoint. The base URL is
     ;; everything up to (but not including) /chat/completions; we append that suffix
     ;; and parse the result into protocol, host, and endpoint for `gptel-make-openai'.
-    (let* ((full-url (concat (string-trim-right test-base-url "/")
-                             "/chat/completions"))
+    (let* ((full-url (concat (string-trim-right test-base-url "/") "/chat/completions"))
            (parsed (url-generic-parse-url full-url))
            (protocol (url-type parsed))
            (host (url-host parsed))
            (port (url-port parsed))
-           (default-port (if (string= protocol "https") 443 80))
-           (host-str (if (and port (/= port default-port))
-                         (format "%s:%d" host port)
-                       host))
+           (default-port
+            (if (string= protocol "https")
+                443
+              80))
+           (host-str
+            (if (and port (/= port default-port))
+                (format "%s:%d" host port)
+              host))
            (endpoint (url-filename parsed))
            (model (or test-model "gpt-4o-mini"))
            (api-key (or test-api-key "dummy")))
