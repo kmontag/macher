@@ -92,12 +92,15 @@ jobs:
           timeout_minutes: 10
           max_attempts: 3
           retry_wait_seconds: 60
-          # Only retry on transient rate-limiting from the GitHub Models API.
-          # The command below runs `make test` and inspects the output for an
-          # HTTP 429; a genuine test failure exits with a different code and
-          # fails the job immediately rather than being retried.
-          # `retry_on_exit_code` makes the retry action only re-run for that
-          # specific exit code (75).
+          # The command below runs `make test` and inspects the output:
+          # - On an HTTP 429 (rate limiting), it exits 75 to trigger a retry.
+          # - On success, it checks for skipped tests and fails the job if
+          #   any are found (buttercup prints "Running X out of Y specs"
+          #   when there are pending tests, vs "Running X specs." when all
+          #   run). This catches misconfiguration where tests are silently
+          #   skipped due to missing env vars.
+          # `retry_on_exit_code` makes the retry action only re-run for
+          # exit code 75; any other non-zero code fails immediately.
           retry_on_exit_code: 75
           command: |
             set +e
@@ -105,6 +108,10 @@ jobs:
             make test 2>&1 | tee /tmp/macher-test-output.log
             status=${PIPESTATUS[0]}
             if [ "$status" -eq 0 ]; then
+              if grep -Eq '^Running [0-9]+ out of [0-9]+ specs' /tmp/macher-test-output.log; then
+                echo "::error::Some tests were skipped (pending). All tests must run in CI."
+                exit 1
+              fi
               exit 0
             fi
             if grep -Eq "HTTP/[0-9.]+ 429" /tmp/macher-test-output.log; then
