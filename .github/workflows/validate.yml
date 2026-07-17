@@ -94,11 +94,11 @@ jobs:
           retry_wait_seconds: 60
           # The command below runs `make test` and inspects the output:
           # - On an HTTP 429 (rate limiting), it exits 75 to trigger a retry.
-          # - On success, it checks for skipped tests and fails the job if
-          #   any are found (buttercup prints "Running X out of Y specs"
-          #   when there are pending tests, vs "Running X specs." when all
-          #   run). This catches misconfiguration where tests are silently
-          #   skipped due to missing env vars.
+          # - On success, it checks for the skip message emitted by the
+          #   `assume' call in tests/test-functional.el, which fires when the
+          #   test endpoint isn't configured. Buttercup still exits 0 in that
+          #   case, so without this check a misconfigured CI run would pass
+          #   with the functional tests silently skipped.
           # `retry_on_exit_code` makes the retry action only re-run for
           # exit code 75; any other non-zero code fails immediately.
           retry_on_exit_code: 75
@@ -108,8 +108,8 @@ jobs:
             make test 2>&1 | tee /tmp/macher-test-output.log
             status=${PIPESTATUS[0]}
             if [ "$status" -eq 0 ]; then
-              if grep -Eq '^Running [0-9]+ out of [0-9]+ specs' /tmp/macher-test-output.log; then
-                echo "::error::Some tests were skipped (pending). All tests must run in CI."
+              if grep -qF 'MACHER_TEST_OPENAI_BASE_URL not set' /tmp/macher-test-output.log; then
+                echo "::error::Functional tests were skipped; the test endpoint is not configured."
                 exit 1
               fi
               exit 0
