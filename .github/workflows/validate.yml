@@ -85,6 +85,9 @@ jobs:
         uses: nick-fields/retry@v4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MACHER_TEST_OPENAI_BASE_URL: https://models.github.ai/inference
+          MACHER_TEST_OPENAI_KEY: ${{ secrets.GITHUB_TOKEN }}
+          MACHER_TEST_OPENAI_MODEL: gpt-4o-mini
         with:
           timeout_minutes: 10
           max_attempts: 3

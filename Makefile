@@ -7,6 +7,9 @@ AGG := agg
 ASCIINEMA := asciinema
 FFMPEG := ffmpeg
 
+# Optional local overrides (e.g. test endpoint configuration). Gitignored.
+-include Makefile.local
+
 # Note this also installs eask dependencies via the package's postinstall script.
 $(EASK) $(PRETTIER) .eask: package.json package-lock.json Eask
 	"$(NPM)" install

@@ -8,17 +8,21 @@
 ;; to catch issues in the general end-to-end implementation workflow.
 ;;
 ;; Backend selection:
-;; - In CI (GITHUB_ACTIONS env var set): Uses GitHub Models API with gpt-4o-mini.
-;; - Locally: Uses Ollama with a local model (works offline).
+;; - Set MACHER_TEST_OPENAI_BASE_URL, MACHER_TEST_OPENAI_KEY, and
+;;   MACHER_TEST_OPENAI_MODEL to configure an OpenAI-compatible endpoint.
+;;   If MACHER_TEST_OPENAI_BASE_URL is unset, all functional tests are
+;;   skipped (registered but marked pending via `assume').
+;; - In CI, these are set in the workflow file. Locally, they can be set
+;;   in a gitignored Makefile.local that the Makefile auto-includes.
 
 ;;; Code:
 
 (require 'buttercup)
 (require 'macher)
 (require 'gptel)
-(require 'gptel-ollama)
 (require 'gptel-openai)
 (require 'project)
+(require 'url)
 
 ;; Uncomment for debugging output.
 ;;
@@ -52,23 +56,13 @@
 (describe "functional tests"
   :var*
   (
-   ;; Whether to use GitHub Models API (in CI) or Ollama (locally).
-   ;; Can be disabled via MACHER_DISABLE_GITHUB_MODELS env var if GitHub Models API is unavailable.
-   (use-github-models
-    (and (getenv "GITHUB_ACTIONS")
-         (let ((disable-var (getenv "MACHER_DISABLE_GITHUB_MODELS")))
-           (not (and disable-var (not (string-empty-p disable-var)))))))
-
-   ;; GitHub Models configuration.
-   (github-models-host "models.github.ai")
-   (github-models-endpoint "/inference/chat/completions")
-   (github-models-model "gpt-4o-mini")
-
-   ;; Ollama configuration.
-   (ollama-model "llama3.2:3b")
-   (ollama-host (or (getenv "MACHER_TEST_OLLAMA_HOST") "localhost:11434"))
-   ;; Seed for consistent responses. You might need to adjust this when changing the model.
-   (ollama-seed 5678)
+   ;; Test endpoint configuration, read from environment variables.
+   ;; MACHER_TEST_OPENAI_BASE_URL is the base URL (without /chat/completions).
+   ;; MACHER_TEST_OPENAI_KEY is the API key (optional for local servers).
+   ;; MACHER_TEST_OPENAI_MODEL is the model name.
+   (test-base-url (getenv "MACHER_TEST_OPENAI_BASE_URL"))
+   (test-api-key (getenv "MACHER_TEST_OPENAI_KEY"))
+   (test-model (getenv "MACHER_TEST_OPENAI_MODEL"))
 
    ;; Timeout in seconds for macher functional tests. Needs to be permissive as tests run in a
    ;; fairly constrained environment on GitHub Actions.
@@ -242,44 +236,53 @@ CALLBACK-TEST is a function that verifies the result."
             (kill-buffer patch-buffer)))))))
 
   (before-all
+    ;; Skip all functional tests if no test endpoint is configured. This
+    ;; registers the specs but marks them as pending so they show up in
+    ;; the test output without running.
+    (assume test-base-url
+            "MACHER_TEST_OPENAI_BASE_URL not set; skipping functional tests")
+
     ;; Allow project.el to detect projects with .project marker file in the root.
     (setq project-vc-extra-root-markers '(".project"))
 
     ;; gptel uses `with-demoted-errors' to swallow errors at some points during the request
     ;; lifecycle. Set 'debug-on-error' globally to cause swallowed errors to actually trigger
     ;; the debugger, which will be interpreted as a proper test error.
-    (setq debug-on-error t))
+    (setq debug-on-error t)
+
+    ;; Configure gptel to use an OpenAI-compatible test endpoint. The base URL is
+    ;; everything up to (but not including) /chat/completions; we append that suffix
+    ;; and parse the result into protocol, host, and endpoint for `gptel-make-openai'.
+    (let* ((full-url (concat (string-trim-right test-base-url "/")
+                             "/chat/completions"))
+           (parsed (url-generic-parse-url full-url))
+           (protocol (url-type parsed))
+           (host (url-host parsed))
+           (port (url-port parsed))
+           (default-port (if (string= protocol "https") 443 80))
+           (host-str (if (and port (/= port default-port))
+                         (format "%s:%d" host port)
+                       host))
+           (endpoint (url-filename parsed))
+           (model (or test-model "gpt-4o-mini"))
+           (api-key (or test-api-key "dummy")))
+      (setq gptel-model model)
+      (setq gptel-directives `(default . ,system-message))
+      (setq gptel-backend
+            (gptel-make-openai
+             "Test endpoint"
+             :host host-str
+             :protocol protocol
+             :endpoint endpoint
+             :key api-key
+             :stream t
+             :models (list model)
+             :request-params '(:temperature 0)))))
 
   (before-each
     ;; Sanity check that trackers are cleaned up between tests.
     (expect temp-files-created :to-be nil)
-    (expect temp-dirs-created :to-be nil)
-
-    ;; Set up gptel configuration for tests.
-    (setq gptel-directives `(default . ,system-message))
-    (if use-github-models
-        ;; CI: Use GitHub Models API (faster, requires internet and token).
-        (progn
-          (setq gptel-model github-models-model)
-          (setq gptel-backend
-                (gptel-make-openai
-                 "GitHub Models"
-                 :host github-models-host
-                 :endpoint github-models-endpoint
-                 :key (getenv "GITHUB_TOKEN")
-                 :stream t
-                 :models `(,gptel-model)
-                 :request-params '(:temperature 0))))
-      ;; Local: Use Ollama (works offline).
-      (setq gptel-model ollama-model)
-      (setq gptel-backend
-            (gptel-make-ollama
-             "Test ollama"
-             :host ollama-host
-             :models `(,gptel-model)
-             ;; Use temperature 0 and a fixed seed for consistent responses.
-             ;; See https://github.com/ollama/ollama/issues/1749.
-             :request-params `(:options (:temperature 0 :seed ,ollama-seed))))))
+    (expect temp-dirs-created :to-be nil))
 
   (after-each
     ;; Verify that all gptel requests have been aborted or terminated.
@@ -297,11 +300,6 @@ CALLBACK-TEST is a function that verifies the result."
     (setq temp-files-created nil)
     (setq temp-dirs-created nil)
 
-    ;; Restore original gptel settings
-    (setq gptel-model original-gptel-model)
-    (setq gptel-directives original-gptel-directives)
-    (setq gptel-backend original-gptel-backend)
-
     ;; If debugging output was enabled (otherwise the buffer won't exist), print it.
     (when (get-buffer "*gptel-log*")
       (with-current-buffer "*gptel-log*"
@@ -310,7 +308,10 @@ CALLBACK-TEST is a function that verifies the result."
   (after-all
     ;; Restore original global settings.
     (setq project-vc-extra-root-markers original-project-vc-extra-root-markers)
-    (setq debug-on-error original-debug-on-error))
+    (setq debug-on-error original-debug-on-error)
+    (setq gptel-model original-gptel-model)
+    (setq gptel-directives original-gptel-directives)
+    (setq gptel-backend original-gptel-backend))
 
   (describe "replace-file operation"
     :var*

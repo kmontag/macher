@@ -1,6 +1,8 @@
 /.eask/
 /node_modules/
 
+/Makefile.local
+
 /.github/terraform/.terraform/
 /.github/terraform/terraform.tfstate
 /.github/terraform/terraform.tfstate.backup
