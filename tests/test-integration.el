@@ -4243,6 +4243,73 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                   ;; Should NOT include header text (has gptel 'ignore property).
                   (expect all-user-content :not :to-match ":discuss:"))))))))
 
+    (it "captures only the latest request in patch metadata for successive actions"
+      ;; Set up backend with responses for two implement actions, each making a tool call.
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "first.txt" :content "first content")))])
+                 "First action response"
+                 (:tool-calls
+                  [(:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "second.txt" :content "second content")))])
+                 "Second action response"))
+
+      (let ((macher-action-buffer-ui 'org))
+        (with-current-buffer project-file-buffer
+          ;; Run the FIRST action.
+          (macher-implement "First action instructions" callback)
+
+          ;; Wait for the first action to complete.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+
+          ;; Reset callback state for the second action.
+          (setq callback-called nil)
+          (setq exit-code nil)
+          (setq callback
+                (macher-test--make-once-only-callback
+                 (lambda (cb-exit-code _cb-execution cb-fsm)
+                   (setq callback-called t)
+                   (setq exit-code cb-exit-code)
+                   (setq fsm cb-fsm))))
+
+          ;; Run the SECOND action, which appends to the same action buffer.
+          (macher-implement "Second action instructions" callback)
+
+          ;; Wait for the second action to complete.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+
+          ;; Sanity check: the action buffer contains both actions' text.
+          (with-current-buffer (macher-action-buffer)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect content :to-match "First action instructions")
+              (expect content :to-match "First action response")
+              (expect content :to-match "Second action instructions")))
+
+          ;; The patch metadata should contain only the second action's request.
+          (with-current-buffer (macher-patch-buffer)
+            (let ((patch-content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect patch-content :to-match "# PROMPT for patch ID")
+              (expect patch-content :to-match "Second action instructions")
+              (expect patch-content :not :to-match "First action instructions")
+              (expect patch-content :not :to-match "First action response")
+              ;; The org topic headers carry the 'ignore property and are excluded too.
+              (expect patch-content :not :to-match ":implement:"))))))
+
     (it "re-sends aborted action with preset applied via gptel-send"
       ;; Set up backend with responses for: prior action, aborted request (never received),
       ;; re-sent request.
