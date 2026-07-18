@@ -2052,14 +2052,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
     ;; work correctly with all directive formats supported by gptel.
 
     (it "handles function directive that returns a string"
-      ;; When gptel--system-message is a function returning a string, macher should evaluate it and
+      ;; When gptel-system-prompt is a function returning a string, macher should evaluate it and
       ;; inject the workspace context into the result.
       (funcall setup-backend '("Function directive works"))
       (funcall setup-project "fn-directive-string" '(("src/main.el" . "main content")))
       (let ((callback-called nil)
             (response-received nil)
             ;; Create a function directive that returns a string.
-            (gptel--system-message (lambda () "DYNAMIC_FUNCTION_DIRECTIVE_CONTENT")))
+            (gptel-system-prompt (lambda () "DYNAMIC_FUNCTION_DIRECTIVE_CONTENT")))
 
         (with-temp-buffer
           (set-visited-file-name project-file)
@@ -2098,14 +2098,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                       :to-match "The user is currently working on a project named:"))))))
 
     (it "handles function directive that returns a list"
-      ;; When gptel--system-message is a function returning a list (few-shot template), macher
+      ;; When gptel-system-prompt is a function returning a list (few-shot template), macher
       ;; should inject workspace context into the first element.
       (funcall setup-backend '("Function returning list works"))
       (funcall setup-project "fn-directive-list" '(("src/main.el" . "main content")))
       (let ((callback-called nil)
             (response-received nil)
             ;; Create a function directive that returns a list (few-shot template).
-            (gptel--system-message
+            (gptel-system-prompt
              (lambda ()
                '("FEW_SHOT_SYSTEM_FROM_FUNCTION"
                  "Example user message"
@@ -2146,14 +2146,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect all-content :to-match "Example assistant response"))))))
 
     (it "handles list directive (few-shot template)"
-      ;; When gptel--system-message is a list, macher should inject workspace context into the
+      ;; When gptel-system-prompt is a list, macher should inject workspace context into the
       ;; first element only.
       (funcall setup-backend '("List directive works"))
       (funcall setup-project "list-directive" '(("src/main.el" . "main content")))
       (let ((callback-called nil)
             (response-received nil)
             ;; Create a list directive (few-shot template).
-            (gptel--system-message
+            (gptel-system-prompt
              '("LIST_BASED_SYSTEM_PROMPT"
                "User example for few-shot"
                "Assistant example response")))
@@ -2203,7 +2203,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           ;; Set up a buffer-local variable that the function will access.
           (setq-local my-dynamic-value "BUFFER_LOCAL_DYNAMIC_VALUE")
           ;; Create a function directive that reads from the buffer.
-          (setq-local gptel--system-message
+          (setq-local gptel-system-prompt
                       (lambda () (format "System with dynamic: %s" my-dynamic-value)))
 
           (macher-test--send
@@ -2247,7 +2247,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (let ((callback-called nil)
             (response-received nil)
             ;; Create a list directive with placeholder in the first element.
-            (gptel--system-message
+            (gptel-system-prompt
              (list
               (concat
                "SYSTEM_WITH_PLACEHOLDER" macher-context-string-placeholder "END_MARKER")
@@ -2303,7 +2303,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (let ((callback-called nil)
             (response-received nil)
             ;; Create a nested function directive.
-            (gptel--system-message (lambda () (lambda () "INNER_RESULT"))))
+            (gptel-system-prompt (lambda () (lambda () "INNER_RESULT"))))
 
         (with-temp-buffer
           (set-visited-file-name project-file)
@@ -2525,7 +2525,47 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect
                buffer-content
                ;; No response text. No trailing prefix.
-               :to-equal (funcall action-buffer-content "Test abort request" "" 'discuss nil))))))))
+               :to-equal (funcall action-buffer-content "Test abort request" "" 'discuss nil)))))))
+
+    (it "populates and focuses the action buffer without sending, with a prefix argument"
+      ;; A backend is set up but should never be hit: in edit mode the request is not sent.
+      (funcall setup-backend '("Response that should never be sent"))
+      ;; `macher--before-action-focus' selects the action buffer's window.  Wrap in
+      ;; `save-window-excursion' to restore the window configuration afterward; otherwise the
+      ;; selected window keeps pointing at the action buffer, and once `after-each' kills the project
+      ;; file buffer the action buffer becomes current, leaking its buffer-local state (workspace,
+      ;; `default-directory', `gptel-system-prompt', etc.) into later specs.
+      (save-window-excursion
+        (with-current-buffer project-file-buffer
+          ;; Start from a single window so the action buffer is displayed in a fresh one.
+          (delete-other-windows)
+          ;; A prefix argument puts the action into edit mode: populate the buffer but don't send.
+          (let ((current-prefix-arg '(4)))
+            (macher-implement nil callback))
+
+          (let ((action-buffer (macher-action-buffer)))
+            (expect action-buffer :to-be-truthy)
+            ;; In edit mode the request is never sent, so the backend receives nothing and the
+            ;; callback never fires.
+            (expect (funcall received-requests) :to-equal '())
+            (expect callback-called :to-be nil)
+
+            ;; The action buffer's window should be displayed and selected, so the user can start
+            ;; editing the populated prompt right away.
+            (let ((win (get-buffer-window action-buffer t)))
+              (expect win :to-be-truthy)
+              (expect (selected-window) :to-equal win))
+
+            ;; The populated prompt should contain the focus string and the implement instruction.
+            (with-current-buffer action-buffer
+              (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+                (expect content :to-match (regexp-quote macher--action-focus-prefix))
+                (expect content :to-match "\\[focus\\]")
+                (expect content :to-match "use workspace tools to implement"))
+              ;; Point should be left at the end of the inserted prompt, ready for editing.
+              (expect (point) :to-equal (point-max))
+              (expect (window-point (get-buffer-window action-buffer t))
+                      :to-equal (point-max))))))))
 
   (describe "search_in_workspace"
     (before-each
@@ -4085,14 +4125,12 @@ Sets `test-patch-content' to the generated patch content for additional assertio
 
             ;; The preset should be applied buffer-locally in the action buffer.
             (with-current-buffer action-buffer
-              (expect (buffer-local-value 'gptel--system-message action-buffer)
+              (expect (buffer-local-value 'gptel-system-prompt action-buffer)
                       :to-match "BUFFER_LOCAL_PRESET_SYSTEM_MESSAGE"))
 
             ;; The global value should be unchanged.
             (with-temp-buffer
-              (expect gptel--system-message
-                      :not
-                      :to-match "BUFFER_LOCAL_PRESET_SYSTEM_MESSAGE")))))))
+              (expect gptel-system-prompt :not :to-match "BUFFER_LOCAL_PRESET_SYSTEM_MESSAGE")))))))
 
   ;; Tests ensuring that action conversations can be continued/resumed directly from the action
   ;; buffer.
@@ -4204,6 +4242,73 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                   (expect all-user-content :not :to-match "Prior action response")
                   ;; Should NOT include header text (has gptel 'ignore property).
                   (expect all-user-content :not :to-match ":discuss:"))))))))
+
+    (it "captures only the latest request in patch metadata for successive actions"
+      ;; Set up backend with responses for two implement actions, each making a tool call.
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "first.txt" :content "first content")))])
+                 "First action response"
+                 (:tool-calls
+                  [(:function
+                    (:name
+                     "write_file_in_workspace"
+                     :arguments (:path "second.txt" :content "second content")))])
+                 "Second action response"))
+
+      (let ((macher-action-buffer-ui 'org))
+        (with-current-buffer project-file-buffer
+          ;; Run the FIRST action.
+          (macher-implement "First action instructions" callback)
+
+          ;; Wait for the first action to complete.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+
+          ;; Reset callback state for the second action.
+          (setq callback-called nil)
+          (setq exit-code nil)
+          (setq callback
+                (macher-test--make-once-only-callback
+                 (lambda (cb-exit-code _cb-execution cb-fsm)
+                   (setq callback-called t)
+                   (setq exit-code cb-exit-code)
+                   (setq fsm cb-fsm))))
+
+          ;; Run the SECOND action, which appends to the same action buffer.
+          (macher-implement "Second action instructions" callback)
+
+          ;; Wait for the second action to complete.
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+          (expect callback-called :to-be-truthy)
+          (expect exit-code :to-be nil)
+
+          ;; Sanity check: the action buffer contains both actions' text.
+          (with-current-buffer (macher-action-buffer)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect content :to-match "First action instructions")
+              (expect content :to-match "First action response")
+              (expect content :to-match "Second action instructions")))
+
+          ;; The patch metadata should contain only the second action's request.
+          (with-current-buffer (macher-patch-buffer)
+            (let ((patch-content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect patch-content :to-match "# PROMPT for patch ID")
+              (expect patch-content :to-match "Second action instructions")
+              (expect patch-content :not :to-match "First action instructions")
+              (expect patch-content :not :to-match "First action response")
+              ;; The org topic headers carry the 'ignore property and are excluded too.
+              (expect patch-content :not :to-match ":implement:"))))))
 
     (it "re-sends aborted action with preset applied via gptel-send"
       ;; Set up backend with responses for: prior action, aborted request (never received),

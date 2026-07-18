@@ -28,7 +28,7 @@ jobs:
       # Allow filing issues if the run fails.
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
 
       - name: Verify the integrity of installed dependencies

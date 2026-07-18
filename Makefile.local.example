@@ -1,0 +1,9 @@
+# -*- mode: makefile -*-
+#
+# Copy this file to Makefile.local and edit for your setup. Auto-included by the Makefile.
+
+# Set these to point functional tests at an OpenAI-compatible API endpoint.
+# The base URL is everything up to (but not including) /chat/completions.
+export MACHER_TEST_OPENAI_BASE_URL := http://localhost:51517/v1
+export MACHER_TEST_OPENAI_KEY := dummy
+export MACHER_TEST_OPENAI_MODEL := gpt-4o-mini

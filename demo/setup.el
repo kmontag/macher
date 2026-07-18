@@ -103,7 +103,7 @@
        "[macher_placeholder]\n")))
   ;; Add the system message to the global config for nicer display in the header.
   (add-to-list 'gptel-directives `(macher-demo . ,system-message))
-  (setq gptel--system-message system-message))
+  (setq gptel-system-prompt system-message))
 
 (setopt gptel-model 'claude-opus-4-6)
 (setq gptel-backend (gptel-make-anthropic "Claude" :key (getenv "ANTHROPIC_API_KEY") :stream nil))

@@ -4,7 +4,7 @@
 
 ;; Author: Kevin Montag
 ;; Version: 0.5.2
-;; Package-Requires: ((emacs "30.1") (gptel "0.9.9.3"))
+;; Package-Requires: ((emacs "30.1") (gptel "0.9.9.6"))
 ;; Keywords: convenience, gptel, llm
 ;; URL: https://github.com/kmontag/macher
 
@@ -244,6 +244,18 @@ This function is used by the default actions in the
            ;; If there's an active region, use its contents.
            ((use-region-p)
             (buffer-substring-no-properties (region-beginning) (region-end)))
+           ;; With a prefix arg, skip the minibuffer prompt and treat the request as a blank string,
+           ;; so that `macher-action' populates the action buffer with an editable prompt instead of
+           ;; sending immediately.
+           ;;
+           ;; NOTE: this input-gathering step still reads `current-prefix-arg' directly because it
+           ;; runs in the source buffer, before the `macher-action-execution' exists.  The send and
+           ;; focus decisions in `macher-action' use the execution's `draft' field instead;
+           ;; threading the draft intent all the way into this helper (and the
+           ;; `macher-actions-alist' API)
+           ;; would be a cleaner but larger change.
+           (current-prefix-arg
+            "")
            ;; Otherwise, prompt the user.
            (t
             (read-string input-prompt))))
@@ -405,8 +417,8 @@ predefined \"pre\" function for the `macher-action-buffer-setup-hook'.
 The choices are:
 
 - ='basic' - sets up buffer-local hooks in
-  `macher-before-action-functions' and `macher-after-action-functions'
-  to display the action buffer and insert a nicely-formatted prompt.
+  `macher-before-action-functions' to display the action buffer and
+  insert a nicely-formatted prompt.
 
 - ='default' - like ='basic', but also enables `gptel-mode' and the
   global `gptel-default-mode' (e.g. markdown or org), and ensures tool
@@ -1252,9 +1264,10 @@ or is aborted.")
 
 - WORKSPACE is the workspace information (same format as `macher--workspace').
 
-- PROMPT is the raw prompt text sent to the LLM (not including any
-  conversation history/prior messages that might also have been
-  included).
+- PROMPT is the most recent user message at the time the request was
+  sent, i.e. the text that actually initiated the request (not
+  including any conversation history/prior messages that might also
+  have been included).
 
   Note the prompt is captured via a prompt transform that gets appended
   to 'gptel-prompt-transform-functions' when applying macher presets.  If
@@ -1303,14 +1316,23 @@ or is aborted.")
 - CONTEXT will be passed as the :context key when calling
   `gptel-request'.  This is a user-defined object that can be read from
   the `gptel-fsm' (state machine) associated with the request.  Functions
-  in `macher-before-action-functions' can modify this field."
+  in `macher-before-action-functions' can modify this field.
+
+- DRAFT, when non-nil, indicates that the request should be populated
+  for manual editing (a draft) rather than sent automatically.
+  `macher-action' sets this from the prefix argument and skips sending
+  the request when it's non-nil.  Functions in
+  `macher-before-action-functions' can read it to adjust their behavior
+  (e.g. the built-in UIs select the action buffer window so the prompt
+  can be edited right away), or modify it to force or suppress sending."
   (action)
   (prompt)
   (preset)
   (summary)
   (buffer)
   (source)
-  (context nil))
+  (context nil)
+  (draft nil))
 
 ;;; Internal Functions
 
@@ -1319,13 +1341,13 @@ or is aborted.")
   "Detect project workspace for the current buffer.
 Returns (project . ROOT) if the buffer is in a project, nil otherwise."
   (require 'project)
-  (when-let ((project (project-current nil default-directory)))
+  (when-let* ((project (project-current nil default-directory)))
     (cons 'project (project-root project))))
 
 (defun macher-workspace-file ()
   "Detect file workspace for the current buffer.
 Returns (file . FILENAME) if the buffer is visiting a file, nil otherwise."
-  (when-let ((filename (buffer-file-name)))
+  (when-let* ((filename (buffer-file-name)))
     (cons 'file filename)))
 
 (defun macher-workspace-directory ()
@@ -1342,10 +1364,10 @@ To enable, add to `macher-workspace-functions':
 
   (setq macher-workspace-functions
         \\='(macher-workspace-project macher-workspace-directory))"
-  (when-let ((dir
-              (and default-directory
-                   (file-directory-p default-directory)
-                   (expand-file-name default-directory))))
+  (when-let* ((dir
+               (and default-directory
+                    (file-directory-p default-directory)
+                    (expand-file-name default-directory))))
     (cons 'directory dir)))
 
 ;; Built-in workspace type functions
@@ -1364,7 +1386,7 @@ the project when it's actually needed."
 (defun macher--project-name (project-id)
   "Get the project name for PROJECT-ID using project.el."
   (require 'project)
-  (if-let ((project (project-current nil project-id)))
+  (if-let* ((project (project-current nil project-id)))
       (project-name project)
     ;; Get the last directory name from the root (trailing slash removed).
     (file-name-nondirectory (directory-file-name project-id))))
@@ -1478,7 +1500,7 @@ Returns a list of absolute file paths."
   "Generate workspace information string for the current workspace.
 
 Returns a workspace information string to be added to the request."
-  (when-let ((workspace (macher-workspace)))
+  (when-let* ((workspace (macher-workspace)))
     (let* ((workspace-name (macher--workspace-name workspace))
            (workspace-files (macher--workspace-files workspace))
            ;; This might get trimmed if there are too many files.
@@ -1536,28 +1558,41 @@ without needing to put the full path in the buffer name."
   "Set up basic common behavior for action buffers.
 
 This adds local hooks to `macher-before-action-functions' to
-format/insert prompts sent by the user, and to display the action
-buffer when actions are performed."
-  ;; Set up the buffer-local hook to insert prompts and headings.
-  (add-hook 'macher-before-action-functions #'macher--before-action-insert-prompt nil t)
+format/insert prompts sent by the user and to display the action buffer
+when actions are performed.
+
+The hooks are added with the APPEND flag so they run in the order
+written here: buffer-local `add-hook' prepends by default, which would
+otherwise reverse the run order.  Adding in run order keeps the sequence
+readable and lets the default/org UI append further hooks (scroll,
+focus) that must run after these."
+  ;; Insert the prompt and any headings.
+  (add-hook 'macher-before-action-functions #'macher--before-action-insert-prompt t t)
   ;; Display the action buffer.
-  (add-hook 'macher-before-action-functions #'macher--before-action-display-buffer nil t))
+  (add-hook 'macher-before-action-functions #'macher--before-action-display-buffer t t))
 
 (defun macher--action-buffer-setup-ui ()
   "Set up a slightly more opinionated action buffer UI.
 
 This setup is shared among the symbol `default' and symbol `org' UI
 configurations.  The function enables `gptel-mode', ensures tool results
-are included in output, and sets up a hook to apply the action's preset
-buffer-locally."
+are included in output, sets up a hook to apply the action's preset
+buffer-locally, and sets up hooks to scroll the window and, for a draft,
+select the action buffer window so the prompt can be edited."
   ;; Include tool calls in output.
   (setq-local gptel-include-tool-results t)
   ;; Enable gptel-mode for a nice header and LLM interaction feedback.
   (gptel-mode 1)
+  ;; Like `macher--action-buffer-setup-basic', these hooks are appended so they run in the order
+  ;; written, after the insert/display hooks set up there.  The window/point hooks (scroll, focus)
+  ;; depend on the prompt having been inserted and the buffer displayed first.
+  ;;
   ;; Apply the action's preset buffer-locally before each request.
-  (add-hook 'macher-before-action-functions #'macher--before-action-apply-preset nil t)
-  ;; Scroll the action buffer window to the current cursor position.
-  (add-hook 'macher-before-action-functions #'macher--before-action-scroll nil t))
+  (add-hook 'macher-before-action-functions #'macher--before-action-apply-preset t t)
+  ;; Scroll the action buffer window to the inserted prompt.
+  (add-hook 'macher-before-action-functions #'macher--before-action-scroll t t)
+  ;; For a draft, select the action buffer window so the user can edit the prompt.
+  (add-hook 'macher-before-action-functions #'macher--before-action-focus t t))
 
 (defun macher--before-action-apply-preset (execution)
   "Apply the current action's preset buffer-locally.
@@ -1576,8 +1611,28 @@ show that position.
 
 This is added buffer-locally to `macher-before-action-functions' by
 `macher--action-buffer-setup-ui'."
-  (when-let ((win (get-buffer-window (current-buffer))))
+  (when-let* ((win (get-buffer-window (current-buffer))))
     (set-window-point win (point))))
+
+(defun macher--before-action-focus (execution)
+  "Select the action buffer window when EXECUTION is a draft.
+
+For a draft (the `draft' field of EXECUTION is non-nil), the request is
+not sent; the populated prompt is left in the action buffer for manual
+editing.  This selects the buffer's window, if it's displayed, and
+places point at the end of the inserted prompt so the user can start
+editing right away.
+
+This is added buffer-locally to `macher-before-action-functions' by
+`macher--action-buffer-setup-ui'."
+  (when (macher-action-execution-draft execution)
+    (when-let* ((win (get-buffer-window (current-buffer) t)))
+      ;; `macher--before-action-insert-prompt' left point at the end of the prompt, but the window's
+      ;; stored point can be stale (e.g. a reused action buffer window left over from a previous
+      ;; request).  Sync it before selecting; otherwise `select-window' would restore the stale
+      ;; window point into the buffer, moving point away from the prompt.
+      (set-window-point win (point))
+      (select-window win))))
 
 (defun macher--action-buffer-setup ()
   "Apply the base UI configuration based on `macher-action-buffer-ui'.
@@ -1683,7 +1738,7 @@ This is added buffer-locally to `macher-before-action-functions' by
         (goto-char (point-max))))
 
     ;; Insert the prefix if point isn't immediately preceded by it.
-    (when-let ((prefix (alist-get major-mode gptel-prompt-prefix-alist)))
+    (when-let* ((prefix (alist-get major-mode gptel-prompt-prefix-alist)))
       (let ((prefix-length (length prefix)))
         (unless (and (>= (point) (+ (point-min) prefix-length))
                      (string=
@@ -2309,7 +2364,7 @@ Signals an error if the directory is not found in the workspace."
          (context-contents (macher-context-contents context)))
 
     ;; Check if this path exists as a file in our context (would indicate it's not a directory).
-    (when-let ((existing-entry (assoc (macher--normalize-path full-path) context-contents)))
+    (when-let* ((existing-entry (assoc (macher--normalize-path full-path) context-contents)))
       (let ((contents (cdr existing-entry)))
         ;; Has new-content, so it's a file.
         (when (cdr contents)
@@ -2339,7 +2394,7 @@ Signals an error if the directory is not found in the workspace."
     (cl-labels
         ((file-deleted-in-context-p
           (file-path) "Check if FILE-PATH is marked as deleted in the context."
-          (when-let ((entry (assoc (macher--normalize-path file-path) context-contents)))
+          (when-let* ((entry (assoc (macher--normalize-path file-path) context-contents)))
             (let ((contents (cdr entry)))
               (and
                ;; Has original content...
@@ -2349,7 +2404,7 @@ Signals an error if the directory is not found in the workspace."
 
          (get-file-content-size
           (file-path) "Get the size of FILE-PATH, considering context modifications."
-          (if-let ((entry (assoc (macher--normalize-path file-path) context-contents)))
+          (if-let* ((entry (assoc (macher--normalize-path file-path) context-contents)))
               (let* ((contents (cdr entry))
                      (new-content (cdr contents)))
                 (if new-content
@@ -2468,9 +2523,9 @@ Signals an error if the directory is not found in the workspace."
                        (entry-disk-type (and entry-attrs (file-attribute-type entry-attrs)))
                        (entry-is-symlink-p (and (not entry-deleted-p) (stringp entry-disk-type)))
                        (entry-exists-in-context-p
-                        (when-let ((entry
-                                    (assoc
-                                     (macher--normalize-path entry-full-path) context-contents)))
+                        (when-let* ((entry
+                                     (assoc
+                                      (macher--normalize-path entry-full-path) context-contents)))
                           (let ((contents (cdr entry)))
                             ;; Has new content.
                             (cdr contents))))
@@ -3742,7 +3797,7 @@ CALLBACK takes no arguments."
     ;; Once the nconc bug is fixed upstream, this can be simplified to just:
     ;;
     ;;   (gptel-with-preset preset-for-gptel (funcall callback))
-    (if-let ((parents (plist-get preset-for-gptel :parents)))
+    (if-let* ((parents (plist-get preset-for-gptel :parents)))
         ;; If the current preset has any parents, apply them and call this function recursively with
         ;; one parent popped from the front of the list.
         (let* ((first-parent (car parents))
@@ -3760,7 +3815,7 @@ CALLBACK takes no arguments."
 PRESET can be a symbol or a raw preset spec plist (as with
 `macher--with-preset').  If PRESET is a symbol, it is looked up from the
 global gptel registry, or if not found there, from `macher-presets-alist'."
-  (when-let ((preset-spec (macher--resolve-preset preset)))
+  (when-let* ((preset-spec (macher--resolve-preset preset)))
     (gptel--apply-preset preset-spec (lambda (sym val) (set (make-local-variable sym) val)))))
 
 (defun macher--parse-directive (directive)
@@ -3941,7 +3996,7 @@ CALLBACK and FSM are as described in the
     ;; The system message needs to be set in the temporary buffer where this prompt transform is
     ;; being invoked, but the context string needs to be generated in the buffer where the request
     ;; is actually being sent.  Pass the request buffer to the replace function.
-    (setq gptel--system-message (macher--system-replace-placeholder gptel--system-message buffer)))
+    (setq gptel-system-prompt (macher--system-replace-placeholder gptel-system-prompt buffer)))
   (funcall callback))
 
 (defun macher--setup-tools (fsm get-context)
@@ -4005,6 +4060,28 @@ they're accessible on the FSM."
     ;; Update the tools list that the FSM will actually use for tool calls.
     (setf (gptel-fsm-info fsm) (plist-put info :tools processed-tools))))
 
+(defun macher--last-user-prompt ()
+  "Extract the most recent user message from the current buffer.
+
+This is meant to be called from within a gptel prompt transform, where
+the current buffer is a temporary buffer containing the full request
+text.  Text from prior LLM responses and tool calls carries a non-nil
+`gptel' text property, while user-entered text does not.  Returns the
+text after the final response/tool region, with prompt/response
+prefixes stripped, or nil if there's no trailing user text.
+
+As with gptel's own request parsing, if neither `gptel-mode' nor
+`gptel-track-response' is enabled, the entire buffer is treated as user
+input."
+  (let ((start
+         (if (or gptel-mode gptel-track-response)
+             (if (and (> (point-max) (point-min)) (get-text-property (1- (point-max)) 'gptel))
+                 ;; The buffer ends with response/tool text, so there's no trailing user message.
+                 (point-max)
+               (or (previous-single-property-change (point-max) 'gptel) (point-min)))
+           (point-min))))
+    (gptel--trim-prefixes (buffer-substring-no-properties start (point-max)))))
+
 (defun macher--transform-setup-tools (callback fsm)
   "A gptel prompt transform to set up macher tools and behavior.
 
@@ -4026,7 +4103,8 @@ CALLBACK and FSM are as described in the
 `gptel-prompt-transform-functions' documentation."
   (let* (
          ;; Capture information that needs to be included in the macher context if it gets created.
-         (prompt (buffer-string))
+         ;; Note we only capture the most recent user message, not the full conversation text.
+         (prompt (macher--last-user-prompt))
          (process-request-function macher-process-request-function)
          ;; Shared context object for this request, with a lazy initializer.  The context will only
          ;; be initialized if macher tools are invoked during the request.  We use t as a flag that
@@ -4045,7 +4123,7 @@ CALLBACK and FSM are as described in the
                   (error "Trying to set up macher tools, but coudn't determine request buffer"))
                 (setq context-or-t
                       (if (buffer-live-p buffer)
-                          (if-let ((workspace (macher-workspace buffer)))
+                          (if-let* ((workspace (macher-workspace buffer)))
                               ;; If we found a workspace, perform context initialization.
                               (let ((context
                                      (macher--make-context
@@ -4423,6 +4501,25 @@ simply ignored if the action is defined as a plain plist.
 When called interactively, prompts the user to select an ACTION from
 those available in the `macher-actions-alist'.
 
+With a prefix argument (e.g. \[universal-argument]), the request is not
+sent.  The `macher-before-action-functions' still run as usual (so, for
+example, the default action buffer UI still populates and displays the
+buffer); the prompt is simply left in the action buffer for you to edit
+and send manually.  With the `default' or `org' action buffer UI, the
+action buffer's window is also selected (if visible) so you can start
+editing right away.  In this mode the built-in actions skip the
+minibuffer prompt, using the selected region if there is one or an empty
+request otherwise.
+
+When sending an edited prompt manually, `gptel-send' should \"just
+work\" in an org-mode action buffer with any of the built-in non-nil
+`macher-action-buffer-ui' options: the populated prompt contains an
+appropriate preset @-prefix (as long as the presets have been installed)
+and a structural org separator.  Note, however, that nothing
+macher-specific happens when you call `gptel-send', so non-built-in UIs
+or non-org-mode action buffers may require more care to send an edited
+prompt correctly.
+
 Note that macher tools/presets can be used with any gptel request, and
 you don't need to use this function to use macher.  This function simply
 implements one possible workflow."
@@ -4466,7 +4563,11 @@ implements one possible workflow."
                :preset preset
                :summary summary
                :buffer action-buffer
-               :source source-buffer))
+               :source source-buffer
+               ;; A prefix argument makes the request a draft: populate the buffer but don't send.
+               ;; This is exposed on the execution so `macher-before-action-functions' (and the
+               ;; built-in UIs) can react to it.
+               :draft (and current-prefix-arg t)))
              ;; Create a callback wrapper that includes the action hooks.
              (request-callback
               (lambda (exit-code fsm)
@@ -4504,21 +4605,27 @@ implements one possible workflow."
           (run-hook-with-args 'macher-before-action-functions execution))
         ;; It's possible for the before-action hook to change the current buffer, so re-enter the
         ;; shared buffer explicitly.
-        (with-current-buffer action-buffer
-          (macher--with-preset
-           (macher-action-execution-preset execution)
-           (lambda ()
-             ;; Just like `gptel-send', but with a prompt specified directly, and with the callback on
-             ;; termination.  Use the potentially modified prompt and context from the execution
-             ;; object.
-             (macher--gptel-request request-callback
-                                    (macher-action-execution-prompt execution)
-                                    :context (macher-action-execution-context execution)
-                                    ;; Insert at the end of the buffer.
-                                    :position (point-max)
-                                    :stream gptel-stream
-                                    :transforms gptel-prompt-transform-functions
-                                    :fsm (gptel-make-fsm :handlers gptel-send--handlers)))))))))
+        ;;
+        ;; For a draft, the before-action hooks above have already populated the action buffer with
+        ;; the prompt; rather than sending, leave it for the user to edit and send manually.  The
+        ;; built-in UIs also select the action buffer window in this case - see
+        ;; `macher--before-action-focus'.
+        (unless (macher-action-execution-draft execution)
+          (with-current-buffer action-buffer
+            (macher--with-preset
+             (macher-action-execution-preset execution)
+             (lambda ()
+               ;; Just like `gptel-send', but with a prompt specified directly, and with the callback on
+               ;; termination.  Use the potentially modified prompt and context from the execution
+               ;; object.
+               (macher--gptel-request request-callback
+                                      (macher-action-execution-prompt execution)
+                                      :context (macher-action-execution-context execution)
+                                      ;; Insert at the end of the buffer.
+                                      :position (point-max)
+                                      :stream gptel-stream
+                                      :transforms gptel-prompt-transform-functions
+                                      :fsm (gptel-make-fsm :handlers gptel-send--handlers))))))))))
 
 ;;;###autoload
 (defun macher-abort (&optional buf)
@@ -4574,7 +4681,7 @@ associated with the current workspace."
   (interactive (list 'interactive))
   (let ((fsm
          (or macher--fsm-latest
-             (when-let ((action-buffer (macher-action-buffer)))
+             (when-let* ((action-buffer (macher-action-buffer)))
                (buffer-local-value 'macher--fsm-latest action-buffer)))))
     (macher-process-request reason fsm)))
 

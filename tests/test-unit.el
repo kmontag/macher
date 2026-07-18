@@ -4046,13 +4046,13 @@
         (with-temp-buffer
           (find-file project-file)
           (let ((macher-context-string-function (lambda () "foobar"))
-                (gptel--system-message (concat "System prompt" macher-context-string-placeholder)))
+                (gptel-system-prompt (concat "System prompt" macher-context-string-placeholder)))
             (macher--with-preset
              'macher-system-commit
              (lambda ()
                ;; Should have replaced placeholder with actual context.
                (expect (string-match-p
-                        (regexp-quote macher-context-string-placeholder) gptel--system-message)
+                        (regexp-quote macher-context-string-placeholder) gptel-system-prompt)
                        :to-be nil)
                ;; Should contain the marker start (indicating context was injected).
                (expect (string-match-p
@@ -4061,18 +4061,18 @@
                           macher-context-string-marker-start
                           "foobar"
                           macher-context-string-marker-end))
-                        gptel--system-message)
+                        gptel-system-prompt)
                        :to-be-truthy))))))
 
       (it "is a no-op when system prompt has no placeholder"
         (with-temp-buffer
           (find-file project-file)
-          (let ((gptel--system-message "System prompt without placeholder"))
+          (let ((gptel-system-prompt "System prompt without placeholder"))
             (macher--with-preset
              'macher-system-commit
              (lambda ()
                ;; System message should be unchanged.
-               (expect gptel--system-message :to-equal "System prompt without placeholder")))))))
+               (expect gptel-system-prompt :to-equal "System prompt without placeholder")))))))
 
     (describe "macher-tools preset"
       (it "adds all macher tools to gptel-tools"
@@ -4104,12 +4104,12 @@
       (it "does not add system prompt modifications"
         (with-temp-buffer
           (find-file project-file)
-          (let ((gptel--system-message "Original system prompt"))
+          (let ((gptel-system-prompt "Original system prompt"))
             (macher--with-preset
              'macher-tools
              (lambda ()
                ;; System prompt should be unchanged (no placeholder added).
-               (expect gptel--system-message :to-equal "Original system prompt"))))))
+               (expect gptel-system-prompt :to-equal "Original system prompt"))))))
 
       (it "adds macher--transform-setup-tools transform"
         (with-temp-buffer
@@ -4540,6 +4540,112 @@
           (expect (funcall (gptel-tool-function processed-tool) ".") :to-throw)
           (expect warn-called :to-be-truthy)))))
 
+  (describe "macher--last-user-prompt"
+    (it "returns the whole buffer text when there is no conversation history"
+      (with-temp-buffer
+        (insert "implement the thing")
+        (expect (macher--last-user-prompt) :to-equal "implement the thing")))
+
+    (it "returns only the trailing user message in a multi-turn buffer"
+      (with-temp-buffer
+        (insert "first message\n\n")
+        (insert (propertize "first response" 'gptel 'response))
+        (insert "\n\nsecond message")
+        (expect (macher--last-user-prompt) :to-equal "second message")))
+
+    (it "returns nil when the buffer ends with response text"
+      (with-temp-buffer
+        (insert "message\n\n")
+        (insert (propertize "response" 'gptel 'response))
+        (expect (macher--last-user-prompt) :to-be nil)))
+
+    (it "returns nil for an empty buffer"
+      (with-temp-buffer
+        (expect (macher--last-user-prompt) :to-be nil)))
+
+    (it "treats text after tool-call regions as the user message"
+      (with-temp-buffer
+        (insert "message\n\n")
+        (insert (propertize "tool output" 'gptel '(tool . "id")))
+        (insert "\n\nfollowup")
+        (expect (macher--last-user-prompt) :to-equal "followup")))
+
+    (it "treats the whole buffer as user input when response tracking is disabled"
+      (with-temp-buffer
+        (setq-local gptel-track-response nil)
+        (insert "message\n\n")
+        (insert (propertize "response" 'gptel 'response))
+        (insert "\n\nfollowup")
+        (expect (macher--last-user-prompt) :to-equal "message\n\nresponse\n\nfollowup")))
+
+    (it "strips prompt prefixes from the captured message"
+      (with-temp-buffer
+        (let ((gptel-prompt-prefix-alist '((fundamental-mode . "### "))))
+          (insert "first message\n\n")
+          (insert (propertize "first response" 'gptel 'response))
+          (insert "\n\n### second message")
+          (expect (macher--last-user-prompt) :to-equal "second message")))))
+
+  (describe "macher--transform-setup-tools"
+    :var (original-tools request-buffer)
+
+    (before-each
+      (funcall setup-project)
+      (setq original-tools gptel--known-tools)
+      (setq gptel--known-tools nil)
+      (macher--install-tools)
+      (setq request-buffer (find-file-noselect project-file)))
+
+    (after-each
+      (kill-buffer request-buffer)
+      (setq gptel--known-tools original-tools))
+
+    ;; Helper logic shared by the capture tests: run the transform against the current buffer's
+    ;; content, simulate the first state transition (which wraps tools with the context injector),
+    ;; and invoke a wrapped tool to force lazy context creation.  Returns the created context.
+    (cl-flet ((capture-context
+               (fsm)
+               (dolist (handler (cdr (assq 'WAIT (gptel-fsm-handlers fsm))))
+                 (funcall handler fsm))
+               (let ((processed-tool (car (plist-get (gptel-fsm-info fsm) :tools))))
+                 (ignore-errors
+                   (funcall (gptel-tool-function processed-tool) "file1.txt")))
+               (macher--context-for-fsm fsm)))
+
+      (it "captures only the most recent user message as the context prompt"
+        (let* ((read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+               ;; No handlers: we only want the transition handlers that the transform itself
+               ;; installs, not gptel's own request-sending handlers.
+               (fsm (gptel-make-fsm :table gptel-request--transitions :handlers nil))
+               (callback-called nil))
+          (setf (gptel-fsm-info fsm)
+                (plist-put
+                 (plist-put (gptel-fsm-info fsm) :buffer request-buffer)
+                 :tools (list read-tool)))
+          (with-temp-buffer
+            (insert "first message\n\n")
+            (insert (propertize "first response" 'gptel 'response))
+            (insert "\n\nsecond message")
+            (macher--transform-setup-tools (lambda () (setq callback-called t)) fsm))
+          (expect callback-called :to-be-truthy)
+          (let ((context (capture-context fsm)))
+            (expect context :to-be-truthy)
+            (expect (macher-context-prompt context) :to-equal "second message"))))
+
+      (it "captures the whole buffer text when there is no conversation history"
+        (let* ((read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+               (fsm (gptel-make-fsm :table gptel-request--transitions :handlers nil)))
+          (setf (gptel-fsm-info fsm)
+                (plist-put
+                 (plist-put (gptel-fsm-info fsm) :buffer request-buffer)
+                 :tools (list read-tool)))
+          (with-temp-buffer
+            (insert "implement the thing")
+            (macher--transform-setup-tools #'ignore fsm))
+          (let ((context (capture-context fsm)))
+            (expect context :to-be-truthy)
+            (expect (macher-context-prompt context) :to-equal "implement the thing"))))))
+
   (describe "macher--context-for-fsm"
     (before-each
       (funcall setup-project))
@@ -4706,6 +4812,25 @@
           (expect (member #'macher--before-action-insert-prompt macher-before-action-functions)
                   :to-be-truthy))))
 
+    (it "registers the focus hook only in the default and org UIs"
+      ;; Selecting the action buffer window is an opinionated behavior, so it lives with the other
+      ;; default/org UI setup rather than the basic UI.
+      (dolist (ui '(default org))
+        (let ((macher-action-buffer-ui ui))
+          (with-temp-buffer
+            (setq-local macher--workspace '(test . "/tmp/test"))
+            (macher--action-buffer-setup)
+            (expect (member #'macher--before-action-focus macher-before-action-functions)
+                    :to-be-truthy))))
+      ;; The basic UI is intentionally passive: it displays the buffer but does not select its
+      ;; window.
+      (let ((macher-action-buffer-ui 'basic))
+        (with-temp-buffer
+          (setq-local macher--workspace '(test . "/tmp/test"))
+          (macher--action-buffer-setup)
+          (expect (member #'macher--before-action-focus macher-before-action-functions)
+                  :to-be nil))))
+
     (it "performs no setup when UI is nil"
       (let ((macher-action-buffer-ui nil))
         (with-temp-buffer
@@ -4766,41 +4891,41 @@
 
     (it "sets buffer-local variables from a plist preset"
       (with-temp-buffer
-        (let ((gptel--system-message "original"))
+        (let ((gptel-system-prompt "original"))
           (macher--apply-preset-locally '(:system "from-preset"))
-          (expect (buffer-local-value 'gptel--system-message (current-buffer))
+          (expect (buffer-local-value 'gptel-system-prompt (current-buffer))
                   :to-equal "from-preset")
           ;; Global value should be unchanged.
           (with-temp-buffer
-            (expect gptel--system-message :to-equal "original")))))
+            (expect gptel-system-prompt :to-equal "original")))))
 
     (it "sets buffer-local variables from a registered symbol preset"
       (gptel-make-preset 'test-local-preset :description "Test" :system "preset-system")
       (with-temp-buffer
         (macher--apply-preset-locally 'test-local-preset)
-        (expect (buffer-local-value 'gptel--system-message (current-buffer))
+        (expect (buffer-local-value 'gptel-system-prompt (current-buffer))
                 :to-equal "preset-system")))
 
     (it "falls back to macher-presets-alist for unregistered symbols"
       (with-temp-buffer
         (let ((macher-presets-alist `((test-macher-preset . (:system "macher-system")))))
           (macher--apply-preset-locally 'test-macher-preset)
-          (expect (buffer-local-value 'gptel--system-message (current-buffer))
+          (expect (buffer-local-value 'gptel-system-prompt (current-buffer))
                   :to-equal "macher-system"))))
 
     (it "does nothing for nil preset-spec"
       (with-temp-buffer
-        (let ((gptel--system-message "original"))
+        (let ((gptel-system-prompt "original"))
           (macher--apply-preset-locally 'nonexistent-symbol)
           ;; Should not have changed anything.
-          (expect gptel--system-message :to-equal "original"))))
+          (expect gptel-system-prompt :to-equal "original"))))
 
     (it "applies parent presets"
       (gptel-make-preset 'parent-preset :description "Parent" :system "parent-system")
       (with-temp-buffer
         (macher--apply-preset-locally '(:parents (parent-preset) :use-tools t))
         ;; Parent's system message should be applied.
-        (expect (buffer-local-value 'gptel--system-message (current-buffer))
+        (expect (buffer-local-value 'gptel-system-prompt (current-buffer))
                 :to-equal "parent-system")
         ;; Child's use-tools should also be applied.
         (expect (buffer-local-value 'gptel-use-tools (current-buffer)) :to-be t)))
@@ -4808,7 +4933,7 @@
     (it "applies anonymous plist parents"
       (with-temp-buffer
         (macher--apply-preset-locally '(:parents ((:system "anon-parent-system")) :use-tools t))
-        (expect (buffer-local-value 'gptel--system-message (current-buffer))
+        (expect (buffer-local-value 'gptel-system-prompt (current-buffer))
                 :to-equal "anon-parent-system")
         (expect (buffer-local-value 'gptel-use-tools (current-buffer)) :to-be t))))
 
@@ -5127,6 +5252,68 @@
         ;; Should not error when there's no window.
         (expect (macher--before-action-scroll nil) :not :to-throw))))
 
+  (describe "macher--before-action-focus"
+    (it "selects the buffer's window when the execution is a draft"
+      (let ((buf (generate-new-buffer "*test-focus*")))
+        (unwind-protect
+            (progn
+              (delete-other-windows)
+              (let ((win (display-buffer buf))
+                    (execution (macher--make-action-execution :draft t)))
+                (expect win :to-be-truthy)
+                ;; `display-buffer' does not select the new window, so it starts unselected.
+                (expect (selected-window) :not :to-equal win)
+                (with-current-buffer buf
+                  (macher--before-action-focus execution))
+                ;; A draft selects the action buffer's window.
+                (expect (selected-window) :to-equal win)))
+          (kill-buffer buf))))
+
+    (it "does nothing when the execution is not a draft"
+      (let ((buf (generate-new-buffer "*test-focus*")))
+        (unwind-protect
+            (progn
+              (delete-other-windows)
+              (let ((original-window (selected-window))
+                    (win (display-buffer buf))
+                    (execution (macher--make-action-execution :draft nil)))
+                (expect win :to-be-truthy)
+                (with-current-buffer buf
+                  (macher--before-action-focus execution))
+                ;; Not a draft: the selection is left untouched.
+                (expect (selected-window) :to-equal original-window)
+                (expect (selected-window) :not :to-equal win)))
+          (kill-buffer buf))))
+
+    (it "is a no-op for a draft when the buffer has no window"
+      (with-temp-buffer
+        (let ((execution (macher--make-action-execution :draft t)))
+          (expect (macher--before-action-focus execution) :not :to-throw))))
+
+    (it "leaves point at the end of the prompt after selecting the window"
+      (let ((buf (generate-new-buffer "*test-focus*")))
+        (unwind-protect
+            (progn
+              (delete-other-windows)
+              (with-current-buffer buf
+                (dotimes (_ 50)
+                  (insert "filler line\n")))
+              ;; Display the buffer before "inserting the prompt", so the window's stored point is
+              ;; stale (at the top), mirroring the real before-action ordering.
+              (let ((win (display-buffer buf))
+                    (execution (macher--make-action-execution :draft t)))
+                (set-window-point win (point-min))
+                (with-current-buffer buf
+                  ;; Move point to the end, as `macher--before-action-insert-prompt' would.
+                  (goto-char (point-max))
+                  (let ((prompt-end (point)))
+                    (macher--before-action-focus execution)
+                    ;; Point should remain at the end of the prompt, not jump to the stale window
+                    ;; point.
+                    (expect (point) :to-equal prompt-end)
+                    (expect (window-point win) :to-equal prompt-end)))))
+          (kill-buffer buf)))))
+
   (describe "macher-action"
     :var ((original-action-buffer-setup-hook macher-action-buffer-setup-hook) project-file-buffer)
 
@@ -5212,7 +5399,67 @@
                  (call-plist (cdr call-args))
                  (passed-context (plist-get call-plist :context)))
             ;; The :context key should contain our test context.
-            (expect passed-context :to-equal test-context))))))
+            (expect passed-context :to-equal test-context)))))
+
+    (it "does not send the request when called with a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let ((current-prefix-arg '(4)))
+          (macher-action 'implement nil "test prompt"))
+        ;; In edit mode the request is not sent; the prompt is left in the buffer for manual editing.
+        (expect 'gptel-request :not :to-have-been-called)
+        (let ((action-buffer (macher-action-buffer)))
+          (expect (buffer-live-p action-buffer) :to-be-truthy)
+          (expect (with-current-buffer action-buffer
+                    (buffer-string))
+                  :to-match "test prompt"))))
+
+    (it "exposes draft mode on the execution when called with a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let* ((captured-draft 'unset)
+               (macher-before-action-functions
+                (list
+                 (lambda (execution)
+                   (setq captured-draft (macher-action-execution-draft execution)))))
+               (current-prefix-arg '(4)))
+          (macher-action 'implement nil "test prompt")
+          ;; Before-action functions can see that this is a draft request.
+          (expect captured-draft :to-be-truthy)
+          (expect 'gptel-request :not :to-have-been-called))))
+
+    (it "does not mark the execution as a draft without a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let* ((captured-draft 'unset)
+               (macher-before-action-functions
+                (list
+                 (lambda (execution)
+                   (setq captured-draft (macher-action-execution-draft execution)))))
+               (current-prefix-arg nil))
+          (macher-action 'implement nil "test prompt")
+          ;; Not a draft: the field is nil and the request is sent.
+          (expect captured-draft :to-be nil)
+          (expect 'gptel-request :to-have-been-called))))
+
+    (it "still runs the before-action functions when called with a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let* ((before-called nil)
+               (macher-before-action-functions (list (lambda (_execution) (setq before-called t))))
+               (current-prefix-arg '(4)))
+          (macher-action 'implement nil "test prompt")
+          ;; The before-action functions run even though the request is not sent.
+          (expect before-called :to-be-truthy)
+          (expect 'gptel-request :not :to-have-been-called))))
+
+    (it "selects the action buffer window when called with a prefix argument"
+      (with-current-buffer project-file-buffer
+        (let ((current-prefix-arg '(4)))
+          ;; Start from a single window so the action buffer gets a fresh one.
+          (delete-other-windows)
+          (macher-action 'implement nil "test prompt")
+          (let ((action-buffer (macher-action-buffer)))
+            ;; The action buffer should be displayed and its window selected, so the user can edit
+            ;; the populated prompt right away.
+            (expect (get-buffer-window action-buffer t) :to-be-truthy)
+            (expect (selected-window) :to-equal (get-buffer-window action-buffer t)))))))
 
   (describe "macher--add-transition-handler"
     :var (fsm test-handler handler-calls)
@@ -5635,6 +5882,43 @@
             (kill-ring nil))
         (macher-focus-string t)
         (expect (car kill-ring) :to-equal "interactive-test"))))
+
+  (describe "macher--action-from-region-or-input"
+    (it "uses a blank request without prompting when called with a prefix argument"
+      (spy-on 'read-string :and-return-value "from-minibuffer")
+      (let* ((current-prefix-arg '(4))
+             (transform (lambda (input is-selected) (cons input is-selected)))
+             (result (macher--action-from-region-or-input "To implement: " transform 'macher)))
+        (expect 'read-string :not :to-have-been-called)
+        (expect (plist-get result :summary) :to-equal "")
+        (expect (car (plist-get result :prompt)) :to-equal "")
+        (expect (cdr (plist-get result :prompt)) :to-be nil)))
+
+    (it "prefers an active region over a blank request with a prefix argument"
+      (spy-on 'read-string :and-return-value "from-minibuffer")
+      (with-temp-buffer
+        (insert "selected region text")
+        (goto-char (point-min))
+        (set-mark (point))
+        (goto-char (point-max))
+        (activate-mark)
+        (let* ((current-prefix-arg '(4))
+               (transform (lambda (input is-selected) (cons input is-selected)))
+               (result (macher--action-from-region-or-input "To implement: " transform 'macher)))
+          (expect 'read-string :not :to-have-been-called)
+          (expect (plist-get result :summary) :to-equal "selected region text")
+          (expect (car (plist-get result :prompt)) :to-equal "selected region text")
+          (expect (cdr (plist-get result :prompt)) :to-be-truthy))))
+
+    (it "prompts in the minibuffer with no region and no prefix argument"
+      (spy-on 'read-string :and-return-value "typed input")
+      (let* ((current-prefix-arg nil)
+             (transform (lambda (input is-selected) (cons input is-selected)))
+             (result (macher--action-from-region-or-input "To implement: " transform 'macher)))
+        (expect 'read-string :to-have-been-called)
+        (expect (plist-get result :summary) :to-equal "typed input")
+        (expect (car (plist-get result :prompt)) :to-equal "typed input")
+        (expect (cdr (plist-get result :prompt)) :to-be nil))))
 
   (describe "macher--implement-prompt"
     :var (temp-file)
@@ -6823,9 +7107,9 @@
       (setq macher-context-string-placeholder original-placeholder)
       (setq macher-context-string-function original-context-fn))
 
-    (it "replaces placeholder in gptel--system-message"
+    (it "replaces placeholder in gptel-system-prompt"
       (let* ((macher-context-string-function (lambda () "INJECTED CONTEXT"))
-             (gptel--system-message (concat "You are helpful." macher-context-string-placeholder))
+             (gptel-system-prompt (concat "You are helpful." macher-context-string-placeholder))
              (callback-called nil)
              (callback (lambda () (setq callback-called t)))
              (fsm (gptel-make-fsm)))
@@ -6834,14 +7118,14 @@
             (setf (gptel-fsm-info fsm) (list :buffer test-buffer))
             (macher--transform-system-replace-placeholder callback fsm)
             (expect callback-called :to-be t)
-            (expect gptel--system-message :to-match "INJECTED CONTEXT")
-            (expect gptel--system-message
+            (expect gptel-system-prompt :to-match "INJECTED CONTEXT")
+            (expect gptel-system-prompt
                     :not
                     :to-match (regexp-quote macher-context-string-placeholder))))))
 
     (it "always calls callback even when no replacement needed"
       (let* ((macher-context-string-function (lambda () "CTX"))
-             (gptel--system-message "No placeholder here")
+             (gptel-system-prompt "No placeholder here")
              (callback-called nil)
              (callback (lambda () (setq callback-called t)))
              (fsm (gptel-make-fsm)))
@@ -6849,10 +7133,10 @@
           (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
           (macher--transform-system-replace-placeholder callback fsm)
           (expect callback-called :to-be t)
-          (expect gptel--system-message :to-equal "No placeholder here"))))
+          (expect gptel-system-prompt :to-equal "No placeholder here"))))
 
     (it "handles nil buffer gracefully"
-      (let* ((gptel--system-message "Test message")
+      (let* ((gptel-system-prompt "Test message")
              (callback-called nil)
              (callback (lambda () (setq callback-called t)))
              (fsm (gptel-make-fsm)))
@@ -6861,7 +7145,7 @@
         (expect callback-called :to-be t)))
 
     (it "handles dead buffer gracefully"
-      (let* ((gptel--system-message "Test message")
+      (let* ((gptel-system-prompt "Test message")
              (callback-called nil)
              (callback (lambda () (setq callback-called t)))
              (fsm (gptel-make-fsm))
@@ -6872,7 +7156,7 @@
         (expect callback-called :to-be t)))
 
     (it "handles nil fsm info gracefully"
-      (let* ((gptel--system-message "Test message")
+      (let* ((gptel-system-prompt "Test message")
              (callback-called nil)
              (callback (lambda () (setq callback-called t)))
              (fsm (gptel-make-fsm)))
@@ -6886,7 +7170,7 @@
               (lambda ()
                 (setq captured-buffer (current-buffer))
                 "CTX"))
-             (gptel--system-message (concat "Message" macher-context-string-placeholder))
+             (gptel-system-prompt (concat "Message" macher-context-string-placeholder))
              (callback (lambda ()))
              (fsm (gptel-make-fsm)))
         (with-temp-buffer
@@ -6897,16 +7181,16 @@
               (macher--transform-system-replace-placeholder callback fsm))
             (expect captured-buffer :to-be request-buffer)))))
 
-    (it "modifies gptel--system-message in transform buffer"
+    (it "modifies gptel-system-prompt in transform buffer"
       (let* ((macher-context-string-function (lambda () "CTX"))
-             (gptel--system-message (concat "Original" macher-context-string-placeholder))
+             (gptel-system-prompt (concat "Original" macher-context-string-placeholder))
              (callback (lambda ()))
              (fsm (gptel-make-fsm)))
         (with-temp-buffer
           (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
           (macher--transform-system-replace-placeholder callback fsm)
-          ;; gptel--system-message should be modified.
-          (expect gptel--system-message :to-match "CTX"))))
+          ;; gptel-system-prompt should be modified.
+          (expect gptel-system-prompt :to-match "CTX"))))
 
     (describe "called multiple times"
       (it "is safe to call multiple times"
@@ -6915,7 +7199,7 @@
                 (lambda ()
                   (setq call-count (1+ call-count))
                   "CTX"))
-               (gptel--system-message (concat "Message" macher-context-string-placeholder))
+               (gptel-system-prompt (concat "Message" macher-context-string-placeholder))
                (callback (lambda ()))
                (fsm (gptel-make-fsm)))
           (with-temp-buffer
@@ -6926,23 +7210,23 @@
             (expect call-count :to-be 3)
             ;; Context function called once per transform call, but replacement only happens
             ;; when placeholder is present.
-            (expect gptel--system-message :to-match "CTX")
-            (expect gptel--system-message
+            (expect gptel-system-prompt :to-match "CTX")
+            (expect gptel-system-prompt
                     :not
                     :to-match (regexp-quote macher-context-string-placeholder)))))
 
       (it "does not accumulate context strings when called multiple times"
         (let* ((macher-context-string-function (lambda () "CTX"))
-               (gptel--system-message (concat "Message" macher-context-string-placeholder))
+               (gptel-system-prompt (concat "Message" macher-context-string-placeholder))
                (callback (lambda ()))
                (fsm (gptel-make-fsm)))
           (with-temp-buffer
             (setf (gptel-fsm-info fsm) (list :buffer (current-buffer)))
             ;; Call multiple times.
             (macher--transform-system-replace-placeholder callback fsm)
-            (let ((first-result gptel--system-message))
+            (let ((first-result gptel-system-prompt))
               (macher--transform-system-replace-placeholder callback fsm)
-              (let ((second-result gptel--system-message))
+              (let ((second-result gptel-system-prompt))
                 ;; Results should be identical.
                 (expect first-result :to-equal second-result)
                 ;; Should only have one context string marker.

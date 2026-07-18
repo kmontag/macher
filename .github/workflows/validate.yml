@@ -20,7 +20,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
 
       - name: Check formatting
@@ -29,70 +29,93 @@ jobs:
       - name: Lint
         run: make lint
 
-  compile:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      emacs-versions: ${{ steps.versions.outputs.emacs-versions }}
     steps:
-      - uses: actions/checkout@v4
+      - id: versions
+        run: |
+          # "release-snapshot" is the pretest build of the current release branch (Emacs 31 as of
+          # writing). There's no tagged Emacs 31 in nix-emacs-ci yet; swap this for the version
+          # number once one exists.
+          echo "emacs-versions=[\"30.1\",\"release-snapshot\"]" >> "$GITHUB_OUTPUT"
+
+  compile:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emacs-version: ${{ fromJson(needs.prepare.outputs.emacs-versions) }}
+    name: compile (emacs ${{ matrix.emacs-version }})
+    steps:
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+        with:
+          emacs-version: ${{ matrix.emacs-version }}
 
       - name: Check for compilation errors
         run: make compile
 
   test:
+    needs: prepare
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emacs-version: ${{ fromJson(needs.prepare.outputs.emacs-versions) }}
+    name: test (emacs ${{ matrix.emacs-version }})
     permissions:
       contents: read
       models: read
+    # Serialize test jobs so only one is hitting the GitHub Models API at a
+    # time. The matrix legs and concurrent pushes can otherwise pile up and
+    # trigger rate limiting (HTTP 429).
+    concurrency:
+      group: test-${{ github.ref }}
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-
-      # If GitHub Models are down due to rate limiting or service issues, functional tests can fall
-      # back to using ollama, it'll just be rather slow.
-      - name: Check GitHub Models availability
-        id: check-github-models
-        continue-on-error: true
-        run: |
-          # Test if GitHub Models API is accessible by sending a minimal request.
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{"messages":[{"role":"user","content":"test"}],"model":"gpt-4o-mini","max_tokens":1}' \
-            "https://models.github.ai/inference/chat/completions")
-
-          if [ "$HTTP_CODE" = "429" ] || [ "$HTTP_CODE" = "503" ] || [ "$HTTP_CODE" = "500" ]; then
-            echo "GitHub Models API returned $HTTP_CODE, will fall back to Ollama"
-            echo "available=false" >> $GITHUB_OUTPUT
-            exit 0
-          else
-            echo "GitHub Models API is available (HTTP $HTTP_CODE)"
-            echo "available=true" >> $GITHUB_OUTPUT
-          fi
-
-      # Note this also starts the ollama server.
-      - name: Install Ollama
-        if: steps.check-github-models.outputs.available == 'false'
-        uses: ai-action/setup-ollama@v1
-
-      # See https://github.com/ai-action/setup-ollama/issues/40.
-      - name: Cache Ollama
-        if: steps.check-github-models.outputs.available == 'false'
-        id: cache-artifacts
-        uses: actions/cache@v4
         with:
-          path: ~/.ollama
-          key: ${{ runner.os }}-ollama
-
-      - name: Pull Ollama model
-        if: steps.check-github-models.outputs.available == 'false'
-        run: |
-          MODEL_NAME=$(grep -o 'ollama-model "[^"]*"' tests/test-functional.el | cut -d'"' -f2)
-          ollama pull "$MODEL_NAME"
+          emacs-version: ${{ matrix.emacs-version }}
 
       - name: Run tests
+        uses: nick-fields/retry@v4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Disable GitHub Models in tests if the API is not available.
-          MACHER_DISABLE_GITHUB_MODELS: ${{ steps.check-github-models.outputs.available == 'false' && '1' || '' }}
-        run: make test
+          MACHER_TEST_OPENAI_BASE_URL: https://models.github.ai/inference
+          MACHER_TEST_OPENAI_KEY: ${{ secrets.GITHUB_TOKEN }}
+          MACHER_TEST_OPENAI_MODEL: gpt-4o-mini
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_wait_seconds: 60
+          # The command below runs `make test` and inspects the output:
+          # - On an HTTP 429 (rate limiting), it exits 75 to trigger a retry.
+          # - On success, it checks for the skip message emitted by the
+          #   `assume' call in tests/test-functional.el, which fires when the
+          #   test endpoint isn't configured. Buttercup still exits 0 in that
+          #   case, so without this check a misconfigured CI run would pass
+          #   with the functional tests silently skipped.
+          # `retry_on_exit_code` makes the retry action only re-run for
+          # exit code 75; any other non-zero code fails immediately.
+          retry_on_exit_code: 75
+          command: |
+            set +e
+            set -o pipefail
+            make test 2>&1 | tee /tmp/macher-test-output.log
+            status=${PIPESTATUS[0]}
+            if [ "$status" -eq 0 ]; then
+              if grep -qF 'MACHER_TEST_OPENAI_BASE_URL not set' /tmp/macher-test-output.log; then
+                echo "::error::Functional tests were skipped; the test endpoint is not configured."
+                exit 1
+              fi
+              exit 0
+            fi
+            if grep -Eq "HTTP/[0-9.]+ 429" /tmp/macher-test-output.log; then
+              echo "::warning::Test failure involved an HTTP 429 (rate limit); retrying."
+              exit 75
+            fi
+            exit "$status"
