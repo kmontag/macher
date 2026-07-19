@@ -1679,6 +1679,28 @@ the content with `org-escape-code-in-string'."
             (insert "#+begin_src " lang "\n" (org-escape-code-in-string content) "#+end_src")))))
     (buffer-string)))
 
+(defun macher--action-source-location (execution)
+  "Return a short location string for EXECUTION's source buffer, or nil.
+
+The location has the form \"NAME:LINE\" (or \"NAME:START-END\" when a
+region is active in the source buffer), where NAME is the base filename
+of the source buffer's file, or the buffer name for non-file buffers.
+Returns nil if the source buffer is not set or no longer live."
+  (when-let* ((source (macher-action-execution-source execution))
+              ((buffer-live-p source)))
+    (with-current-buffer source
+      (let ((name
+             (if buffer-file-name
+                 (file-name-nondirectory buffer-file-name)
+               (buffer-name))))
+        (if (use-region-p)
+            (let ((start-line (line-number-at-pos (region-beginning)))
+                  (end-line (line-number-at-pos (region-end))))
+              (if (= start-line end-line)
+                  (format "%s:%d" name start-line)
+                (format "%s:%d-%d" name start-line end-line)))
+          (format "%s:%d" name (line-number-at-pos (point))))))))
+
 (defun macher--before-action-insert-prompt (execution)
   "Insert the action prompt into the current buffer.
 
@@ -1710,7 +1732,11 @@ This is added buffer-locally to `macher-before-action-functions' by
       ;; Add another newline if we're not at the beginning of the buffer, for visual clarity.
       (unless (bobp)
         (insert "\n"))
-      (let* ((header-prefix "* ")
+      (let* ((location (macher--action-source-location execution))
+             (header-prefix
+              (if location
+                  (format "* %s: " location)
+                "* "))
              (header-postfix (format " :%s:" action))
              (summary (macher-action-execution-summary execution))
              ;; Extract the first non-whitespace line from the summary and truncate to fill-column.

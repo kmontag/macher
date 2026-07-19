@@ -5118,8 +5118,92 @@
               ;; Check that the topic follows the expected format.
               (expect
                content
-               :to-match ":GPTEL_TOPIC: macher-discuss-[0-9]\\{14\\}-test-prompt-for-topic-setting")))))))
+               :to-match ":GPTEL_TOPIC: macher-discuss-[0-9]\\{14\\}-test-prompt-for-topic-setting")))))
 
+      (it "includes the source location in the topic heading"
+        (let ((source (generate-new-buffer "*test-location-source*")))
+          (unwind-protect
+              (progn
+                (with-current-buffer source
+                  (insert "one\ntwo\nthree\n")
+                  (setq buffer-file-name "/some/dir/source.el")
+                  (set-buffer-modified-p nil)
+                  (goto-char (point-min))
+                  (forward-line 2))
+                (with-temp-buffer
+                  (org-mode)
+                  (gptel-mode 1)
+                  (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+                  (let ((execution
+                         (macher--make-action-execution
+                          :action 'implement
+                          :prompt "Test prompt"
+                          :summary "Do the thing"
+                          :buffer (current-buffer)
+                          :source source)))
+                    (macher--before-action-insert-prompt execution)
+                    (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+                      (expect content :to-match "^\\* source\\.el:3: Do the thing :implement:")))))
+            (kill-buffer source))))))
+
+
+  (describe "macher--action-source-location"
+    (it "returns nil when the execution has no source buffer"
+      (let ((execution (macher--make-action-execution :action 'test)))
+        (expect (macher--action-source-location execution) :to-be nil)))
+
+    (it "returns nil when the source buffer has been killed"
+      (let ((buf (generate-new-buffer "*test-dead-source*")))
+        (kill-buffer buf)
+        (let ((execution (macher--make-action-execution :action 'test :source buf)))
+          (expect (macher--action-source-location execution) :to-be nil))))
+
+    (it "uses the base filename and line number for file buffers"
+      (with-temp-buffer
+        (insert "line one\nline two\nline three\n")
+        (setq buffer-file-name "/some/dir/test.js")
+        (set-buffer-modified-p nil)
+        (goto-char (point-min))
+        (forward-line 1)
+        (let ((execution (macher--make-action-execution :action 'test :source (current-buffer))))
+          (expect (macher--action-source-location execution) :to-equal "test.js:2"))))
+
+    (it "uses the buffer name for non-file buffers"
+      (let ((buf (generate-new-buffer "*test-source-name*")))
+        (unwind-protect
+            (with-current-buffer buf
+              (insert "hello\nworld\n")
+              (goto-char (point-min))
+              (let ((execution (macher--make-action-execution :action 'test :source buf)))
+                (expect (macher--action-source-location execution)
+                        :to-equal "*test-source-name*:1")))
+          (kill-buffer buf))))
+
+    (it "uses a single line number when the region is within one line"
+      (with-temp-buffer
+        (insert "line one\nline two\nline three\n")
+        (setq buffer-file-name "/some/dir/test.js")
+        (set-buffer-modified-p nil)
+        (goto-char (point-min))
+        (forward-line 1)
+        (set-mark (point))
+        (end-of-line)
+        (activate-mark)
+        (let ((execution (macher--make-action-execution :action 'test :source (current-buffer))))
+          (expect (macher--action-source-location execution) :to-equal "test.js:2"))))
+
+    (it "uses a line range when a multi-line region is active"
+      (with-temp-buffer
+        (insert "line one\nline two\nline three\nline four\n")
+        (setq buffer-file-name "/some/dir/test.js")
+        (set-buffer-modified-p nil)
+        (goto-char (point-min))
+        (forward-line 1)
+        (set-mark (point))
+        (forward-line 2)
+        (activate-mark)
+        (let ((execution (macher--make-action-execution :action 'test :source (current-buffer))))
+          (expect (macher--action-source-location execution) :to-equal "test.js:2-4")))))
 
   (describe "macher--before-action-scroll"
     (it "updates window point to match buffer point"

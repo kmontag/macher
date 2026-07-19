@@ -2464,7 +2464,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (let ((buffer-content (buffer-substring-no-properties (point-min) (point-max))))
                 ;; Check for topic heading.
                 (expect buffer-content
-                        :to-match "^\\* Test successful request with org :discuss:\n")
+                        :to-match "^\\* main\\.el:1: Test successful request with org :discuss:\n")
                 ;; Check for GPTEL_TOPIC property.
                 (expect
                  buffer-content
