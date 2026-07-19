@@ -4987,6 +4987,20 @@
               (expect content :to-match "^### Test prompt$"))))))
 
     (describe "text properties"
+      :var (source)
+
+      (before-each
+        (setq source (generate-new-buffer "*test-source*"))
+        (with-current-buffer source
+          (insert "line one\nline two\n")
+          (setq buffer-file-name "/some/dir/source.el")
+          (set-buffer-modified-p nil)
+          (goto-char (point-min))))
+
+      (after-each
+        (when (buffer-live-p source)
+          (kill-buffer source)))
+
       (it "sets gptel 'ignore property on the header line"
         (with-temp-buffer
           (org-mode)
@@ -4997,7 +5011,8 @@
                   :action 'test
                   :prompt "Test prompt"
                   :summary "Test prompt"
-                  :buffer (current-buffer))))
+                  :buffer (current-buffer)
+                  :source source)))
             (macher--before-action-insert-prompt execution)
             ;; Find the header line and check its text property.
             (goto-char (point-min))
@@ -5017,7 +5032,8 @@
                   :action 'test
                   :prompt "Test prompt content"
                   :summary "Test prompt"
-                  :buffer (current-buffer))))
+                  :buffer (current-buffer)
+                  :source source)))
             (macher--before-action-insert-prompt execution)
             ;; Find where the prompt starts (after header and prefix).
             (goto-char (point-min))
@@ -5036,7 +5052,8 @@
                   :action 'test
                   :prompt "User message content"
                   :summary "Summary"
-                  :buffer (current-buffer))))
+                  :buffer (current-buffer)
+                  :source source)))
             (macher--before-action-insert-prompt execution)
             ;; Now parse the buffer as gptel would.
             (goto-char (point-max))
@@ -5058,6 +5075,20 @@
                       :to-be nil))))))
 
     (describe "org mode behavior"
+      :var (source)
+
+      (before-each
+        (setq source (generate-new-buffer "*test-source*"))
+        (with-current-buffer source
+          (insert "line one\nline two\n")
+          (setq buffer-file-name "/some/dir/source.el")
+          (set-buffer-modified-p nil)
+          (goto-char (point-min))))
+
+      (after-each
+        (when (buffer-live-p source)
+          (kill-buffer source)))
+
       (it "folds source blocks after insertion"
         (with-temp-buffer
           (org-mode)
@@ -5068,7 +5099,8 @@
                   :action 'test
                   :prompt "Check this code:\n```python\nprint(\"hello world\")\n```"
                   :summary "Test prompt"
-                  :buffer (current-buffer))))
+                  :buffer (current-buffer)
+                  :source source)))
             (macher--before-action-insert-prompt execution)
             ;; Find the src block content line.
             (goto-char (point-min))
@@ -5090,7 +5122,8 @@
                  :action 'test
                  :prompt "Here is an example:\n#+begin_example\nsome example content\n#+end_example"
                  :summary "Test prompt"
-                 :buffer (current-buffer))))
+                 :buffer (current-buffer)
+                 :source source)))
             (macher--before-action-insert-prompt execution)
             ;; Find the example block content line.
             (goto-char (point-min))
@@ -5109,7 +5142,8 @@
                   :action 'discuss
                   :prompt "Test prompt for topic"
                   :summary "Test prompt for topic setting"
-                  :buffer (current-buffer))))
+                  :buffer (current-buffer)
+                  :source source)))
             (macher--before-action-insert-prompt execution)
             ;; The buffer should have a GPTEL_TOPIC property set.
             (let ((content (buffer-substring-no-properties (point-min) (point-max))))
@@ -5120,31 +5154,37 @@
                content
                :to-match ":GPTEL_TOPIC: macher-discuss-[0-9]\\{14\\}-test-prompt-for-topic-setting")))))
 
+      (it "renders the heading without a location when source is not set"
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'test
+                  :prompt "Test prompt"
+                  :summary "Test prompt"
+                  :buffer (current-buffer))))
+            (macher--before-action-insert-prompt execution)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect content :to-match "^\\* Test prompt :test:\n")
+              (expect content :not :to-match "source\\.el")))))
+
       (it "includes the source location in the topic heading"
-        (let ((source (generate-new-buffer "*test-location-source*")))
-          (unwind-protect
-              (progn
-                (with-current-buffer source
-                  (insert "one\ntwo\nthree\n")
-                  (setq buffer-file-name "/some/dir/source.el")
-                  (set-buffer-modified-p nil)
-                  (goto-char (point-min))
-                  (forward-line 2))
-                (with-temp-buffer
-                  (org-mode)
-                  (gptel-mode 1)
-                  (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
-                  (let ((execution
-                         (macher--make-action-execution
-                          :action 'implement
-                          :prompt "Test prompt"
-                          :summary "Do the thing"
-                          :buffer (current-buffer)
-                          :source source)))
-                    (macher--before-action-insert-prompt execution)
-                    (let ((content (buffer-substring-no-properties (point-min) (point-max))))
-                      (expect content :to-match "^\\* source\\.el:3: Do the thing :implement:")))))
-            (kill-buffer source))))))
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'implement
+                  :prompt "Test prompt"
+                  :summary "Do the thing"
+                  :buffer (current-buffer)
+                  :source source)))
+            (macher--before-action-insert-prompt execution)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect content :to-match "^\\* source\\.el:1: Do the thing :implement:")))))))
 
 
   (describe "macher--action-source-location"
