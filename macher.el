@@ -1679,27 +1679,40 @@ the content with `org-escape-code-in-string'."
             (insert "#+begin_src " lang "\n" (org-escape-code-in-string content) "#+end_src")))))
     (buffer-string)))
 
-(defun macher--action-source-location (execution)
-  "Return a short location string for EXECUTION's source buffer, or nil.
+(defun macher--action-source-name (execution)
+  "Return the source buffer's name for EXECUTION, or nil.
 
-The location has the form \"NAME:LINE\" (or \"NAME:START-END\" when a
-region is active in the source buffer), where NAME is the base filename
-of the source buffer's file, or the buffer name for non-file buffers.
-Returns nil if the source buffer is not set or no longer live."
+NAME is the base filename of the source buffer's file, or the buffer
+name for non-file buffers.  Returns nil if the source buffer is not
+set or no longer live."
   (when-let* ((source (macher-action-execution-source execution))
               ((buffer-live-p source)))
     (with-current-buffer source
-      (let ((name
-             (if buffer-file-name
-                 (file-name-nondirectory buffer-file-name)
-               (buffer-name))))
-        (if (use-region-p)
-            (let ((start-line (line-number-at-pos (region-beginning)))
-                  (end-line (line-number-at-pos (region-end))))
-              (if (= start-line end-line)
-                  (format "%s:%d" name start-line)
-                (format "%s:%d-%d" name start-line end-line)))
-          (format "%s:%d" name (line-number-at-pos (point))))))))
+      (if buffer-file-name
+          (file-name-nondirectory buffer-file-name)
+        (buffer-name)))))
+
+(defun macher--action-source-link (execution)
+  "Return an org file link for EXECUTION's source buffer, or nil.
+
+Returns a string of the form \"[[file:PATH::LINE][NAME]]\" where PATH
+is the absolute path of the source buffer's file, LINE is the line
+number of the cursor or the start of the active region, and NAME is
+the display string from `macher--action-source-name'.  The link
+target points at the start of the cursor position or region.
+
+Returns nil if the source buffer is not set, no longer live, or
+doesn't visit a file (file links only make sense for actual files)."
+  (when-let* ((source (macher-action-execution-source execution))
+              ((buffer-live-p source)))
+    (with-current-buffer source
+      (when buffer-file-name
+        (let ((name (macher--action-source-name execution))
+              (line
+               (if (use-region-p)
+                   (line-number-at-pos (region-beginning))
+                 (line-number-at-pos (point)))))
+          (format "[[file:%s::%d][%s]]" buffer-file-name line name))))))
 
 (defun macher--before-action-insert-prompt (execution)
   "Insert the action prompt into the current buffer.
@@ -1732,10 +1745,14 @@ This is added buffer-locally to `macher-before-action-functions' by
       ;; Add another newline if we're not at the beginning of the buffer, for visual clarity.
       (unless (bobp)
         (insert "\n"))
-      (let* ((location (macher--action-source-location execution))
+      (let* ((name (macher--action-source-name execution))
+             (link (macher--action-source-link execution))
+             ;; `header-prefix' is the visible width of the prefix (used for truncation math
+             ;; below).  When `link' is non-nil, the actual inserted bytes wrap the name in an
+             ;; org file link, but the visible width stays the same.
              (header-prefix
-              (if location
-                  (format "* %s: " location)
+              (if name
+                  (format "* %s: " name)
                 "* "))
              (header-postfix (format " :%s:" action))
              (summary (macher-action-execution-summary execution))
@@ -1755,7 +1772,12 @@ This is added buffer-locally to `macher-before-action-functions' by
         ;; Use the 'ignore property to omit the header from requests sent via normal gptel
         ;; conversational methods.
         (insert
-         (propertize (concat header-prefix truncated-summary header-postfix "\n") 'gptel 'ignore))
+         (propertize (concat
+                      (if link
+                          (format "* %s: " link)
+                        header-prefix)
+                      truncated-summary header-postfix "\n")
+                     'gptel 'ignore))
         (condition-case err
             (gptel-org-set-topic topic)
           (error
