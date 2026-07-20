@@ -2463,9 +2463,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Check that the content matches the expected org-mode format.
               (let ((buffer-content (buffer-substring-no-properties (point-min) (point-max))))
                 ;; Check for topic heading.
-                (expect
-                 buffer-content
-                 :to-match "^\\* \\[\\[file:.*main\\.el::1\\]\\[main\\.el\\]\\]: Test successful request with org :discuss:$")
+                (expect buffer-content
+                        :to-match "^\\* main\\.el: Test successful request with org :discuss:$")
                 ;; Check for GPTEL_TOPIC property.
                 (expect
                  buffer-content

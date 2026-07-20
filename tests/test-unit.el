@@ -5170,7 +5170,7 @@
               (expect content :to-match "^\\* Test prompt :test:$")
               (expect content :not :to-match "source\\.el")))))
 
-      (it "includes the source name in the topic heading as an org file link"
+      (it "includes the source name in the topic heading"
         (with-temp-buffer
           (org-mode)
           (gptel-mode 1)
@@ -5184,71 +5184,8 @@
                   :source source)))
             (macher--before-action-insert-prompt execution)
             (let ((content (buffer-substring-no-properties (point-min) (point-max))))
-              ;; The name is rendered as an org file link so it's clickable and face-distinct.
-              (expect
-               content
-               :to-match "^\\* \\[\\[file:/some/dir/source\\.el::1\\]\\[source\\.el\\]\\]: Do the thing :implement:$")))))))
-
-
-  (describe "macher--action-source-link"
-    (it "returns nil when the execution has no source buffer"
-      (let ((execution (macher--make-action-execution :action 'test)))
-        (expect (macher--action-source-link execution) :to-be nil)))
-
-    (it "returns nil when the source buffer has been killed"
-      (let ((buf (generate-new-buffer "*test-dead-source*")))
-        (kill-buffer buf)
-        (let ((execution (macher--make-action-execution :action 'test :source buf)))
-          (expect (macher--action-source-link execution) :to-be nil))))
-
-    (it "returns nil for non-file buffers"
-      (let ((buf (generate-new-buffer "*test-source-name*")))
-        (unwind-protect
-            (with-current-buffer buf
-              (insert "hello\nworld\n")
-              (goto-char (point-min))
-              (let ((execution (macher--make-action-execution :action 'test :source buf)))
-                (expect (macher--action-source-link execution) :to-be nil)))
-          (kill-buffer buf))))
-
-    (it "returns a file link for file buffers at the cursor position"
-      (with-temp-buffer
-        (insert "line one\nline two\nline three\n")
-        (setq buffer-file-name "/some/dir/test.js")
-        (set-buffer-modified-p nil)
-        (goto-char (point-min))
-        (forward-line 1)
-        (let ((execution (macher--make-action-execution :action 'test :source (current-buffer))))
-          (expect (macher--action-source-link execution)
-                  :to-equal "[[file:/some/dir/test.js::2][test.js]]"))))
-
-    (it "targets the start line for a multi-line region"
-      (with-temp-buffer
-        (insert "line one\nline two\nline three\nline four\n")
-        (setq buffer-file-name "/some/dir/test.js")
-        (set-buffer-modified-p nil)
-        (goto-char (point-min))
-        (forward-line 1)
-        (set-mark (point))
-        (forward-line 2)
-        (activate-mark)
-        (let ((execution (macher--make-action-execution :action 'test :source (current-buffer))))
-          (expect (macher--action-source-link execution)
-                  :to-equal "[[file:/some/dir/test.js::2][test.js]]"))))
-
-    (it "targets the cursor line when the region is within one line"
-      (with-temp-buffer
-        (insert "line one\nline two\nline three\n")
-        (setq buffer-file-name "/some/dir/test.js")
-        (set-buffer-modified-p nil)
-        (goto-char (point-min))
-        (forward-line 1)
-        (set-mark (point))
-        (end-of-line)
-        (activate-mark)
-        (let ((execution (macher--make-action-execution :action 'test :source (current-buffer))))
-          (expect (macher--action-source-link execution)
-                  :to-equal "[[file:/some/dir/test.js::2][test.js]]")))))
+              ;; The source name is rendered in the heading before the summary.
+              (expect content :to-match "^\\* source\\.el: Do the thing :implement:$")))))))
 
   (describe "macher--action-source-name"
     (it "returns nil when the execution has no source buffer"
