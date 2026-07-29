@@ -1,4 +1,6 @@
-NPM := npm
+# JavaScript package manager used to install dev dependencies. Defaults to npm; override on the
+# command line (e.g. `make NPM=pnpm`) or in Makefile.local (e.g. `NPM := pnpm`).
+NPM ?= npm
 EASK := node_modules/.bin/eask
 PRETTIER := node_modules/.bin/prettier
 
@@ -163,3 +165,8 @@ demo/output/%.mkv: demo/output/%.gif
 # blank-at-beginning issue. mp4's can be included inline in READMEs on GitHub.
 demo/output/%.mp4: demo/output/%.mkv
 	$(FFMPEG) -y -i "$<" "$@"
+
+# Remove installed dependencies and build artifacts.
+.PHONY: clean
+clean:
+	rm -rf node_modules/ .eask/ *.elc demo/output/
