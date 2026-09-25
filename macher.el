@@ -1061,7 +1061,55 @@ adding tools to this category directly; instead, customize
      ((:name
        "path"
        :type string
-       :description "Path to the file to delete, relative to workspace root"))))
+       :description "Path to the file to delete, relative to workspace root")))
+
+    (:name
+     "diff_workspace_changes"
+     :function macher--tool-diff-workspace
+     :description
+     ,(concat
+       "Show a unified diff of the changes you've made in your workspace, relative to the original "
+       "file contents.\n"
+       "\n"
+       "Use this to review your pending changes - for example before telling the user you're done, "
+       "or to check what a series of edits actually produced.\n"
+       "\n"
+       "Returns the diff, or a message saying so if you haven't changed anything. Optionally "
+       "restricted to a single file."
+       macher--workspace-postfix)
+     :confirm nil
+     :include nil
+     :args
+     ((:name
+       "path"
+       :type string
+       :optional t
+       :description "Path to a single file, relative to workspace root (defaults to all changed files)")))
+
+    (:name
+     "revert_workspace_changes"
+     :function macher--tool-revert-workspace
+     :description
+     ,(concat
+       "Discard changes you've made in your workspace, restoring the original file contents.\n"
+       "\n"
+       "Without a path, reverts every file you've changed. With a path, reverts only that file.\n"
+       "\n"
+       "Files you created stop existing again, and files you deleted come back. The originals are "
+       "the contents the workspace loaded, NOT the current contents on disk.\n"
+       "\n"
+       "This can't be undone - your edits to the reverted files are lost.\n"
+       "\n"
+       "Returns a summary of what was reverted."
+       macher--workspace-postfix)
+     :confirm nil
+     :include nil
+     :args
+     ((:name
+       "path"
+       :type string
+       :optional t
+       :description "Path to a single file, relative to workspace root (defaults to all changed files)"))))
   "List of macher tool definitions.
 
 Entries are plists of keyword arguments for `gptel-make-tool', except
@@ -2819,6 +2867,70 @@ changes."
                                   editable-content nil))
                                t))
 
+(defun macher--tool-diff-workspace (context &optional path)
+  "Show a unified diff of what has been modified in the workspace.
+
+CONTEXT is a `macher-context' struct containing workspace information.
+
+PATH, if non-nil, is the path to a single file relative to the workspace
+root, restricting the diff to that file.
+
+The diff is taken against the file contents as they were when the
+workspace first loaded them, which is the same baseline the final patch
+uses.
+
+Returns the diff text, or a message saying so if there are no changes."
+  (let* ((workspace (macher-context-workspace context))
+         (full-path
+          (unless (or (null path) (string-empty-p path))
+            (macher--resolve-workspace-path workspace path)))
+         (diff (macher--workspace-diff context full-path)))
+    (if (string-empty-p diff)
+        (if full-path
+            (format "No changes to '%s' in the workspace." path)
+          "No changes in the workspace.")
+      (macher--check-output-length diff "Diff")
+      diff)))
+
+(defun macher--tool-revert-workspace (context &optional path)
+  "Restore the original content of files modified in the workspace.
+
+CONTEXT is a `macher-context' struct containing workspace information.
+
+PATH, if non-nil, is the path to a single file relative to the workspace
+root, restricting the revert to that file.  Otherwise every changed file
+is reverted.
+
+Files are restored to the contents they had when the workspace first
+loaded them, not to whatever is on disk now.  Files created during the
+request go back to not existing, and files deleted during the request
+come back.
+
+Returns a summary of what was reverted."
+  (let* ((workspace (macher-context-workspace context))
+         (full-path
+          (unless (or (null path) (string-empty-p path))
+            (macher--resolve-workspace-path workspace path)))
+         (reverted nil))
+    (dolist (entry (macher-context-contents context))
+      (let ((contents (cdr entry)))
+        (when (and (or (null full-path) (equal (car entry) full-path))
+                   (not (equal (car contents) (cdr contents))))
+          ;; Restore the new content to the original.  For files created during the request the
+          ;; original is nil, which is already the canonical "doesn't exist" state.
+          (setcdr contents (car contents))
+          (push (macher--context-relative-name context (car entry)) reverted))))
+    (if (not reverted)
+        (if full-path
+            (format "No changes to '%s' to revert." path)
+          "No changes to revert.")
+      (format "Reverted %d file%s: %s"
+              (length reverted)
+              (if (= (length reverted) 1)
+                  ""
+                "s")
+              (string-join (sort reverted #'string<) ", ")))))
+
 (cl-defun macher--search-get-xref-matches (context pattern &key path file-regexp case-insensitive)
   "Get raw xref matches as an alist of ((filename . matches)).
 
@@ -3501,20 +3613,31 @@ throw off the counts."
         (setq deleted (1+ deleted)))))
     (cons added deleted)))
 
-(defun macher--generate-patch-diff (context)
-  "Generate a raw diff to populate the patch buffer.
-CONTEXT is the `macher-context' object.  Returns the generated diff text."
+(defun macher--workspace-diff (context &optional full-path)
+  "Generate a unified diff of the modifications recorded in CONTEXT.
+
+CONTEXT is a `macher-context' struct.
+
+FULL-PATH, if non-nil, is an absolute path to restrict the diff to.
+
+Returns the diff text, or an empty string if there are no changes."
   (let ((result ""))
     ;; Sort the contents list by filename for consistent patch ordering.
     (dolist (entry
              (sort (copy-sequence (macher-context-contents context))
                    (lambda (a b) (string< (car a) (car b)))))
-      (setq result
-            (concat
-             result
-             (macher--diff-strings
-              (cadr entry) (cddr entry) (macher--context-relative-name context (car entry))))))
+      (when (or (null full-path) (equal (car entry) full-path))
+        (setq result
+              (concat
+               result
+               (macher--diff-strings
+                (cadr entry) (cddr entry) (macher--context-relative-name context (car entry)))))))
     result))
+
+(defun macher--generate-patch-diff (context)
+  "Generate a raw diff to populate the patch buffer.
+CONTEXT is the `macher-context' object.  Returns the generated diff text."
+  (macher--workspace-diff context))
 
 ;;; Context Content Management
 

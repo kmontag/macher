@@ -1431,6 +1431,75 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Should contain the prompt for reference
               (expect "Test prompt to move a file" :to-appear-once-in patch)))))))
 
+  (describe "diff_workspace_changes and revert_workspace_changes"
+    (before-each
+      (funcall setup-project "diff-revert-tools" '(("test-file.txt" . "hello world\n"))))
+
+    (it "shows pending changes, for the whole workspace or a single file"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "edit_file_in_workspace"
+                     :arguments
+                     (:path "test-file.txt" :old_text "hello world" :new_text "goodbye world")))
+                   (:function (:name "diff_workspace_changes" :arguments nil))
+                   (:function (:name "diff_workspace_changes" :arguments (:path "test-file.txt")))])
+                 "I edited the file and reviewed the diff"))
+      (let ((callback-called nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt" (lambda (_cb-exit-code _cb-fsm) (setq callback-called t)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool"))
+                 (results (cadr tool-messages)))
+            (expect (length results) :to-be 3)
+            ;; Both the whole-workspace diff and the single-file diff show the edit.
+            (dolist (diff (cdr results))
+              (expect diff :to-match "diff --git a/test-file\\.txt b/test-file\\.txt")
+              (expect diff :to-match "^-hello world$")
+              (expect diff :to-match "^\\+goodbye world$"))))))
+
+    (it "reverts changes and leaves the workspace clean"
+      (funcall setup-backend
+               '((:tool-calls
+                  [(:function
+                    (:name
+                     "edit_file_in_workspace"
+                     :arguments
+                     (:path "test-file.txt" :old_text "hello world" :new_text "goodbye world")))
+                   (:function (:name "revert_workspace_changes" :arguments nil))
+                   (:function (:name "diff_workspace_changes" :arguments nil))])
+                 "I reverted my changes"))
+      (let ((callback-called nil))
+        (with-temp-buffer
+          (set-visited-file-name project-file)
+          (macher-test--send
+           'macher "Test prompt" (lambda (_cb-exit-code _cb-fsm) (setq callback-called t)))
+
+          (let ((timeout 0))
+            (while (and (not callback-called) (< timeout 100))
+              (sleep-for 0.1)
+              (setq timeout (1+ timeout))))
+
+          (expect callback-called :to-be-truthy)
+
+          (let* ((requests (funcall received-requests))
+                 (tool-messages (funcall messages-of-type requests "tool"))
+                 (results (cadr tool-messages)))
+            (expect (length results) :to-be 3)
+            (expect (nth 1 results) :to-equal "Reverted 1 file: test-file.txt")
+            (expect (nth 2 results) :to-equal "No changes in the workspace."))))))
+
   (describe "tool specs"
     (it "includes tools in request for macher presets"
       (funcall setup-backend '("Test response"))
