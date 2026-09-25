@@ -837,15 +837,15 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
           (expect callback-called :to-be-truthy)
 
-          ;; Check that received-requests contains a tool response with null (success).
+          ;; Check that received-requests contains a tool response summarizing the change.
           (let* ((requests (funcall received-requests))
                  (tool-messages (funcall messages-of-type requests "tool")))
             ;; We expect one element per received request.
             (expect (length tool-messages) :to-be 2)
             ;; No tool response included in the first request.
             (expect (car tool-messages) :to-be nil)
-            ;; Second request should contain null (success).
-            (expect (cadr tool-messages) :to-equal '("nil"))))))
+            ;; Second request should contain the change summary.
+            (expect (cadr tool-messages) :to-equal '("test-file.txt: +1 -1"))))))
 
     (it "performs replace_all edit"
       (funcall setup-backend
@@ -873,15 +873,15 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
           (expect callback-called :to-be-truthy)
 
-          ;; Check that received-requests contains a tool response with null (success).
+          ;; Check that received-requests contains a tool response summarizing the change.
           (let* ((requests (funcall received-requests))
                  (tool-messages (funcall messages-of-type requests "tool")))
             ;; We expect one element per received request.
             (expect (length tool-messages) :to-be 2)
             ;; No tool response included in the first request.
             (expect (car tool-messages) :to-be nil)
-            ;; Second request should contain null (success).
-            (expect (cadr tool-messages) :to-equal '("nil")))))))
+            ;; Second request should contain the change summary.
+            (expect (cadr tool-messages) :to-equal '("test-file.txt: +3 -3")))))))
 
   (describe "multi_edit_file_in_workspace"
     (before-each
@@ -919,15 +919,15 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
           (expect callback-called :to-be-truthy)
 
-          ;; Check that received-requests contains a tool response with null (success).
+          ;; Check that received-requests contains a tool response summarizing the change.
           (let* ((requests (funcall received-requests))
                  (tool-messages (funcall messages-of-type requests "tool")))
             ;; We expect one element per received request.
             (expect (length tool-messages) :to-be 2)
             ;; No tool response included in the first request.
             (expect (car tool-messages) :to-be nil)
-            ;; Second request should contain null (success).
-            (expect (cadr tool-messages) :to-equal '("nil"))))))
+            ;; Second request should contain the change summary.
+            (expect (cadr tool-messages) :to-equal '("test-file.txt: +2 -2"))))))
 
     (it "performs multiple edits with replace_all"
       (funcall setup-backend
@@ -959,15 +959,15 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
           (expect callback-called :to-be-truthy)
 
-          ;; Check that received-requests contains a tool response with null (success).
+          ;; Check that received-requests contains a tool response summarizing the change.
           (let* ((requests (funcall received-requests))
                  (tool-messages (funcall messages-of-type requests "tool")))
             ;; We expect one element per received request.
             (expect (length tool-messages) :to-be 2)
             ;; No tool response included in the first request.
             (expect (car tool-messages) :to-be nil)
-            ;; Second request should contain null (success).
-            (expect (cadr tool-messages) :to-equal '("nil")))))))
+            ;; Second request should contain the change summary.
+            (expect (cadr tool-messages) :to-equal '("test-file.txt: +3 -3")))))))
 
   (describe "delete_file_in_workspace"
     (before-each
@@ -999,15 +999,15 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
           (expect callback-called :to-be-truthy)
 
-          ;; Check that received-requests contains a tool response with null (success).
+          ;; Check that received-requests contains a tool response summarizing the change.
           (let* ((requests (funcall received-requests))
                  (tool-messages (funcall messages-of-type requests "tool")))
             ;; We expect one element per received request.
             (expect (length tool-messages) :to-be 2)
             ;; No tool response included in the first request.
             (expect (car tool-messages) :to-be nil)
-            ;; Second request should contain null (success).
-            (expect (cadr tool-messages) :to-equal '("nil"))))))
+            ;; Second request should contain the change summary.
+            (expect (cadr tool-messages) :to-equal '("test-file.txt: deleted, -1"))))))
 
     (it "returns error when trying to delete non-existent file"
       (funcall setup-backend
@@ -1122,15 +1122,15 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
           (expect callback-called :to-be-truthy)
 
-          ;; Check that received-requests contains a tool response with null (success).
+          ;; Check that received-requests contains a tool response summarizing the change.
           (let* ((requests (funcall received-requests))
                  (tool-messages (funcall messages-of-type requests "tool")))
             ;; We expect one element per received request.
             (expect (length tool-messages) :to-be 2)
             ;; No tool response included in the first request.
             (expect (car tool-messages) :to-be nil)
-            ;; Second request should contain null (success).
-            (expect (cadr tool-messages) :to-equal '("nil"))))))
+            ;; Second request should contain the change summary.
+            (expect (cadr tool-messages) :to-equal '("new-file.txt: created, +1"))))))
 
     (it "overwrites existing file successfully"
       (funcall setup-backend
@@ -1157,15 +1157,15 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
           (expect callback-called :to-be-truthy)
 
-          ;; Check that received-requests contains a tool response with null (success).
+          ;; Check that received-requests contains a tool response summarizing the change.
           (let* ((requests (funcall received-requests))
                  (tool-messages (funcall messages-of-type requests "tool")))
             ;; We expect one element per received request.
             (expect (length tool-messages) :to-be 2)
             ;; No tool response included in the first request.
             (expect (car tool-messages) :to-be nil)
-            ;; Second request should contain null (success).
-            (expect (cadr tool-messages) :to-equal '("nil"))))))
+            ;; Second request should contain the change summary.
+            (expect (cadr tool-messages) :to-equal '("existing-file.txt: +1 -1"))))))
 
     (it "generates proper diff when file is created"
       (funcall setup-backend
@@ -1246,15 +1246,16 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
           (expect callback-called :to-be-truthy)
 
-          ;; Check that received-requests contains a tool response with null (success).
+          ;; Check that received-requests contains a tool response summarizing the change.
           (let* ((requests (funcall received-requests))
                  (tool-messages (funcall messages-of-type requests "tool")))
             ;; We expect one element per received request.
             (expect (length tool-messages) :to-be 2)
             ;; No tool response included in the first request.
             (expect (car tool-messages) :to-be nil)
-            ;; Second request should contain null (success).
-            (expect (cadr tool-messages) :to-equal '("nil"))))))
+            ;; Second request should contain the change summary.
+            (expect (cadr tool-messages)
+                    :to-equal '("source-file.txt -> destination-file.txt: moved"))))))
 
     (it "renames a file in the same directory successfully"
       (funcall setup-backend
@@ -1282,15 +1283,16 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
           (expect callback-called :to-be-truthy)
 
-          ;; Check that received-requests contains a tool response with null (success).
+          ;; Check that received-requests contains a tool response summarizing the change.
           (let* ((requests (funcall received-requests))
                  (tool-messages (funcall messages-of-type requests "tool")))
             ;; We expect one element per received request.
             (expect (length tool-messages) :to-be 2)
             ;; No tool response included in the first request.
             (expect (car tool-messages) :to-be nil)
-            ;; Second request should contain null (success).
-            (expect (cadr tool-messages) :to-equal '("nil"))))))
+            ;; Second request should contain the change summary.
+            (expect (cadr tool-messages)
+                    :to-equal '("source-file.txt -> renamed-file.txt: moved"))))))
 
     (it "returns error when source file doesn't exist"
       (funcall setup-backend
@@ -2867,7 +2869,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (let ((search-result (cadr tool-messages)))
               ;; Both the edit call and the search call were included in a single response.
               (expect (length search-result) :to-be 2)
-              (expect (car search-result) :to-equal "nil")
+              (expect (car search-result) :to-equal "src/main.js: +1 -1")
               (let ((search-content (cadr search-result))
                     (expected-content
                      (concat
@@ -3882,8 +3884,8 @@ Sets `test-patch-content' to the generated patch content for additional assertio
             (expect (length requests) :to-be 3)
             ;; First request has no tool response.
             (expect (nth 0 tool-messages) :to-be nil)
-            ;; Second request has write tool response (nil for success).
-            (expect (nth 1 tool-messages) :to-equal '("nil"))
+            ;; Second request has the write tool response.
+            (expect (nth 1 tool-messages) :to-equal '("shared-test.txt: created, +1"))
             ;; Third request contains read tool response with the written content.  This is the
             ;; critical assertion - read saw what write created.  The response might also include
             ;; the previous write response, so check membership.
