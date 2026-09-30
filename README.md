@@ -228,8 +228,6 @@ Available tools:
 - `move_file_in_workspace`: Move/rename files
 - `delete_file_in_workspace`: Delete files
 
-The tools that modify the workspace return a summary of the change, e.g. `foo.el: +12 -3`.
-
 When `macher-install` is called, these tools are registered with gptel but not activated. The
 `@macher` and `@macher-ro` presets activate the appropriate subsets.
 
