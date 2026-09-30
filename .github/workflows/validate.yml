@@ -68,54 +68,75 @@ jobs:
     name: test (emacs ${{ matrix.emacs-version }})
     permissions:
       contents: read
-      models: read
-    # Serialize test jobs so only one is hitting the GitHub Models API at a
-    # time. The matrix legs and concurrent pushes can otherwise pile up and
-    # trigger rate limiting (HTTP 429).
-    concurrency:
-      group: test-${{ github.ref }}
-      cancel-in-progress: false
+    # Replaces the timeout the retry action used to impose, so a wedged model server can't
+    # keep the job alive for the default six hours.
+    timeout-minutes: 20
+    env:
+      # The functional tests need a real LLM, so CI runs one on the runner itself. The
+      # image and the model are pinned together: the flags below are parsed by that image,
+      # and they have changed under us before (`--reasoning off` used to be spelled
+      # `--chat-template-kwargs '{"enable_thinking":false}'`, which it now rejects as
+      # deprecated).
+      LLAMA_IMAGE: ghcr.io/ggml-org/llama.cpp:server@sha256:970168341efef973da5666ea5c362fa428ee66ba0dfa621b0f69bf3feb3320f7
+      LLAMA_MODEL: unsloth/Qwen3-0.6B-GGUF:Q4_K_M
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           emacs-version: ${{ matrix.emacs-version }}
 
-      - name: Run tests
-        uses: nick-fields/retry@v4
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MACHER_TEST_OPENAI_BASE_URL: https://models.github.ai/inference
-          MACHER_TEST_OPENAI_KEY: ${{ secrets.GITHUB_TOKEN }}
-          MACHER_TEST_OPENAI_MODEL: gpt-4o-mini
+      - name: Cache the model
+        uses: actions/cache@v4
         with:
-          timeout_minutes: 10
-          max_attempts: 3
-          retry_wait_seconds: 60
-          # The command below runs `make test` and inspects the output:
-          # - On an HTTP 429 (rate limiting), it exits 75 to trigger a retry.
-          # - On success, it checks for the skip message emitted by the
-          #   `assume' call in tests/test-functional.el, which fires when the
-          #   test endpoint isn't configured. Buttercup still exits 0 in that
-          #   case, so without this check a misconfigured CI run would pass
-          #   with the functional tests silently skipped.
-          # `retry_on_exit_code` makes the retry action only re-run for
-          # exit code 75; any other non-zero code fails immediately.
-          retry_on_exit_code: 75
-          command: |
-            set +e
-            set -o pipefail
-            make test 2>&1 | tee /tmp/macher-test-output.log
-            status=${PIPESTATUS[0]}
-            if [ "$status" -eq 0 ]; then
-              if grep -qF 'MACHER_TEST_OPENAI_BASE_URL not set' /tmp/macher-test-output.log; then
-                echo "::error::Functional tests were skipped; the test endpoint is not configured."
-                exit 1
-              fi
+          path: ${{ runner.temp }}/llama-cache
+          key: llama-${{ env.LLAMA_MODEL }}
+
+      # A 0.6B model running on the runner's CPU is enough for these tests: the prompts are
+      # trivial and the assertions only check that the right tool was called with the right
+      # arguments.
+      #
+      # Two flags carry most of the weight:
+      #
+      # - `--reasoning off`, because Qwen3 is a hybrid-thinking model. Without it every tool
+      #   call is preceded by ~90 tokens of thinking, which also leak into the message
+      #   content. Generation dominates once the prompt is cached, so this is the difference
+      #   between roughly 2 and 10 seconds per request.
+      #
+      # - `--cache-reuse`, because a macher request is ~3700 tokens of which ~95% is the tool
+      #   definitions, identical from one request to the next. Reusing that prefix means it
+      #   is prefilled once for the whole suite instead of once per request.
+      - name: Start the model server
+        run: |
+          mkdir -p "$RUNNER_TEMP/llama-cache"
+          docker run -d --name llama -p 8080:8080 \
+            -e HF_HOME=/cache/hf \
+            -v "$RUNNER_TEMP/llama-cache:/cache" \
+            "$LLAMA_IMAGE" \
+            -hf "$LLAMA_MODEL" \
+            --jinja --reasoning off \
+            --ctx-size 8192 --cache-reuse 256 \
+            --host 0.0.0.0 --port 8080
+          # On a cache miss the server downloads the model before it starts listening.
+          for _ in $(seq 1 120); do
+            if curl -sf http://127.0.0.1:8080/health >/dev/null; then
+              echo "model server ready"
               exit 0
             fi
-            if grep -Eq "HTTP/[0-9.]+ 429" /tmp/macher-test-output.log; then
-              echo "::warning::Test failure involved an HTTP 429 (rate limit); retrying."
-              exit 75
-            fi
-            exit "$status"
+            sleep 5
+          done
+          echo "::error::The model server did not become ready."
+          docker logs llama
+          exit 1
+
+      - name: Run tests
+        env:
+          MACHER_TEST_OPENAI_BASE_URL: http://127.0.0.1:8080/v1
+          # llama-server needs no key, and serves whatever model it was started with
+          # regardless of the name the request asks for.
+          MACHER_TEST_OPENAI_KEY: unused
+          MACHER_TEST_OPENAI_MODEL: qwen3-0.6b
+          # Every spec is expected to run here, so a spec that skips itself - the
+          # functional tests do that when they can't see an endpoint - fails the job
+          # rather than passing quietly. See `macher-test-require-all-specs'.
+          MACHER_TEST_REQUIRE_ALL_SPECS: "1"
+        run: make test

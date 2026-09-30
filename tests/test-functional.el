@@ -12,8 +12,9 @@
 ;;   MACHER_TEST_OPENAI_MODEL to configure an OpenAI-compatible endpoint.
 ;;   If MACHER_TEST_OPENAI_BASE_URL is unset, all functional tests are
 ;;   skipped (registered but marked pending via `assume').
-;; - In CI, these are set in the workflow file.  Locally, they can be set
-;;   in a gitignored Makefile.local that the Makefile auto-includes.
+;; - In CI, they point at a small llama.cpp server started on the runner, so no
+;;   credentials are involved.  Locally, they can be set in a gitignored
+;;   Makefile.local that the Makefile auto-includes.
 
 ;;; Code:
 
