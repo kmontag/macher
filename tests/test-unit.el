@@ -7148,6 +7148,31 @@
         (expect (macher--tool-diff-workspace context "b.txt")
                 :to-equal "No changes to 'b.txt' in the workspace."))
 
+      (it "restricts the diff to the files under a directory"
+        (macher--tool-edit-file context "a.txt" "a one" "a 1" nil)
+        (macher--tool-write-file context "sub/c.txt" "c one\n")
+        (let ((diff (macher--tool-diff-workspace context "sub")))
+          (expect diff :to-match "diff --git a/sub/c.txt b/sub/c.txt")
+          (expect diff :not :to-match "a\\.txt")))
+
+      (it "reports when the given directory has no changes"
+        (make-directory (expand-file-name "sub" temp-dir))
+        (macher--tool-edit-file context "a.txt" "a one" "a 1" nil)
+        (expect (macher--tool-diff-workspace context "sub")
+                :to-equal "No changes to 'sub' in the workspace."))
+
+      (it "errors for a path that doesn't exist"
+        (expect (condition-case err
+                    (macher--tool-diff-workspace context "missing.txt")
+                  (error
+                   (error-message-string err)))
+                :to-match "missing\\.txt.* not found in workspace\\'"))
+
+      (it "errors for a file that was created and then deleted"
+        (macher--tool-write-file context "new.txt" "created\n")
+        (macher--tool-delete-file context "new.txt")
+        (expect (macher--tool-diff-workspace context "new.txt") :to-throw 'error))
+
       (it "errors for a path outside the workspace"
         (expect (macher--tool-diff-workspace context "../outside.txt") :to-throw)))
 
@@ -7189,6 +7214,57 @@
       (it "reports when the given file has no changes"
         (expect (macher--tool-revert-workspace context "a.txt")
                 :to-equal "No changes to 'a.txt' to revert."))
+
+      (it "reverts only the files under the named directory"
+        (macher--tool-edit-file context "a.txt" "a one" "a 1" nil)
+        (macher--tool-write-file context "sub/c.txt" "c one\n")
+        (macher--tool-write-file context "sub/deeper/d.txt" "d one\n")
+        (expect (macher--tool-revert-workspace context "sub")
+                :to-equal "Reverted 2 files: sub/c.txt, sub/deeper/d.txt")
+        (expect (macher--tool-diff-workspace context) :to-match "diff --git a/a.txt b/a.txt")
+        (expect (macher--tool-diff-workspace context) :not :to-match "sub/"))
+
+      (it "doesn't treat a sibling with a common prefix as part of a directory"
+        (macher--tool-write-file context "sub/c.txt" "c one\n")
+        (macher--tool-write-file context "subway.txt" "train\n")
+        (expect (macher--tool-revert-workspace context "sub")
+                :to-equal "Reverted 1 file: sub/c.txt"))
+
+      (it "errors for a path that doesn't exist"
+        (expect (condition-case err
+                    (macher--tool-revert-workspace context "missing.txt")
+                  (error
+                   (error-message-string err)))
+                :to-match "missing\\.txt.* not found in workspace\\'"))
+
+      (it "reverts both sides of a move when given the destination"
+        (macher--tool-move-file context "a.txt" "moved.txt")
+        (expect (macher--tool-revert-workspace context "moved.txt")
+                :to-equal "Reverted 2 files: a.txt, moved.txt")
+        (expect (macher--tool-diff-workspace context) :to-equal "No changes in the workspace."))
+
+      (it "reverts both sides of a move when given the source"
+        (macher--tool-move-file context "a.txt" "moved.txt")
+        (expect (macher--tool-revert-workspace context "a.txt")
+                :to-equal "Reverted 2 files: a.txt, moved.txt")
+        (expect (macher--tool-diff-workspace context) :to-equal "No changes in the workspace."))
+
+      (it "reverts every file in a chain of moves"
+        (macher--tool-move-file context "a.txt" "moved.txt")
+        (macher--tool-move-file context "moved.txt" "moved-again.txt")
+        (expect (macher--tool-revert-workspace context "moved-again.txt")
+                :to-equal "Reverted 2 files: a.txt, moved-again.txt")
+        (expect (macher--tool-diff-workspace context) :to-equal "No changes in the workspace."))
+
+      (it "forgets a move once it's been reverted"
+        (macher--tool-move-file context "a.txt" "moved.txt")
+        (macher--tool-revert-workspace context)
+        (expect (macher-context-moves context) :to-be nil)
+        (macher--tool-edit-file context "a.txt" "a one" "a 1" nil)
+        (macher--tool-write-file context "moved.txt" "unrelated\n")
+        (expect (macher--tool-revert-workspace context "moved.txt")
+                :to-equal "Reverted 1 file: moved.txt")
+        (expect (cddr (assoc file-a (macher-context-contents context))) :to-equal "a 1\na two\n"))
 
       (it "errors for a path outside the workspace"
         (expect (macher--tool-revert-workspace context "../outside.txt") :to-throw))
