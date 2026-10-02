@@ -223,6 +223,43 @@
         (macher--tool-delete-file context temp-file)
         (expect (macher-context-dirty-p context) :to-be-truthy)))
 
+    (describe "macher--tool-multi-edit-file"
+      (it "applies all edits in sequence"
+        (macher--tool-multi-edit-file
+         context temp-file
+         [(:old_text "original" :new_text "modified") (:old_text "content" :new_text "text")])
+        (let ((contents (macher-context-contents context)))
+          (expect (cdr (assoc temp-file contents))
+                  :to-equal '("original file content" . "modified file text"))))
+      (it "returns a summary covering all of the edits"
+        (expect (macher--tool-multi-edit-file
+                 context temp-file
+                 [(:old_text "original" :new_text "modified")
+                  (:old_text "content" :new_text "text")])
+                :to-equal (format "%s: +1 -1" (file-name-nondirectory temp-file)))))
+
+    (describe "tool result summaries"
+      (it "reports added and deleted lines for an edit"
+        (expect (macher--tool-edit-file context temp-file "original" "modified" nil)
+                :to-equal (format "%s: +1 -1" (file-name-nondirectory temp-file))))
+      (it "reports a write over an existing file as an ordinary change"
+        (expect (macher--tool-write-file context temp-file "new content")
+                :to-equal (format "%s: +1 -1" (file-name-nondirectory temp-file))))
+      (it "reports a write to a nonexistent file as a creation"
+        (let ((new-file (concat temp-file "-new")))
+          (expect (macher--tool-write-file context new-file "one\ntwo\n")
+                  :to-equal (format "%s: created, +2" (file-name-nondirectory new-file)))))
+      (it "reports a deletion"
+        (expect (macher--tool-delete-file context temp-file)
+                :to-equal (format "%s: deleted, -1" (file-name-nondirectory temp-file))))
+      (it "reports a move"
+        (let ((dest-file (concat temp-file "-moved")))
+          (expect (macher--tool-move-file context temp-file dest-file)
+                  :to-equal
+                  (format "%s -> %s: moved"
+                          (file-name-nondirectory temp-file)
+                          (file-name-nondirectory dest-file))))))
+
     (describe "macher--tool-edit-file"
       (it "edits file content with single replacement"
         (macher--tool-edit-file context temp-file "original" "modified" nil)
@@ -6723,6 +6760,58 @@
             ;; Modified file should NOT have any mode line.
             ;; Check by ensuring the modified.txt header is NOT followed by a mode line.
             (expect patch :to-match "diff --git a/modified.txt b/modified.txt\n---"))))))
+
+  (describe "macher--diff-strings"
+    (it "returns an empty string for identical contents"
+      (expect (macher--diff-strings "same" "same" "f.txt") :to-equal "")
+      (expect (macher--diff-strings nil nil "f.txt") :to-equal ""))
+
+    (it "includes a git header and a/b labels for modified files"
+      (let ((diff (macher--diff-strings "a\n" "b\n" "sub/f.txt")))
+        (expect diff :to-match "\\`diff --git a/sub/f.txt b/sub/f.txt\n")
+        (expect diff :to-match "^--- a/sub/f.txt")
+        (expect diff :to-match "^\\+\\+\\+ b/sub/f.txt")
+        (expect diff :not :to-match "file mode")))
+
+    (it "marks created files with a mode line and a /dev/null label"
+      (let ((diff (macher--diff-strings nil "new\n" "f.txt")))
+        (expect diff :to-match "new file mode 100644")
+        (expect diff :to-match "^--- /dev/null")))
+
+    (it "marks deleted files with a mode line and a /dev/null label"
+      (let ((diff (macher--diff-strings "old\n" nil "f.txt")))
+        (expect diff :to-match "deleted file mode 100644")
+        (expect diff :to-match "^\\+\\+\\+ /dev/null"))))
+
+  (describe "macher--diff-stat"
+    (it "counts added and deleted lines"
+      (expect (macher--diff-stat (macher--diff-strings "a\nb\nc\n" "a\nB\nc\nd\n" "f.txt"))
+              :to-equal '(2 . 1)))
+
+    (it "counts a created file as all additions"
+      (expect (macher--diff-stat (macher--diff-strings nil "one\ntwo\n" "f.txt"))
+              :to-equal '(2 . 0)))
+
+    (it "counts a deleted file as all deletions"
+      (expect (macher--diff-stat (macher--diff-strings "one\ntwo\n" nil "f.txt"))
+              :to-equal '(0 . 2)))
+
+    (it "returns zeroes for identical contents"
+      (expect (macher--diff-stat (macher--diff-strings "same\n" "same\n" "f.txt"))
+              :to-equal '(0 . 0)))
+
+    (it "counts content lines that look like diff headers"
+      ;; Content lines inside a hunk always carry a one-character prefix, so they can't be
+      ;; confused with the headers.
+      (expect (macher--diff-stat (macher--diff-strings "--- x\n" "+++ y\n" "f.txt"))
+              :to-equal '(1 . 1)))
+
+    (it "counts across multiple files in one diff"
+      (expect (macher--diff-stat
+               (concat
+                (macher--diff-strings "a\n" "b\n" "one.txt")
+                (macher--diff-strings nil "x\ny\n" "two.txt")))
+              :to-equal '(3 . 1))))
 
   (describe "macher--system-ensure-placeholder-or-context-string"
     :var (original-placeholder original-marker-start original-marker-end original-context-fn)

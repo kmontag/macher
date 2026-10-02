@@ -938,8 +938,9 @@ adding tools to this category directly; instead, customize
        "If replace_all=false and multiple matches exist: ERROR. Add more context to old_text to make "
        "the match unique.\n"
        "\n"
-       "Returns null on success. Fails if the file is not found, if the text to replace is not found, "
-       "or if multiple matches exist when replace_all is false."
+       "Returns a summary of the change (lines added/deleted) on success. Fails if the file is not "
+       "found, if the text to replace is not found, or if multiple matches exist when replace_all "
+       "is false."
        macher--workspace-postfix)
      :confirm nil
      :include nil
@@ -969,8 +970,9 @@ adding tools to this category directly; instead, customize
        "\n"
        "Edits apply in array order. If ANY edit fails, ALL changes are rolled back.\n"
        "\n"
-       "Returns null on success. Fails if the file is not found or if any individual edit fails "
-       "(text not found, multiple matches without replace_all, etc.)."
+       "Returns a summary of the change (lines added/deleted) on success. Fails if the file is not "
+       "found or if any individual edit fails (text not found, multiple matches without "
+       "replace_all, etc.)."
        macher--workspace-postfix)
      :confirm nil
      :include nil
@@ -1007,7 +1009,8 @@ adding tools to this category directly; instead, customize
        "\n"
        "WARNING: Overwrites ALL existing content. Use edit_file_in_workspace for partial changes.\n"
        "\n"
-       "Returns null on success. Fails if the path is invalid or outside the workspace."
+       "Returns a summary of the change (lines added/deleted) on success. Fails if the path is "
+       "invalid or outside the workspace."
        macher--workspace-postfix)
      :confirm nil
      :include nil
@@ -1027,7 +1030,7 @@ adding tools to this category directly; instead, customize
        "\n"
        "Fails if destination already exists.\n"
        "\n"
-       "Returns null on success."
+       "Returns a summary of the move on success."
        macher--workspace-postfix)
      :confirm nil
      :include nil
@@ -1050,7 +1053,7 @@ adding tools to this category directly; instead, customize
        "\n"
        "Fails if file doesn't exist.\n"
        "\n"
-       "Returns null on success."
+       "Returns a summary of the deletion on success."
        macher--workspace-postfix)
      :confirm nil
      :include nil
@@ -2249,6 +2252,27 @@ Returns the processed content as a string."
        (t
         (string-join selected-lines "\n"))))))
 
+(defun macher--context-relative-name (context full-path)
+  "Return FULL-PATH relative to the root of CONTEXT's workspace."
+  (file-relative-name full-path (macher--workspace-root (macher-context-workspace context))))
+
+(defun macher--change-summary (rel-path orig-content new-content)
+  "Summarize a change to REL-PATH from ORIG-CONTENT to NEW-CONTENT.
+
+ORIG-CONTENT and NEW-CONTENT are as in `macher--diff-strings'.
+
+Returns a short string with the number of lines added and deleted."
+  (let* ((stat (macher--diff-stat (macher--diff-strings orig-content new-content rel-path)))
+         (added (car stat))
+         (deleted (cdr stat)))
+    (cond
+     ((not new-content)
+      (format "%s: deleted, -%d" rel-path deleted))
+     ((not orig-content)
+      (format "%s: created, +%d" rel-path added))
+     (t
+      (format "%s: +%d -%d" rel-path added deleted)))))
+
 (defun macher--with-workspace-file (context path callback &optional set-dirty-p workspace-files)
   "Helper function to execute CALLBACK with workspace file content.
 
@@ -2616,9 +2640,9 @@ NEW-TEXT is the replacement text.
 REPLACE-ALL, if non-nil, replaces all occurrences; otherwise errors if
 multiple matches exist.
 
-Returns nil on success.  Signals an error if the file is not found or if
-the edit operation fails.  Sets the dirty-p flag on the context to
-indicate changes."
+Returns a summary of the change on success.  Signals an error if the
+file is not found or if the edit operation fails.  Sets the dirty-p flag
+on the context to indicate changes."
   ;; Handle :json-false inputs for replace-all parameter.
   (let ((replace-all (and replace-all (not (eq replace-all :json-false)))))
     ;; Validate required parameters
@@ -2633,8 +2657,10 @@ indicate changes."
                                      ;; Update the content in the context.
                                      (macher-context--set-new-content-for-file
                                       full-path result context)
-                                     ;; Return nil to indicate success.
-                                     nil))
+                                     (macher--change-summary
+                                      (macher--context-relative-name
+                                       context full-path)
+                                      new-content result)))
                                  t)))
 
 (defun macher--tool-multi-edit-file (context path edits)
@@ -2652,9 +2678,9 @@ All edits are applied in sequence to the same file.  Each edit requires
 exact whitespace matching.  If any edit fails, the entire operation
 fails.
 
-Returns nil on success.  Signals an error if the file is not found or if
-any edit operation fails.  Sets the dirty-p flag on the context to
-indicate changes."
+Returns a summary of the change on success.  Signals an error if the
+file is not found or if any edit operation fails.  Sets the dirty-p flag
+on the context to indicate changes."
   ;; Validate that edits is a vector, i.e. a JSON array.  Ideally the argument should
   ;; have been sent as an actual array, but some LLMs seem to have trouble with this,
   ;; and instead send JSON strings which decode to an array.  Allow both cases, as
@@ -2677,27 +2703,30 @@ indicate changes."
   ;; Use the helper function to perform the edits.
   (macher--with-workspace-file context path
                                (lambda (full-path new-content)
-                                 ;; Apply edits sequentially.
-                                 (cl-loop
-                                  for edit across edits do
-                                  (let ((old-text (plist-get edit :old_text))
-                                        (new-text (plist-get edit :new_text))
-                                        (replace-all (plist-get edit :replace_all)))
+                                 (let ((orig-content new-content))
+                                   ;; Apply edits sequentially.
+                                   (cl-loop
+                                    for edit across edits do
+                                    (let ((old-text (plist-get edit :old_text))
+                                          (new-text (plist-get edit :new_text))
+                                          (replace-all (plist-get edit :replace_all)))
 
-                                    (unless (and old-text new-text)
-                                      (error
-                                       "Each edit must contain old_text and new_text properties"))
-                                    ;; Handle :json-false inputs for replace-all parameter.
-                                    (setq replace-all
-                                          (and replace-all (not (eq replace-all :json-false))))
-                                    (setq new-content
-                                          (macher--edit-string new-content old-text new-text
-                                                               replace-all))
-                                    ;; Update the content in the context after each edit.
-                                    (macher-context--set-new-content-for-file
-                                     full-path new-content context)))
-                                 ;; Return nil to indicate success.
-                                 nil)
+                                      (unless (and old-text new-text)
+                                        (error
+                                         "Each edit must contain old_text and new_text properties"))
+                                      ;; Handle :json-false inputs for replace-all parameter.
+                                      (setq replace-all
+                                            (and replace-all (not (eq replace-all :json-false))))
+                                      (setq new-content
+                                            (macher--edit-string new-content old-text new-text
+                                                                 replace-all))
+                                      ;; Update the content in the context after each edit.
+                                      (macher-context--set-new-content-for-file
+                                       full-path new-content context)))
+                                   (macher--change-summary
+                                    (macher--context-relative-name
+                                     context full-path)
+                                    orig-content new-content)))
                                t))
 
 (defun macher--tool-write-file (context path content)
@@ -2712,16 +2741,19 @@ CONTENT is the complete new content for the file.
 Use with caution as it will overwrite existing files without warning.
 Handles text content with proper encoding.
 
-Returns nil on success.  Sets the dirty-p flag on the context to indicate
-changes."
+Returns a summary of the change on success.  Sets the dirty-p flag on
+the context to indicate changes."
   (let* ((workspace (macher-context-workspace context))
          (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
-         (full-path (funcall resolve-workspace-path path)))
+         (full-path (funcall resolve-workspace-path path))
+         ;; Capture the pre-write content, so the result can describe what this call changed.
+         (prev-content (cdr (macher-context--contents-for-file full-path context))))
     ;; Set the dirty flag to indicate changes are being made.
     (setf (macher-context-dirty-p context) t)
     ;; Set the new content in the context (this will create the entry if needed).
     (macher-context--set-new-content-for-file full-path content context)
-    nil))
+    (macher--change-summary
+     (macher--context-relative-name context full-path) prev-content content)))
 
 (defun macher--tool-move-file (context source-path destination-path)
   "Move or rename files within the workspace.
@@ -2736,9 +2768,9 @@ Can move files between directories and rename them in a single operation.
 If the destination exists, the operation will fail.  Works across different
 directories and can be used for simple renaming within the same directory.
 
-Returns nil on success.  Signals an error if the source file is not found or
-if the destination already exists.  Sets the dirty-p flag on the context to
-indicate changes."
+Returns a summary of the move on success.  Signals an error if the source
+file is not found or if the destination already exists.  Sets the dirty-p
+flag on the context to indicate changes."
   (let* ((workspace (macher-context-workspace context))
          ;; Compute workspace-files once and share it with both resolve calls
          ;; below, to avoid a redundant `project-current' walk over TRAMP.
@@ -2758,8 +2790,9 @@ indicate changes."
                                    ;; Mark source for deletion by setting its content to nil.
                                    (macher-context--set-new-content-for-file
                                     source-full-path nil context)
-                                   ;; Return nil to indicate success.
-                                   nil)
+                                   (format "%s -> %s: moved"
+                                           (macher--context-relative-name context source-full-path)
+                                           (macher--context-relative-name context dest-full-path)))
                                  t workspace-files)))
 
 (defun macher--tool-delete-file (context rel-path)
@@ -2772,15 +2805,18 @@ REL-PATH is the path to the file, relative to the workspace root.
 The file must exist and will be marked for deletion in the patch.
 Permanently removes the file from the workspace.
 
-Returns nil on success.  Signals an error if the file is not found.
-Sets the dirty-p flag on the context to indicate changes."
+Returns a summary of the deletion on success.  Signals an error if the
+file is not found.  Sets the dirty-p flag on the context to indicate
+changes."
   ;; Use the helper function to delete the file.
   (macher--with-workspace-file context rel-path
-                               (lambda (full-path _editable-content)
+                               (lambda (full-path editable-content)
                                  ;; For deletion, set the new content to nil to indicate deletion.
                                  (macher-context--set-new-content-for-file full-path nil context)
-                                 ;; Return nil to indicate success.
-                                 nil)
+                                 (macher--change-summary
+                                  (macher--context-relative-name
+                                   context full-path)
+                                  editable-content nil))
                                t))
 
 (cl-defun macher--search-get-xref-matches (context pattern &key path file-regexp case-insensitive)
@@ -3385,79 +3421,99 @@ an error if it was not."
                new-string
                (substring content (+ match-pos (length old-string))))))))))))
 
-(defun macher--generate-patch-diff (context)
-  "Generate a raw diff to populate the patch buffer.
-CONTEXT is the `macher-context' object.  Returns the generated diff text."
-  (let* ((contents-alist (macher-context-contents context))
-         (workspace (macher-context-workspace context))
-         (base-dir (macher--workspace-root workspace))
-         (result ""))
+(defun macher--diff-strings (orig-content new-content rel-path)
+  "Generate a unified diff from ORIG-CONTENT to NEW-CONTENT for REL-PATH.
 
-    ;; Use the system diff command to generate a unified diff for each file.
-    ;; Sort the contents list by filename for consistent patch ordering.
-    (dolist (entry (sort (copy-sequence contents-alist) (lambda (a b) (string< (car a) (car b)))))
-      (let* ((filename (car entry))
-             (contents (cdr entry))
-             (orig-content (car contents))
-             (new-content (cdr contents))
-             ;; Get the path relative to the base directory.
-             (rel-path (file-relative-name filename base-dir))
-             ;; Check if file has actually changed.
-             (file-changed-p (not (equal orig-content new-content))))
+ORIG-CONTENT and NEW-CONTENT are strings, or nil to indicate that the
+file doesn't exist - that is, a nil ORIG-CONTENT means the file is being
+created, and a nil NEW-CONTENT means it's being deleted.
 
-        ;; Only generate diff if the file has actually changed.
-        (when file-changed-p
-          (let ((temp-orig (make-temp-file "gptel-diff-orig"))
-                (temp-new (make-temp-file "gptel-diff-new")))
+REL-PATH is the path to use in the diff headers, normally relative to
+the workspace root.
 
-            ;; Write original content (or empty file for new files).
+Returns the diff text, including a git-style header so that `diff-mode'
+can create and delete files.  Returns an empty string if the contents
+are identical."
+  (if (equal orig-content new-content)
+      ""
+    (let ((temp-orig (make-temp-file "macher-diff-orig"))
+          (temp-new (make-temp-file "macher-diff-new")))
+      (unwind-protect
+          (progn
+            ;; Write both sides, using an empty file to stand in for a nonexistent one.
             (with-temp-buffer
               (when orig-content
                 (insert orig-content))
               (write-region (point-min) (point-max) temp-orig nil 'silent))
-
-            ;; Write new content or create empty file for deletions.
             (with-temp-buffer
               (when new-content
                 (insert new-content))
               (write-region (point-min) (point-max) temp-new nil 'silent))
 
-            ;; Generate diff and append to result.
             (with-temp-buffer
               ;; Add the standard git diff header, which allows diff-mode to create new files.
               (insert (format "diff --git a/%s b/%s\n" rel-path rel-path))
 
               ;; Add file mode lines for new or deleted files.
               (cond
-               ;; New file: orig-content is nil, new-content is non-nil.
-               ((and (not orig-content) new-content)
+               ((not orig-content)
                 (insert "new file mode 100644\n"))
-               ;; Deleted file: orig-content is non-nil, new-content is nil.
-               ((and orig-content (not new-content))
+               ((not new-content)
                 (insert "deleted file mode 100644\n")))
 
-              ;; Use diff to generate a unified patch with the correct file path.
-              (when (or orig-content new-content)
-                (call-process "diff"
-                              nil t nil "-u" "--label"
-                              (if orig-content
-                                  (concat "a/" rel-path)
-                                ;; Use /dev/null to denote file creations.
-                                "/dev/null")
-                              "--label"
-                              (if new-content
-                                  (concat "b/" rel-path)
-                                ;; Use /dev/null to denote file deletions.
-                                "/dev/null")
-                              temp-orig temp-new))
+              ;; Use diff to generate a unified patch with the correct file path, using /dev/null
+              ;; labels to denote creations and deletions.
+              (call-process "diff"
+                            nil t nil "-u" "--label"
+                            (if orig-content
+                                (concat "a/" rel-path)
+                              "/dev/null")
+                            "--label"
+                            (if new-content
+                                (concat "b/" rel-path)
+                              "/dev/null")
+                            temp-orig temp-new)
+              (buffer-string)))
+        (delete-file temp-orig)
+        (delete-file temp-new)))))
 
-              ;; Append the diff to the result.
-              (setq result (concat result (buffer-string))))
+(defun macher--diff-stat (diff)
+  "Count the changed lines in the unified DIFF text.
 
-            ;; Clean up the temp files.
-            (delete-file temp-orig)
-            (delete-file temp-new)))))
+Returns a cons cell (ADDED . DELETED).  Only lines within hunks are
+counted, so content lines that happen to look like diff headers don't
+throw off the counts."
+  (let ((added 0)
+        (deleted 0)
+        (in-hunk nil))
+    (dolist (line (split-string diff "\n"))
+      (cond
+       ;; Hunk headers can't be confused with content lines, since content lines within a hunk
+       ;; always carry a one-character prefix.
+       ((string-prefix-p "@@ " line)
+        (setq in-hunk t))
+       ((string-prefix-p "diff --git " line)
+        (setq in-hunk nil))
+       ((not in-hunk))
+       ((string-prefix-p "+" line)
+        (setq added (1+ added)))
+       ((string-prefix-p "-" line)
+        (setq deleted (1+ deleted)))))
+    (cons added deleted)))
 
+(defun macher--generate-patch-diff (context)
+  "Generate a raw diff to populate the patch buffer.
+CONTEXT is the `macher-context' object.  Returns the generated diff text."
+  (let ((result ""))
+    ;; Sort the contents list by filename for consistent patch ordering.
+    (dolist (entry
+             (sort (copy-sequence (macher-context-contents context))
+                   (lambda (a b) (string< (car a) (car b)))))
+      (setq result
+            (concat
+             result
+             (macher--diff-strings
+              (cadr entry) (cddr entry) (macher--context-relative-name context (car entry))))))
     result))
 
 ;;; Context Content Management
