@@ -227,6 +227,8 @@ Available tools:
 - `write_file_in_workspace`: Create or overwrite files
 - `move_file_in_workspace`: Move/rename files
 - `delete_file_in_workspace`: Delete files
+- `diff_workspace_changes`: Show a unified diff of the pending changes
+- `revert_workspace_changes`: Discard pending changes, restoring the original contents
 
 When `macher-install` is called, these tools are registered with gptel but not activated. The
 `@macher` and `@macher-ro` presets activate the appropriate subsets.
