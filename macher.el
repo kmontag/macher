@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2025 Kevin Montag
 
-;; Author: Kevin Montag
+;; Author: Kevin Montag <https://github.com/kmontag>
 ;; Version: 0.5.2
 ;; Package-Requires: ((emacs "30.1") (gptel "0.9.9.6"))
 ;; Keywords: convenience, gptel, llm
