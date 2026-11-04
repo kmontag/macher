@@ -3919,7 +3919,10 @@ or the `macher-context-string-marker-start', this is a no-op.
 Otherwise, appends the `macher-context-string-placeholder' to the end of
 the system prompt.
 
-SYSTEM can be a string, a function, or a list:
+SYSTEM can be nil, a string, a function, or a list:
+
+- nil: No system message.  Treated as the empty string, so the result
+  still carries the placeholder or context.
 
 - String: The most common case, a static system message.  We check if
   the placeholder or marker is present, and append the placeholder if
@@ -3946,6 +3949,8 @@ If both `macher-context-string-placeholder' AND
   (if (not (or macher-context-string-function macher-context-string-placeholder))
       system
     (cl-etypecase system
+      ;; Must precede the `list' case, which nil also matches.
+      (null (macher--system-ensure-placeholder-or-context-string ""))
       (string
        (cond
         ;; Already has marker-start, nothing to do.
@@ -4003,7 +4008,9 @@ things like \"@macher-system\" and \"@macher-system-commit\" - we don't
 want to just remove the placeholder entirely, as it could end up getting
 appended again later, which would be surprising.
 
-SYSTEM can be a string, a function, or a list:
+SYSTEM can be nil, a string, a function, or a list:
+
+- nil: No system message.  Returned unchanged.
 
 - String: The most common case.  We search for the placeholder and
   replace it with the demarcated context string.
@@ -4026,6 +4033,8 @@ built-in contexts like `gptel-context--wrap-in-buffer' (though note
   (if (not macher-context-string-placeholder)
       system
     (cl-etypecase system
+      ;; Must precede the `list' case, which nil also matches.
+      (null nil)
       (string
        (let* ((context-string
                (with-current-buffer (or buffer (current-buffer))
