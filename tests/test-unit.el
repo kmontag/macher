@@ -6914,6 +6914,30 @@
           (let ((result (macher--system-ensure-placeholder-or-context-string system)))
             (expect result :to-equal system)))))
 
+    (describe "nil input"
+      (it "returns the placeholder"
+        (expect (macher--system-ensure-placeholder-or-context-string nil)
+                :to-equal macher-context-string-placeholder))
+
+      (it "returns demarcated context when placeholder is nil"
+        (let ((macher-context-string-placeholder nil)
+              (macher-context-string-function (lambda () "PROJECT CONTEXT")))
+          (expect (macher--system-ensure-placeholder-or-context-string nil)
+                  :to-equal
+                  (concat
+                   macher-context-string-marker-start
+                   "PROJECT CONTEXT"
+                   macher-context-string-marker-end))))
+
+      (it "returns nil when placeholder and context-fn are nil"
+        (let ((macher-context-string-placeholder nil)
+              (macher-context-string-function nil))
+          (expect (macher--system-ensure-placeholder-or-context-string nil) :to-be nil)))
+
+      (it "wraps function that returns nil"
+        (let ((result (macher--system-ensure-placeholder-or-context-string (lambda () nil))))
+          (expect (funcall result) :to-equal macher-context-string-placeholder))))
+
     (describe "list input"
       (it "appends placeholder to first element of list"
         (let* ((system '("System message" "user message" "assistant message"))
@@ -7172,6 +7196,13 @@
             (let ((test-buffer (current-buffer)))
               (macher--system-replace-placeholder system test-buffer)
               (expect captured-buffer :to-be test-buffer))))))
+
+    (describe "nil input"
+      (it "returns nil"
+        (expect (macher--system-replace-placeholder nil) :to-be nil))
+
+      (it "returns nil for function that returns nil"
+        (expect (macher--system-replace-placeholder (lambda () nil)) :to-be nil)))
 
     (describe "list input"
       (it "replaces placeholder in first element only"
