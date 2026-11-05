@@ -155,6 +155,41 @@ action buffer using `gptel-send`.
 
 You can define custom actions in `macher-actions-alist`.
 
+By default there's one action buffer per workspace. To choose it yourself, e.g. to keep each day's
+conversation in a file, set `macher-action-buffer-function`. It's called once per action, and the
+action stays in the buffer it returns:
+
+```elisp
+(defvar my-macher-session (format "%04x" (random #x10000)))
+
+(setopt macher-action-buffer-function
+        (lambda (workspace)
+          (find-file-noselect
+           (expand-file-name
+            (format "%s-%s-%s.org"
+                    (format-time-string "%F")
+                    (file-name-nondirectory (directory-file-name (cdr workspace)))
+                    my-macher-session)
+            "~/gptel/"))))
+```
+
+The link between a buffer and its workspace isn't saved with the file, so if you reopen the file
+later and continue with `gptel-send`, the workspace would be guessed from the file's own location.
+To keep it, store it in the file and read it back:
+
+```elisp
+(add-hook 'macher-before-action-functions
+          (lambda (_execution)
+            (when (derived-mode-p 'org-mode)
+              (org-entry-put (point-min) "MACHER_WORKSPACE" (prin1-to-string (macher-workspace))))))
+
+(add-to-list 'macher-workspace-functions
+             (lambda ()
+               (when-let* (((derived-mode-p 'org-mode))
+                           (value (org-entry-get (point-min) "MACHER_WORKSPACE")))
+                 (read value))))
+```
+
 ### Workspace context
 
 macher can add information about the current workspace (project name, location, file listings) to
@@ -247,8 +282,9 @@ You can see customizable variables/sub-groups with `M-x customize-group RET mach
 | --------------------------------- | ------------------------------------------------------------------- |
 | `macher-actions-alist`            | Defines available actions (implement, revise, discuss, etc.)        |
 | `macher-focus-string`             | Function to generate description of current code location           |
+| `macher-action-buffer-function`   | Chooses the buffer each action runs in                              |
 | `macher-action-buffer-ui`         | UI style for action buffers: `'default`, `'org`, `'basic`, or `nil` |
-| `macher-action-buffer-setup-hook` | Hook run when creating action buffers                               |
+| `macher-action-buffer-setup-hook` | Hook run when setting up action buffers                             |
 | `macher-action-dispatch-hook`     | Hook run when invoking an action                                    |
 | `macher-before-action-functions`  | Functions run before sending the request                            |
 | `macher-after-action-functions`   | Functions run after request completes                               |
