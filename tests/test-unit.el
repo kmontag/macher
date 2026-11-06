@@ -3102,16 +3102,15 @@
     (it "signals error with nil project root"
       (expect (macher--project-files nil) :to-throw))
 
-    (it "returns project files with relative paths"
+    (it "returns project files with absolute paths"
       (funcall setup-project)
       (expect project-dir :to-be-truthy)
       (let ((files (macher--project-files (directory-file-name project-dir))))
         (expect files :to-be-truthy)
         (expect (listp files) :to-be-truthy)
-        ;; Should contain relative paths.
-        (expect files :to-contain "file1.txt")
-        (expect files :to-contain "file2.el")
-        (expect files :to-contain "subdir/file3.md"))))
+        (expect files :to-contain (expand-file-name "file1.txt" project-dir))
+        (expect files :to-contain (expand-file-name "file2.el" project-dir))
+        (expect files :to-contain (expand-file-name "subdir/file3.md" project-dir)))))
 
   (describe "macher--context-string"
     (it "returns nil when workspace is nil"
@@ -3398,21 +3397,25 @@
         (expect (macher--directory-name "/foo/bar") :to-equal "bar")))
 
     (describe "macher--directory-files"
-      (it "returns relative file paths"
+      (it "returns absolute file paths"
         (let ((files (macher--directory-files project-dir)))
           (expect files :to-be-truthy)
           (dolist (f files)
-            (expect (file-name-absolute-p f) :to-be nil))))
+            (expect (string-prefix-p (file-name-as-directory project-dir) f) :to-be-truthy))))
+
+      (it "returns expanded paths for an unexpanded directory ID"
+        (let ((files (macher--directory-files (concat project-dir "/subdir/.."))))
+          (expect files :to-contain (expand-file-name "subdir/file3.md" project-dir))))
 
       (it "includes files from subdirectories"
         (let ((files (macher--directory-files project-dir)))
-          (expect (member "subdir/file3.md" files) :to-be-truthy)))
+          (expect (member (expand-file-name "subdir/file3.md" project-dir) files) :to-be-truthy)))
 
       (it "includes hidden files at the top level"
         (let ((hidden-file (expand-file-name ".env" project-dir)))
           (write-region "SECRET=1" nil hidden-file)
           (let ((files (macher--directory-files project-dir)))
-            (expect (member ".env" files) :to-be-truthy))))
+            (expect (member (expand-file-name ".env" project-dir) files) :to-be-truthy))))
 
       (it "includes hidden files in subdirectories"
         (let* ((subdir (expand-file-name "sub" project-dir))
@@ -3420,7 +3423,7 @@
           (make-directory subdir)
           (write-region "SECRET=1" nil hidden-file)
           (let ((files (macher--directory-files project-dir)))
-            (expect (member "sub/.env" files) :to-be-truthy))))
+            (expect (member (expand-file-name "sub/.env" project-dir) files) :to-be-truthy))))
 
       (it "includes files inside hidden directories"
         (let* ((hidden-dir (expand-file-name ".hidden" project-dir))
@@ -3428,7 +3431,8 @@
           (make-directory hidden-dir)
           (write-region "secret" nil hidden-file)
           (let ((files (macher--directory-files project-dir)))
-            (expect (member ".hidden/secret.txt" files) :to-be-truthy))))
+            (expect (member (expand-file-name ".hidden/secret.txt" project-dir) files)
+                    :to-be-truthy))))
 
       (it "includes files inside hidden directories nested in normal directories"
         (let* ((subdir (expand-file-name "sub" project-dir))
@@ -3437,7 +3441,8 @@
           (make-directory nested-hidden-dir t)
           (write-region "cached" nil nested-hidden-file)
           (let ((files (macher--directory-files project-dir)))
-            (expect (member "sub/.cache/data.txt" files) :to-be-truthy)))))
+            (expect (member (expand-file-name "sub/.cache/data.txt" project-dir) files)
+                    :to-be-truthy)))))
 
     (describe "macher--get-buffer"
       (it "signals user-error when no workspace can be determined"
