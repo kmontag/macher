@@ -417,8 +417,9 @@ root.
 
 On every action, macher binds the buffer to WORKSPACE (see
 `macher-workspace').  The first time a buffer is used, and again after
-its major mode changes, macher also applies `macher-action-buffer-ui'
-and runs `macher-action-buffer-setup-hook'.  The buffer then becomes the
+its local variables are cleared (e.g. if the major mode changes), macher
+also applies `macher-action-buffer-ui' and runs
+`macher-action-buffer-setup-hook'.  The buffer then becomes the
 workspace's active action buffer, which commands like `macher-abort'
 operate on (see `macher-action-buffer').
 
