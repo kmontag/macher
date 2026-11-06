@@ -3142,164 +3142,84 @@
         (delete-directory temp-dir t))
 
       (it "generates context string for project workspace"
+        (spy-on 'macher--workspace-files :and-call-through)
         (let* ((macher--workspace (cons 'project temp-dir))
                (result (macher--context-string)))
-          (expect (stringp result) :to-be-truthy)
-          ;; Should contain workspace information.
-          (expect "The user is currently working on a project named:" :to-appear-once-in result)
-          ;; Should contain our test files with full relative paths.
-          (expect result :to-match "file1.txt")
-          (expect result :to-match "file2.el")
-          (expect result :to-match "subdir/file3.md")
-          ;; Should list files in the workspace.
           (expect result
-                  :to-match
-                  (regexp-quote
-                   (format "Files in the \"%s\" project:" (file-name-nondirectory temp-dir))))
-          ;; Should only contain the description text once.
-          (expect "Files in the" :to-appear-once-in result)))
+                  :to-equal
+                  (format "The user is currently working on a project named: \"%s\""
+                          (file-name-nondirectory temp-dir)))
+          ;; Listing files is slow on large or remote workspaces, and this runs on every request.
+          (expect 'macher--workspace-files :not :to-have-been-called)))
 
       (it "generates context string for single-file workspace"
         (let* ((macher--workspace (cons 'file file1))
                (result (macher--context-string)))
-          (expect (stringp result) :to-be-truthy)
-          ;; Should contain workspace information.
           (expect result
-                  :to-match "The user is currently working on a project named: \"file1.txt\"")
-          (message "reus %s" result)
-          ;; Should contain only the single file.
-          (expect result :to-match "Files in the \"file1.txt\" project:\n[ ]+file1.txt")
-          ;; Should not contain other files.
-          (expect result :not :to-match "file2.el")
-          (expect result :not :to-match "file3.md")))
+                  :to-equal "The user is currently working on a project named: \"file1.txt\""))))
 
-      (it "properly categorizes files with same name in different directories"
-        (let* ((workspace '(project . "/test/project/"))
-               (workspace-files '("/test/project/test.txt" "/test/project/subdir/test.txt"))
-               result)
-          ;; Mock workspace functions.
-          (spy-on 'macher--workspace-root :and-return-value "/test/project/")
-          (spy-on 'macher--workspace-name :and-return-value "test-project")
-          (spy-on 'macher--workspace-files :and-return-value workspace-files)
-
-          ;; Set the test workspace.
-          (with-temp-buffer
-            (setq-local macher--workspace workspace)
-            (setq result (macher--context-string)))
-
-          ;; Verify the result structure.
-          (expect (stringp result) :to-be-truthy)
-          (expect result
-                  :to-match "The user is currently working on a project named: \"test-project\"")
-
-          ;; Both files should be listed.
-          (expect result :to-match "    test\\.txt")
-          (expect result :to-match "    subdir/test\\.txt")
-
-          ;; Should contain workspace file listing.
-          (expect result :to-match "Files in the \"test-project\" project:"))))
-
-    (it "handles project workspace with no files"
-      (let* ((empty-workspace '(project . "/test/empty-project/"))
-             result)
-        ;; Mock workspace functions to return empty file list.
-        (spy-on 'macher--workspace-root :and-return-value "/test/empty-project/")
-        (spy-on 'macher--workspace-name :and-return-value "empty-project")
-        (spy-on 'macher--workspace-files :and-return-value nil)
-
-        ;; Set the test workspace.
-        (with-temp-buffer
-          (setq-local macher--workspace empty-workspace)
-          (setq result (macher--context-string)))
-
-        ;; Verify the result structure.
-        (expect (stringp result) :to-be-truthy)
-        (expect result
-                :to-match "The user is currently working on a project named: \"empty-project\"")
-        ;; Should indicate there are no files.
-        (expect "There are no files in the \"empty-project\" project." :to-appear-once-in result)
-        ;; Should NOT contain the file listing header (which ends with a colon).
-        (expect result :not :to-match "Files in the .* project:")))
-
-    (describe "with max-files limit"
-      :var (temp-dir workspace all-files original-max-files)
+    (describe "obsolete macher-context-string-max-files"
+      :var (run-emacs)
 
       (before-each
-        (setq temp-dir (make-temp-file "macher-context-test" t))
-        (setq workspace `(project . ,(directory-file-name temp-dir)))
-        (setq original-max-files macher-context-string-max-files)
+        ;; Settings made before macher is loaded need a fresh Emacs to be meaningful.
+        (setq run-emacs
+              (lambda (&rest forms)
+                (with-temp-buffer
+                  (let ((exit-code
+                         (apply #'call-process
+                                (expand-file-name invocation-name invocation-directory)
+                                nil
+                                t
+                                nil
+                                "-Q"
+                                "--batch"
+                                "--eval"
+                                (format "(setq load-path '%S)" load-path)
+                                (mapcan (lambda (form) (list "--eval" (format "%S" form))) forms))))
+                    (cons exit-code (buffer-string)))))))
 
-        ;; Create test files
-        (let ((file1 (expand-file-name "file1.txt" temp-dir))
-              (file2 (expand-file-name "file2.txt" temp-dir))
-              (file3 (expand-file-name "file3.txt" temp-dir))
-              (file4 (expand-file-name "file4.txt" temp-dir))
-              (file5 (expand-file-name "file5.txt" temp-dir)))
-          (write-region "content1" nil file1)
-          (write-region "content2" nil file2)
-          (write-region "content3" nil file3)
-          (write-region "content4" nil file4)
-          (write-region "content5" nil file5)
-          (setq all-files (list file1 file2 file3 file4 file5)))
+      (it "is marked obsolete"
+        (expect (get 'macher-context-string-max-files 'byte-obsolete-variable) :to-be-truthy))
 
-        ;; Create project marker
-        (write-region "" nil (expand-file-name ".project" temp-dir))
+      (it "accepts use-package :custom"
+        (let ((result
+               (funcall run-emacs
+                        '(require 'use-package)
+                        '(use-package
+                          macher
+                          :ensure nil
+                          :demand t
+                          :custom (macher-context-string-max-files 10)))))
+          ;; Emacs itself may print unrelated notes (e.g. cus-start reporting built-in variables
+          ;; missing from this build), so check only for errors and warnings about the variable.
+          (expect (cdr result) :not :to-match "Warning\\|macher-context-string-max-files")
+          (expect (car result) :to-equal 0)))
 
-        ;; Mock workspace functions
-        (spy-on 'macher-workspace :and-return-value workspace)
-        (spy-on 'macher--workspace-name :and-return-value "test-project")
-        (spy-on 'macher--workspace-root :and-return-value temp-dir)
-        (spy-on 'macher--workspace-files :and-return-value all-files))
+      (it "accepts settings made before macher is loaded"
+        (let ((result
+               (funcall run-emacs
+                        '(custom-set-variables '(macher-context-string-max-files 10))
+                        '(setopt macher-context-string-max-files 20)
+                        '(setq macher-context-string-max-files 30)
+                        '(require 'macher))))
+          ;; Emacs itself may print unrelated notes (e.g. cus-start reporting built-in variables
+          ;; missing from this build), so check only for errors and warnings about the variable.
+          (expect (cdr result) :not :to-match "Warning\\|macher-context-string-max-files")
+          (expect (car result) :to-equal 0)))
 
-      (after-each
-        (setq macher-context-string-max-files original-max-files)
-        (when (and temp-dir (file-exists-p temp-dir))
-          (delete-directory temp-dir t)))
-
-      (it "lists all files when max-files is nil (no limit)"
-        (setq macher-context-string-max-files nil)
-        (let ((result (macher--context-string)))
-          (expect result :to-match "file1.txt")
-          (expect result :to-match "file2.txt")
-          (expect result :to-match "file3.txt")
-          (expect result :to-match "file4.txt")
-          (expect result :to-match "file5.txt")
-          (expect result :not :to-match "more files")))
-
-      (it "respects max-files limit"
-        (setq macher-context-string-max-files 3)
-        (let ((result (macher--context-string)))
-          ;; Should show only first 3 files in workspace order.
-          (expect result :to-match "file1.txt")
-          (expect result :to-match "file2.txt")
-          (expect result :to-match "file3.txt")
-          (expect result :not :to-match "file4.txt")
-          (expect result :not :to-match "file5.txt")
-          (expect result :to-match "2 more files")))
-
-      (it "lists files up to limit"
-        (setq macher-context-string-max-files 4)
-        (let ((result (macher--context-string)))
-          ;; Should show first 4 files.
-          (expect result :to-match "file1.txt")
-          (expect result :to-match "file2.txt")
-          (expect result :to-match "file3.txt")
-          (expect result :to-match "file4.txt")
-          ;; file5.txt should be truncated.
-          (expect result :not :to-match "file5.txt")
-          (expect result :to-match "1 more files")))
-
-      (it "lists all files when all are within limit"
-        (setq macher-context-string-max-files 10)
-        (let ((result (macher--context-string)))
-          ;; All files should be listed.
-          (expect result :to-match "file1.txt")
-          (expect result :to-match "file2.txt")
-          (expect result :to-match "file3.txt")
-          (expect result :to-match "file4.txt")
-          (expect result :to-match "file5.txt")
-          ;; No truncation message.
-          (expect result :not :to-match "more files")))))
+      (it "accepts settings made after macher is loaded"
+        (let ((result
+               (funcall run-emacs
+                        '(require 'macher)
+                        '(custom-set-variables '(macher-context-string-max-files 10))
+                        '(customize-set-variable 'macher-context-string-max-files 20)
+                        '(setopt macher-context-string-max-files nil)
+                        '(setq macher-context-string-max-files 30))))
+          ;; Emacs itself may print unrelated notes (e.g. cus-start reporting built-in variables
+          ;; missing from this build), so check only for errors and warnings about the variable.
+          (expect (cdr result) :not :to-match "Warning\\|macher-context-string-max-files")
+          (expect (car result) :to-equal 0)))))
 
   (describe "Workspace detection functions"
     (before-each

@@ -1597,19 +1597,11 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (let ((system-content
                      (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
                 ;; Check for workspace description.
-                (expect "The user is currently working on a project named:"
+                (expect (format "The user is currently working on a project named: \"%s\""
+                                (file-name-nondirectory project-dir))
                         :to-appear-once-in system-content)
-                ;; Check that files are listed.
-                (expect (format "Files in the \"%s\" project:" (file-name-nondirectory project-dir))
-                        :to-appear-once-in system-content)
-                ;; Check that files appear in the listing.
-                (expect system-content :to-match "    README\\.md")
-                (expect system-content :to-match "    src/main\\.el")
-                (expect system-content :to-match "    src/util\\.el")
-                (expect system-content :to-match "    test/test-main\\.el")
-                ;; Check that it mentions the project name in the description.
-                (expect (format "project named: \"%s\"" (file-name-nondirectory project-dir))
-                        :to-appear-once-in system-content)))))))
+                ;; Files aren't listed.
+                (expect system-content :not :to-match "src/main\\.el")))))))
 
     (it "does not duplicate macher context string when macher-system applied multiple times"
       ;; This test verifies that applying @macher-system multiple times (e.g. in nested presets or
@@ -1665,9 +1657,6 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                 (expect macher-context-string-marker-start :to-appear-once-in system-content)
                 ;; The workspace description should appear exactly once.
                 (expect "The user is currently working on a project named:"
-                        :to-appear-once-in system-content)
-                ;; The file listing header should appear exactly once.
-                (expect (format "Files in the \"%s\" project:" (file-name-nondirectory project-dir))
                         :to-appear-once-in system-content))))))))
 
   (it "handles nil workspace without error"
