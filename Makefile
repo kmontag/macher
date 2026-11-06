@@ -20,6 +20,8 @@ $(EASK) $(PRETTIER) .eask: package.json package-lock.json Eask
 # Analyze the Eask file itself for inconsistencies, and exit unsuccessfully if any are found.
 .PHONY: analyze
 analyze: $(EASK) .eask
+# --strict is what makes warnings (e.g. a version mismatch with macher.el) fail the build; without
+# it, only errors produce a non-zero exit status.
 	$(EASK) --strict analyze
 
 # Generic target for lint commands that take a list of files.
