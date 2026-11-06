@@ -1514,8 +1514,8 @@ absolute path to a real directory."
          (root
           (if root-fn
               (or (funcall root-fn workspace-id)
-                  (error
-                   "Root function for workspace type %s failed to return a root" workspace-type))
+                  (error "Root function for workspace type %s failed to return a root"
+                         workspace-type))
             (error "No root function configured for workspace type %s" workspace-type))))
     ;; Only validate the shape of the root.  A `file-directory-p' check would be a remote
     ;; round-trip over TRAMP on every call; any real file operation downstream will fail with a
@@ -2186,12 +2186,12 @@ expensive for remote workspaces."
                     (cond
                      ;; type is a string when the path is a symlink (the string is the target).
                      ((stringp type)
-                      (error
-                       "Path '%s' contains a symbolic link in a non-final component" rel-path))
+                      (error "Path '%s' contains a symbolic link in a non-final component"
+                             rel-path))
                      ;; type is t for directories, nil for regular files.
                      ((not (eq t type))
-                      (error
-                       "Path '%s' contains a file in a non-final component" rel-path)))))))))))
+                      (error "Path '%s' contains a file in a non-final component"
+                             rel-path)))))))))))
 
     ;; Validate access permissions.  If WORKSPACE-FILES was passed in, use it instead of calling
     ;; `macher--workspace-files' (which can trigger `project-current' over TRAMP).
@@ -2409,13 +2409,7 @@ caller can see the structure of the truncated payload."
              (tail (substring output (- len preview-chars))))
         (error
          "%s too large: %d characters exceeds maximum tool output length of %d characters\nFirst %d characters:\n%s\n...\nLast %d characters:\n%s"
-         description
-         len
-         macher-tool-output-max-length
-         preview-chars
-         head
-         preview-chars
-         tail)))))
+         description len macher-tool-output-max-length preview-chars head preview-chars tail)))))
 
 (defun macher--tool-read-file (context path &optional offset limit show-line-numbers)
   "Read the contents of a file specified by PATH within the workspace.
@@ -3486,12 +3480,11 @@ an error if it was not."
          ((= matches 0)
           (error "String to replace not found in file"))
          ((and (> matches 1) (not replace-all))
-          (error
-           (concat
-            "Found %d matches of the string to replace, but replace_all is false. "
-            "To replace all occurrences, set replace_all to true.  To replace only one "
-            "occurrence, please provide more context to uniquely identify the instance")
-           matches))
+          (error (concat
+                  "Found %d matches of the string to replace, but replace_all is false. "
+                  "To replace all occurrences, set replace_all to true.  To replace only one "
+                  "occurrence, please provide more context to uniquely identify the instance")
+                 matches))
          (t
           ;; Perform replacement(s)
           (if replace-all
@@ -4212,8 +4205,8 @@ they're accessible on the FSM."
                                                    (format
                                                     "could be determined for request buffer \"%s\" "
                                                     ,buffer)))
-                                                 (error
-                                                  "The tool \"%s\" is not available" ,tool-name))
+                                                 (error "The tool \"%s\" is not available"
+                                                        ,tool-name))
                                                ;; Call original function with args plus the context.
                                                (apply orig-fn context args)))
                                           get-context orig-fn))
