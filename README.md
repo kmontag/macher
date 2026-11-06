@@ -15,10 +15,10 @@ for this purpose, macher is focused on the simple joys of editing text. I reach 
 actively coding or writing and want to keep it in manual. It also helps me stay nimble in
 environments without a full agentic stack.
 
-macher's tools are designed to be run without manual confirmation. [By default](#workspaces), file
+macher's tools are designed to run without per-call confirmation. [By default](#workspaces), file
 access is restricted to the current `project.el` project, or to a single projectless file. Edits
-happen in-memory and get proposed as an aggregate patch, with nothing written to disk until you
-apply it.
+happen in-memory and get collected into a single patch, with nothing written to disk until you apply
+it.
 
 macher takes inspiration from gptel's flexibility and visibility. You can use the presets and tools
 in your own workflows, or use the built-in action commands for a quick and easy editing setup. It
@@ -190,10 +190,9 @@ operations are restricted to the current workspace. By default, macher supports:
 - **`project`**: A project.el project
 - **`file`**: A single non-project file
 
-For `project` workspace types, only the `project-files` are exposed to the LLM. By default, this
-means that things like `.gitignore`'d files will be automatically unreadable - though if you've
-customized `project.el`, you might want to verify that your setup excludes anything sensitive from
-your project file listings.
+For `project` workspaces, only the `project-files` are exposed to the LLM. By default, this means
+that things like `.gitignore`'d files won't be visible to the LLM. If you've customized
+`project.el`, you might want to verify that your file listings exclude anything sensitive.
 
 A **`directory`** workspace type is also available for working in arbitrary directories (not managed
 by project.el). It is not enabled by default to avoid accidentally exposing broad directories to the
