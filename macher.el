@@ -416,13 +416,11 @@ buffer per workspace, with its `default-directory' set to the workspace
 root.
 
 On every action, macher binds the buffer to WORKSPACE (see
-`macher-workspace').  It leaves the buffer's `default-directory' alone,
-so e.g. relative links in a file-visiting buffer still resolve against
-the file's directory.  The first time a buffer is used, and again after
+`macher-workspace').  The first time a buffer is used, and again after
 its major mode changes, macher also applies `macher-action-buffer-ui'
-and runs `macher-action-buffer-setup-hook'.  The buffer then becomes
-the workspace's active action buffer, which commands like
-`macher-abort' operate on (see `macher-action-buffer').
+and runs `macher-action-buffer-setup-hook'.  The buffer then becomes the
+workspace's active action buffer, which commands like `macher-abort'
+operate on (see `macher-action-buffer').
 
 The workspace binding isn't saved with a file.  That only matters if
 you reopen a saved action buffer and send from it directly (e.g. with
