@@ -439,12 +439,11 @@ An action buffer is a buffer where gptel requests are made when using
 `macher-action' (or its wrappers like `macher-implement').  See
 `macher-action-buffer-function'.
 
-This value controls the buffer-local setup that happens when a buffer
-is first used as an action buffer, just before the
-`macher-action-buffer-setup-hook' is fired.  The setup runs again if
-the buffer's major mode changes, since that discards the buffer-local
-hooks it installs.  It effectively sets up a predefined \"pre\"
-function for the `macher-action-buffer-setup-hook'.
+This value controls the buffer-local setup that happens when a buffer is
+first used as an action buffer, just before the
+`macher-action-buffer-setup-hook' is fired.  The setup runs again if the
+buffer's local variables are cleared.  It effectively sets up a
+predefined \"pre\" function for the `macher-action-buffer-setup-hook'.
 
 The choices are:
 
@@ -483,11 +482,11 @@ change."
   "Hook run when setting up a buffer as a macher action buffer.
 
 Functions in this hook are called with no arguments in the action buffer
-the first time it's used for an action, and again after its major mode
-changes (see `macher-action-buffer-function').  The buffer may already
-have content, e.g. if it visits an existing file.  The buffer will
-already have its workspace set up, i.e. `macher-workspace' can be used
-to get the associated workspace.
+the first time it's used for an action, and again after its local
+variables are cleared (see `macher-action-buffer-function').  The buffer
+may already have content, e.g. if it visits an existing file.  The
+buffer will already have its workspace set up, i.e. `macher-workspace'
+can be used to get the associated workspace.
 
 The base UI configuration is controlled by `macher-action-buffer-ui'
 and is applied before this hook runs.  This hook can be used for
