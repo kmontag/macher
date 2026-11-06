@@ -6697,6 +6697,83 @@
                                 (temporary-file-directory)))))
         (expect (macher--resolve-workspace-path project-workspace non-existent-dir) :to-throw)))
 
+    (it "rejects traversal back into the workspace to reach a file not in the files list"
+      (let ((extra-file (expand-file-name "extra.txt" temp-workspace-root)))
+        (write-region "extra content" nil extra-file)
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (cl-remove-if
+                   (lambda (file) (string-match-p "extra\\.txt$" file))
+                   (macher--project-files (cdr workspace)))))
+        (expect (macher--resolve-workspace-path project-workspace "subdir/../extra.txt") :to-throw)
+        (expect (macher--resolve-workspace-path
+                 project-workspace
+                 (format "../%s/extra.txt" (file-name-nondirectory temp-workspace-root)))
+                :to-throw)
+        (expect (macher--resolve-workspace-path
+                 project-workspace (concat temp-workspace-root "/subdir/../extra.txt"))
+                :to-throw)))
+
+    (it "expands relative entries from a custom :get-files against the workspace root"
+      (let* ((outside-file (make-temp-file "macher-test-outside-"))
+             (outside-rel (file-relative-name outside-file temp-workspace-root))
+             (macher-workspace-types-alist
+              `((custom
+                 .
+                 (:get-root
+                  identity
+                  :get-name file-name-nondirectory
+                  :get-files
+                  ,(lambda (_id) (list "file1.txt" outside-rel))))))
+             (workspace `(custom . ,temp-workspace-root)))
+        (unwind-protect
+            (progn
+              (expect (macher--resolve-workspace-path workspace "file1.txt") :to-equal temp-file1)
+              (expect (macher--resolve-workspace-path workspace outside-file)
+                      :to-equal outside-file)
+              (expect (macher--resolve-workspace-path workspace outside-rel) :to-equal outside-file)
+              ;; Not listed, so still rejected.
+              (expect (macher--resolve-workspace-path workspace "file2.txt") :to-throw))
+          (delete-file outside-file))))
+
+    (it "matches absolute files list entries verbatim, so unnormalized entries grant nothing"
+      ;; The files list is compared by string after expanding the requested path.  Absolute
+      ;; entries aren't normalized, so the built-in listers must return expanded paths; a
+      ;; differently spelled entry fails closed rather than granting access.
+      (let* ((extra-file (expand-file-name "extra.txt" temp-workspace-root))
+             (outside-file (make-temp-file "macher-test-outside-"))
+             (outside-name (file-name-nondirectory outside-file)))
+        (write-region "extra content" nil extra-file)
+        (spy-on 'macher--workspace-files
+                :and-return-value
+                (list
+                 (concat temp-workspace-root "/subdir/../extra.txt")
+                 (concat temp-workspace-root "/../" outside-name)))
+        (unwind-protect
+            (progn
+              (expect (macher--resolve-workspace-path project-workspace "extra.txt") :to-throw)
+              (expect (macher--resolve-workspace-path project-workspace outside-file) :to-throw)
+              (expect (macher--resolve-workspace-path project-workspace (concat "../" outside-name))
+                      :to-throw))
+          (delete-file outside-file))))
+
+    (it "accepts every file from the built-in listers, including for unexpanded IDs"
+      (dolist (id
+               (list
+                temp-workspace-root
+                (file-name-as-directory temp-workspace-root)
+                (concat temp-workspace-root "/subdir/..")))
+        (dolist (type '(project directory))
+          (let* ((workspace (cons type id))
+                 (files (macher--workspace-files workspace)))
+            (expect files :to-contain temp-subfile)
+            (dolist (file files)
+              (expect (macher--resolve-workspace-path workspace file) :to-equal file)
+              (expect (macher--resolve-workspace-path
+                       workspace (file-relative-name file temp-workspace-root))
+                      :to-equal file))))))
+
     (it "handles broken symlinks"
       (let ((broken-symlink (expand-file-name "broken-symlink" temp-workspace-root)))
         (make-symbolic-link "/nonexistent/target" broken-symlink)
