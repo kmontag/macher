@@ -2,8 +2,10 @@
 
 ;;; Commentary:
 
-;; Run with `eask emacs --batch -l scripts/install-compat.el' before `eask install-deps'. eask sets
-;; up `package-user-dir' and the archives from the Eask file, so this installs where eask does.
+;; Normally run by the npm postinstall script (see package.json), so `npm install' / `make' take
+;; care of it. To run it by hand, use `eask emacs --batch -l scripts/install-compat.el' before
+;; `eask install-deps'. eask sets up `package-user-dir' and the archives from the Eask file, so this
+;; installs where eask does.
 ;;
 ;; MELPA's transient requires compat 31.1. Emacs 30's package.el counts the built-in compat
 ;; (30.1.9999) as satisfying that, so neither package.el nor eask installs compat 31.1, and the new
