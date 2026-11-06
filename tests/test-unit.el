@@ -3163,7 +3163,7 @@
       :var (run-emacs)
 
       (before-each
-        ;; The warning fires at most once per session, so each case runs in a fresh Emacs.
+        ;; Settings made before macher is loaded need a fresh Emacs to be meaningful.
         (setq run-emacs
               (lambda (&rest forms)
                 (with-temp-buffer
@@ -3180,30 +3180,41 @@
                                 (mapcan (lambda (form) (list "--eval" (format "%S" form))) forms))))
                     (cons exit-code (buffer-string)))))))
 
-      (it "warns once when set before macher is loaded"
+      (it "is marked obsolete"
+        (expect (get 'macher-context-string-max-files 'byte-obsolete-variable) :to-be-truthy))
+
+      (it "accepts use-package :custom"
         (let ((result
                (funcall run-emacs
-                        '(setq macher-context-string-max-files 10)
-                        '(require 'macher)
-                        '(setopt macher-context-string-max-files 20))))
-          (expect (car result) :to-equal 0)
-          (expect "`macher-context-string-max-files' no longer has any effect"
-                  :to-appear-once-in (cdr result))))
+                        '(require 'use-package)
+                        '(use-package
+                          macher
+                          :ensure nil
+                          :demand t
+                          :custom (macher-context-string-max-files 10)))))
+          (expect (cdr result) :to-equal "")
+          (expect (car result) :to-equal 0)))
 
-      (it "warns once when set after macher is loaded"
+      (it "accepts settings made before macher is loaded"
+        (let ((result
+               (funcall run-emacs
+                        '(custom-set-variables '(macher-context-string-max-files 10))
+                        '(setopt macher-context-string-max-files 20)
+                        '(setq macher-context-string-max-files 30)
+                        '(require 'macher))))
+          (expect (cdr result) :to-equal "")
+          (expect (car result) :to-equal 0)))
+
+      (it "accepts settings made after macher is loaded"
         (let ((result
                (funcall run-emacs
                         '(require 'macher)
-                        '(setopt macher-context-string-max-files 10)
-                        '(customize-set-variable 'macher-context-string-max-files 20))))
-          (expect (car result) :to-equal 0)
-          (expect "`macher-context-string-max-files' no longer has any effect"
-                  :to-appear-once-in (cdr result))))
-
-      (it "doesn't warn when never set"
-        (let ((result (funcall run-emacs '(require 'macher))))
-          (expect (car result) :to-equal 0)
-          (expect (cdr result) :not :to-match "macher-context-string-max-files")))))
+                        '(custom-set-variables '(macher-context-string-max-files 10))
+                        '(customize-set-variable 'macher-context-string-max-files 20)
+                        '(setopt macher-context-string-max-files nil)
+                        '(setq macher-context-string-max-files 30))))
+          (expect (cdr result) :to-equal "")
+          (expect (car result) :to-equal 0)))))
 
   (describe "Workspace detection functions"
     (before-each

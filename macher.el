@@ -639,23 +639,17 @@ you can set both this and `macher-context-string-placeholder' to nil."
   :type '(function :tag "Workspace string function")
   :group 'macher-workspace)
 
-(defun macher--warn-context-string-max-files (&rest _)
-  "Warn once that `macher-context-string-max-files' has no effect."
-  (remove-variable-watcher 'macher-context-string-max-files #'macher--warn-context-string-max-files)
-  (display-warning
-   'macher
-   (concat
-    "`macher-context-string-max-files' no longer has any effect, since the "
-    "workspace context no longer lists files.  Remove it from your configuration.")))
+;; Kept as a real option so existing configurations (`setopt', `use-package' :custom, Customize)
+;; keep working unchanged.
+(defcustom macher-context-string-max-files 50
+  "This variable has no effect.
 
+It used to limit the number of files listed in the workspace context
+string, but the workspace context no longer lists files."
+  :type '(choice (natnum :tag "Maximum number of files") (const :tag "No limit" nil))
+  :group 'macher-workspace)
 (make-obsolete-variable
  'macher-context-string-max-files "the workspace context no longer lists files." "0.6.0")
-
-;; Users may have set the variable before macher was loaded (e.g. via `use-package' :custom), or
-;; may set it afterwards.  Either way they get one warning, rather than an error or silence.
-(if (boundp 'macher-context-string-max-files)
-    (macher--warn-context-string-max-files)
-  (add-variable-watcher 'macher-context-string-max-files #'macher--warn-context-string-max-files))
 
 ;;;; Result processing
 
