@@ -417,7 +417,7 @@ The function is called once per `macher-action', and the action keeps
 using the returned buffer until its request finishes, so the function
 can return a different buffer each time (e.g. a new file per day).
 
-Before the action runs, macher binds the buffer to WORKSPACE (see
+Before an action runs, macher binds the buffer to WORKSPACE (see
 `macher-workspace') and sets its `default-directory' to the workspace
 root.  The first time a buffer is used as an action buffer, and again
 after its major mode changes, macher also applies
@@ -425,12 +425,17 @@ after its major mode changes, macher also applies
 The returned buffer is remembered as the workspace's latest action
 buffer, which commands like `macher-abort' operate on.
 
-The workspace binding only lives in the buffer.  If the buffer visits a
-file, and you later reopen that file in a new session and send from it
-directly (e.g. with `gptel-send'), the workspace is determined from the
-file's own location by `macher-workspace-functions'.  To restore it,
-store the workspace in the file from a `macher-before-action-functions'
-entry, and read it back with an entry in `macher-workspace-functions'."
+The workspace and `default-directory' bindings live only in the buffer.
+If the buffer visits a file, and you later reopen that file in a new
+session and send from it directly (e.g. with `gptel-send'), the
+workspace is determined from the file's own location by
+`macher-workspace-functions'.  In many workflows you probably don't need
+to worry about this, since each `macher-action' will update these
+bindings automatically - but if you need to, you can store the
+`macher-workspace' and `default-directory' in the file from a
+`macher-before-action-functions' entry, and read them back with entries
+in `macher-workspace-functions' and/or
+`macher-action-buffer-setup-hook'."
   :type 'function
   :group 'macher-actions)
 
