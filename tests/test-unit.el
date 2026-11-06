@@ -3102,16 +3102,15 @@
     (it "signals error with nil project root"
       (expect (macher--project-files nil) :to-throw))
 
-    (it "returns project files with relative paths"
+    (it "returns project files with absolute paths"
       (funcall setup-project)
       (expect project-dir :to-be-truthy)
       (let ((files (macher--project-files (directory-file-name project-dir))))
         (expect files :to-be-truthy)
         (expect (listp files) :to-be-truthy)
-        ;; Should contain relative paths.
-        (expect files :to-contain "file1.txt")
-        (expect files :to-contain "file2.el")
-        (expect files :to-contain "subdir/file3.md"))))
+        (expect files :to-contain (expand-file-name "file1.txt" project-dir))
+        (expect files :to-contain (expand-file-name "file2.el" project-dir))
+        (expect files :to-contain (expand-file-name "subdir/file3.md" project-dir)))))
 
   (describe "macher--context-string"
     (it "returns nil when workspace is nil"
@@ -3398,21 +3397,25 @@
         (expect (macher--directory-name "/foo/bar") :to-equal "bar")))
 
     (describe "macher--directory-files"
-      (it "returns relative file paths"
+      (it "returns absolute file paths"
         (let ((files (macher--directory-files project-dir)))
           (expect files :to-be-truthy)
           (dolist (f files)
-            (expect (file-name-absolute-p f) :to-be nil))))
+            (expect (string-prefix-p (file-name-as-directory project-dir) f) :to-be-truthy))))
+
+      (it "returns expanded paths for an unexpanded directory ID"
+        (let ((files (macher--directory-files (concat project-dir "/subdir/.."))))
+          (expect files :to-contain (expand-file-name "subdir/file3.md" project-dir))))
 
       (it "includes files from subdirectories"
         (let ((files (macher--directory-files project-dir)))
-          (expect (member "subdir/file3.md" files) :to-be-truthy)))
+          (expect (member (expand-file-name "subdir/file3.md" project-dir) files) :to-be-truthy)))
 
       (it "includes hidden files at the top level"
         (let ((hidden-file (expand-file-name ".env" project-dir)))
           (write-region "SECRET=1" nil hidden-file)
           (let ((files (macher--directory-files project-dir)))
-            (expect (member ".env" files) :to-be-truthy))))
+            (expect (member (expand-file-name ".env" project-dir) files) :to-be-truthy))))
 
       (it "includes hidden files in subdirectories"
         (let* ((subdir (expand-file-name "sub" project-dir))
@@ -3420,7 +3423,7 @@
           (make-directory subdir)
           (write-region "SECRET=1" nil hidden-file)
           (let ((files (macher--directory-files project-dir)))
-            (expect (member "sub/.env" files) :to-be-truthy))))
+            (expect (member (expand-file-name "sub/.env" project-dir) files) :to-be-truthy))))
 
       (it "includes files inside hidden directories"
         (let* ((hidden-dir (expand-file-name ".hidden" project-dir))
@@ -3428,7 +3431,8 @@
           (make-directory hidden-dir)
           (write-region "secret" nil hidden-file)
           (let ((files (macher--directory-files project-dir)))
-            (expect (member ".hidden/secret.txt" files) :to-be-truthy))))
+            (expect (member (expand-file-name ".hidden/secret.txt" project-dir) files)
+                    :to-be-truthy))))
 
       (it "includes files inside hidden directories nested in normal directories"
         (let* ((subdir (expand-file-name "sub" project-dir))
@@ -3437,7 +3441,8 @@
           (make-directory nested-hidden-dir t)
           (write-region "cached" nil nested-hidden-file)
           (let ((files (macher--directory-files project-dir)))
-            (expect (member "sub/.cache/data.txt" files) :to-be-truthy)))))
+            (expect (member (expand-file-name "sub/.cache/data.txt" project-dir) files)
+                    :to-be-truthy)))))
 
     (describe "macher--get-buffer"
       (it "signals user-error when no workspace can be determined"
@@ -4808,7 +4813,188 @@
             ;; Get the same buffer again
             (let ((buffer2 (macher-action-buffer nil nil)))
               (expect buffer2 :to-be buffer1)
-              (expect setup-hook-call-count :to-equal 1)))))))
+              (expect setup-hook-call-count :to-equal 1))))))
+
+    (describe "with a custom macher-action-buffer-function"
+      :var (workspace other-workspace buffers)
+
+      (before-each
+        (setq workspace (cons 'project project-dir))
+        (setq other-workspace (cons 'project (expand-file-name "subdir/" project-dir)))
+        (setq buffers nil))
+
+      (after-each
+        (dolist (buffer buffers)
+          (when (buffer-live-p buffer)
+            (kill-buffer buffer))))
+
+      (it "calls the function with the workspace and makes its result the active buffer"
+        (let* ((buffer (generate-new-buffer "*custom-action*"))
+               (calls nil)
+               (macher-action-buffer-ui nil)
+               (macher-action-buffer-function
+                (lambda (ws)
+                  (push ws calls)
+                  buffer)))
+          (push buffer buffers)
+          (expect (macher-action-buffer workspace t) :to-be buffer)
+          (expect (macher-action-buffer workspace) :to-be buffer)
+          ;; Looking up the active buffer doesn't consult the function.
+          (expect calls :to-equal (list workspace))))
+
+      (it "tracks the active buffer when the function's result changes"
+        (let* ((first (generate-new-buffer "*custom-action-1*"))
+               (second (generate-new-buffer "*custom-action-2*"))
+               (next first)
+               (macher-action-buffer-ui nil)
+               (macher-action-buffer-function (lambda (_workspace) next)))
+          (setq buffers (list first second))
+          (expect (macher-action-buffer workspace t) :to-be first)
+          (setq next second)
+          (expect (macher-action-buffer workspace t) :to-be second)
+          (expect (macher-action-buffer workspace) :to-be second)
+          ;; The earlier buffer keeps its workspace binding.
+          (expect (buffer-local-value 'macher--workspace first) :to-equal workspace)))
+
+      (it "returns nil without side effects when no buffer has been selected for the workspace"
+        (let* ((calls 0)
+               (setup-count 0)
+               (macher-action-buffer-setup-hook (list (lambda () (cl-incf setup-count))))
+               (macher-action-buffer-function
+                (lambda (ws)
+                  (cl-incf calls)
+                  (macher-action-buffer-default ws))))
+          (expect (macher-action-buffer workspace) :to-be nil)
+          (expect calls :to-equal 0)
+          (expect setup-count :to-equal 0)
+          (expect (get-buffer (macher--buffer-name nil workspace)) :to-be nil)))
+
+      (it "returns nil once the active buffer has been killed"
+        (let* ((buffer (generate-new-buffer "*custom-action*"))
+               (macher-action-buffer-ui nil)
+               (macher-action-buffer-function (lambda (_workspace) buffer)))
+          (macher-action-buffer workspace t)
+          (kill-buffer buffer)
+          (expect (macher-action-buffer workspace) :to-be nil)))
+
+      (it "signals an error when the function doesn't return a live buffer"
+        (let ((macher-action-buffer-function (lambda (_workspace) "not-a-buffer")))
+          (expect (macher-action-buffer workspace t) :to-throw 'error)))
+
+      (it "binds the buffer to the workspace on every call, leaving default-directory alone"
+        (let* ((buffer (generate-new-buffer "*custom-action*"))
+               (macher-action-buffer-ui nil)
+               (macher-action-buffer-function (lambda (_workspace) buffer)))
+          (push buffer buffers)
+          (with-current-buffer buffer
+            (setq default-directory temporary-file-directory))
+          (macher-action-buffer workspace t)
+          (expect (buffer-local-value 'macher--workspace buffer) :to-equal workspace)
+          (macher-action-buffer other-workspace t)
+          (expect (buffer-local-value 'macher--workspace buffer) :to-equal other-workspace)
+          (expect (buffer-local-value 'default-directory buffer) :to-equal temporary-file-directory)
+          (expect (macher-action-buffer workspace) :to-be buffer)
+          (expect (macher-action-buffer other-workspace) :to-be buffer)))
+
+      (it "makes macher-abort and macher-process-request-dwim act on each workspace's active buffer"
+        (let* ((old (generate-new-buffer "*custom-action-old*"))
+               (new (generate-new-buffer "*custom-action-new*"))
+               (other (generate-new-buffer "*custom-action-other*"))
+               (old-fsm (gptel-make-fsm))
+               (new-fsm (gptel-make-fsm))
+               (other-fsm (gptel-make-fsm))
+               (next nil)
+               (macher-action-buffer-ui nil)
+               (macher-action-buffer-function (lambda (_workspace) next)))
+          (setq buffers (list old new other))
+          (spy-on 'gptel-abort)
+          (spy-on 'macher-process-request)
+          ;; Two actions in WORKSPACE, the second in a new buffer, and one in OTHER-WORKSPACE.
+          (setq next old)
+          (macher-action-buffer workspace t)
+          (setq next new)
+          (macher-action-buffer workspace t)
+          (setq next other)
+          (macher-action-buffer other-workspace t)
+          (with-current-buffer old
+            (setq macher--fsm-latest old-fsm))
+          (with-current-buffer new
+            (setq macher--fsm-latest new-fsm))
+          (with-current-buffer other
+            (setq macher--fsm-latest other-fsm))
+
+          ;; From a source buffer, each workspace resolves to its own active buffer.
+          (with-temp-buffer
+            (setq-local macher--workspace workspace)
+            (macher-abort)
+            (macher-process-request-dwim 'test))
+          (expect 'gptel-abort :to-have-been-called-with new)
+          (expect 'macher-process-request :to-have-been-called-with 'test new-fsm)
+          (spy-calls-reset 'gptel-abort)
+          (spy-calls-reset 'macher-process-request)
+          (with-temp-buffer
+            (setq-local macher--workspace other-workspace)
+            (macher-abort)
+            (macher-process-request-dwim 'test))
+          (expect 'gptel-abort :to-have-been-called-with other)
+          (expect 'macher-process-request :to-have-been-called-with 'test other-fsm)
+
+          ;; From the older action buffer itself, abort still targets the active buffer, while dwim
+          ;; prefers the buffer's own request.
+          (spy-calls-reset 'gptel-abort)
+          (spy-calls-reset 'macher-process-request)
+          (macher-abort old)
+          (with-current-buffer old
+            (macher-process-request-dwim 'test))
+          (expect 'gptel-abort :to-have-been-called-with new)
+          (expect 'macher-process-request :to-have-been-called-with 'test old-fsm)
+
+          ;; Once the active buffer is killed, nothing falls back to the older one.
+          (kill-buffer new)
+          (spy-calls-reset 'gptel-abort)
+          (spy-calls-reset 'macher-process-request)
+          (with-temp-buffer
+            (setq-local macher--workspace workspace)
+            (macher-abort)
+            (macher-process-request-dwim 'test))
+          (expect 'gptel-abort :not :to-have-been-called)
+          (expect 'macher-process-request :to-have-been-called-with 'test nil)))
+
+      (it "sets the default buffer's default-directory to the workspace root"
+        (let* ((macher-action-buffer-ui nil)
+               (buffer
+                (with-temp-buffer
+                  (setq default-directory temporary-file-directory)
+                  (macher-action-buffer other-workspace t))))
+          (push buffer buffers)
+          (expect (buffer-local-value 'default-directory buffer)
+                  :to-equal (macher--workspace-root other-workspace))))
+
+      (it "sets up a pre-existing buffer once, and again after its major mode changes"
+        (let* ((buffer (generate-new-buffer "*custom-action*"))
+               (setup-count 0)
+               (macher-action-buffer-ui 'basic)
+               (macher-action-buffer-setup-hook (list (lambda () (cl-incf setup-count))))
+               (macher-action-buffer-function (lambda (_workspace) buffer)))
+          (push buffer buffers)
+          (with-current-buffer buffer
+            (insert "existing content"))
+          (macher-action-buffer workspace t)
+          (macher-action-buffer workspace t)
+          (expect setup-count :to-equal 1)
+          (with-current-buffer buffer
+            (text-mode)
+            ;; The mode change discarded the hooks installed by the setup.
+            (expect (local-variable-p 'macher-before-action-functions) :to-be nil))
+          ;; Looking up the active buffer never runs the setup.
+          (expect (macher-action-buffer workspace) :to-be buffer)
+          (expect setup-count :to-equal 1)
+          (macher-action-buffer workspace t)
+          (expect setup-count :to-equal 2)
+          (with-current-buffer buffer
+            (expect (member #'macher--before-action-insert-prompt macher-before-action-functions)
+                    :to-be-truthy)
+            (expect (buffer-string) :to-equal "existing content"))))))
 
   (describe "macher--action-buffer-setup"
     (it "sets up basic UI correctly"
@@ -4882,6 +5068,29 @@
           (expect (bound-and-true-p gptel-mode) :to-be nil)
           ;; Check that major mode is still fundamental-mode.
           (expect major-mode :to-be 'fundamental-mode))))
+
+    (it "leaves the major mode and gptel-mode alone when they're already enabled"
+      (let ((macher-action-buffer-ui 'org))
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          ;; Re-running the major mode would kill this.
+          (setq-local macher-test--marker t)
+          ;; Re-enabling gptel-mode would restore state from the visited file.
+          (spy-on 'gptel--restore-state)
+          (macher--action-buffer-setup)
+          (expect (bound-and-true-p macher-test--marker) :to-be t)
+          (expect 'gptel--restore-state :not :to-have-been-called)
+          (expect (member #'macher--before-action-insert-prompt macher-before-action-functions)
+                  :to-be-truthy))))
+
+    (it "leaves a mode derived from gptel-default-mode alone in the default UI"
+      (let ((macher-action-buffer-ui 'default)
+            (gptel-default-mode 'text-mode))
+        (with-temp-buffer
+          (org-mode)
+          (macher--action-buffer-setup)
+          (expect major-mode :to-be 'org-mode))))
 
     (it "raises error for unrecognized UI value"
       (let ((macher-action-buffer-ui 'invalid-value))
@@ -6488,6 +6697,83 @@
                                 (temporary-file-directory)))))
         (expect (macher--resolve-workspace-path project-workspace non-existent-dir) :to-throw)))
 
+    (it "rejects traversal back into the workspace to reach a file not in the files list"
+      (let ((extra-file (expand-file-name "extra.txt" temp-workspace-root)))
+        (write-region "extra content" nil extra-file)
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (cl-remove-if
+                   (lambda (file) (string-match-p "extra\\.txt$" file))
+                   (macher--project-files (cdr workspace)))))
+        (expect (macher--resolve-workspace-path project-workspace "subdir/../extra.txt") :to-throw)
+        (expect (macher--resolve-workspace-path
+                 project-workspace
+                 (format "../%s/extra.txt" (file-name-nondirectory temp-workspace-root)))
+                :to-throw)
+        (expect (macher--resolve-workspace-path
+                 project-workspace (concat temp-workspace-root "/subdir/../extra.txt"))
+                :to-throw)))
+
+    (it "expands relative entries from a custom :get-files against the workspace root"
+      (let* ((outside-file (make-temp-file "macher-test-outside-"))
+             (outside-rel (file-relative-name outside-file temp-workspace-root))
+             (macher-workspace-types-alist
+              `((custom
+                 .
+                 (:get-root
+                  identity
+                  :get-name file-name-nondirectory
+                  :get-files
+                  ,(lambda (_id) (list "file1.txt" outside-rel))))))
+             (workspace `(custom . ,temp-workspace-root)))
+        (unwind-protect
+            (progn
+              (expect (macher--resolve-workspace-path workspace "file1.txt") :to-equal temp-file1)
+              (expect (macher--resolve-workspace-path workspace outside-file)
+                      :to-equal outside-file)
+              (expect (macher--resolve-workspace-path workspace outside-rel) :to-equal outside-file)
+              ;; Not listed, so still rejected.
+              (expect (macher--resolve-workspace-path workspace "file2.txt") :to-throw))
+          (delete-file outside-file))))
+
+    (it "matches absolute files list entries verbatim, so unnormalized entries grant nothing"
+      ;; The files list is compared by string after expanding the requested path.  Absolute
+      ;; entries aren't normalized, so the built-in listers must return expanded paths; a
+      ;; differently spelled entry fails closed rather than granting access.
+      (let* ((extra-file (expand-file-name "extra.txt" temp-workspace-root))
+             (outside-file (make-temp-file "macher-test-outside-"))
+             (outside-name (file-name-nondirectory outside-file)))
+        (write-region "extra content" nil extra-file)
+        (spy-on 'macher--workspace-files
+                :and-return-value
+                (list
+                 (concat temp-workspace-root "/subdir/../extra.txt")
+                 (concat temp-workspace-root "/../" outside-name)))
+        (unwind-protect
+            (progn
+              (expect (macher--resolve-workspace-path project-workspace "extra.txt") :to-throw)
+              (expect (macher--resolve-workspace-path project-workspace outside-file) :to-throw)
+              (expect (macher--resolve-workspace-path project-workspace (concat "../" outside-name))
+                      :to-throw))
+          (delete-file outside-file))))
+
+    (it "accepts every file from the built-in listers, including for unexpanded IDs"
+      (dolist (id
+               (list
+                temp-workspace-root
+                (file-name-as-directory temp-workspace-root)
+                (concat temp-workspace-root "/subdir/..")))
+        (dolist (type '(project directory))
+          (let* ((workspace (cons type id))
+                 (files (macher--workspace-files workspace)))
+            (expect files :to-contain temp-subfile)
+            (dolist (file files)
+              (expect (macher--resolve-workspace-path workspace file) :to-equal file)
+              (expect (macher--resolve-workspace-path
+                       workspace (file-relative-name file temp-workspace-root))
+                      :to-equal file))))))
+
     (it "handles broken symlinks"
       (let ((broken-symlink (expand-file-name "broken-symlink" temp-workspace-root)))
         (make-symbolic-link "/nonexistent/target" broken-symlink)
@@ -7013,6 +7299,30 @@
           (let ((result (macher--system-ensure-placeholder-or-context-string system)))
             (expect result :to-equal system)))))
 
+    (describe "nil input"
+      (it "returns the placeholder"
+        (expect (macher--system-ensure-placeholder-or-context-string nil)
+                :to-equal macher-context-string-placeholder))
+
+      (it "returns demarcated context when placeholder is nil"
+        (let ((macher-context-string-placeholder nil)
+              (macher-context-string-function (lambda () "PROJECT CONTEXT")))
+          (expect (macher--system-ensure-placeholder-or-context-string nil)
+                  :to-equal
+                  (concat
+                   macher-context-string-marker-start
+                   "PROJECT CONTEXT"
+                   macher-context-string-marker-end))))
+
+      (it "returns nil when placeholder and context-fn are nil"
+        (let ((macher-context-string-placeholder nil)
+              (macher-context-string-function nil))
+          (expect (macher--system-ensure-placeholder-or-context-string nil) :to-be nil)))
+
+      (it "wraps function that returns nil"
+        (let ((result (macher--system-ensure-placeholder-or-context-string (lambda () nil))))
+          (expect (funcall result) :to-equal macher-context-string-placeholder))))
+
     (describe "list input"
       (it "appends placeholder to first element of list"
         (let* ((system '("System message" "user message" "assistant message"))
@@ -7271,6 +7581,13 @@
             (let ((test-buffer (current-buffer)))
               (macher--system-replace-placeholder system test-buffer)
               (expect captured-buffer :to-be test-buffer))))))
+
+    (describe "nil input"
+      (it "returns nil"
+        (expect (macher--system-replace-placeholder nil) :to-be nil))
+
+      (it "returns nil for function that returns nil"
+        (expect (macher--system-replace-placeholder (lambda () nil)) :to-be nil)))
 
     (describe "list input"
       (it "replaces placeholder in first element only"

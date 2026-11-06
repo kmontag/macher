@@ -10,17 +10,21 @@ https://github.com/user-attachments/assets/af8bed3d-913b-4365-9f71-85d969810d22
 form of patches, potentially involving multiple files. You can apply the patches directly to your
 project, or send them back for revision.
 
-macher is a lightweight Emacs-native take on the editing workflows of more full-featured tools like
-[Aider](https://aider.chat/) or [Plandex](https://plandex.ai/). It works with any gptel backend that
+macher is a lightweight Emacs-native take on LLM file editing. In a world filled with excellent
+agentic development tools, macher is focused on the simple joys of reading and editing text. I reach
+for it when I'm researching a codebase, or when I'm actively coding/writing and want to drive stick.
+Use it on its own or alongside your other tools, to stay nimble when a heavier agentic stack is
+unavailable or undesired.
+
+macher's tools are designed to run safely without per-call confirmation. [By default](#workspaces),
+file access is restricted to the current `project.el` project, or to a single projectless file.
+Edits happen in-memory and get collected into a single patch, with nothing written to disk until you
+apply it.
+
+macher takes inspiration from gptel's flexibility and visibility. You can use the presets and tools
+in your own workflows, or use the built-in action commands for a quick and easy editing setup. It
+doesn't touch your gptel globals (unless you tell it to), and works with any gptel backend that
 supports tool use.
-
-It's great for "pseudo-agentic" workflows, for example when you want your LLM to implement a set of
-changes, maybe call other tools to do research, etc - but you want to review the aggregate changes
-before writing them to disk.
-
-macher takes inspiration from gptel's flexibility and visibility. It doesn't touch your gptel
-globals (unless you tell it to) - it's just a set of presets, tools, and transforms that you can use
-as you like. Or you can use the built-in action commands for a quick and easy workflow.
 
 ## Installation and configuration
 
@@ -155,6 +159,9 @@ action buffer using `gptel-send`.
 
 You can define custom actions in `macher-actions-alist`.
 
+By default, actions run in a single ephemeral buffer per workspace. To send them somewhere else,
+e.g. a file, set `macher-action-buffer-function`.
+
 ### Workspace context
 
 macher can add information about the current workspace (project name, location, file listings) to
@@ -178,18 +185,22 @@ The workspace description can be customized by setting the `macher-context-strin
 
 The **workspace** is the set of files macher can read and edit.
 
-The workspace is determined by `macher-workspace-functions`. All file operations are restricted to
-the current workspace. By default, macher supports:
+The workspace is determined from the current buffer by `macher-workspace-functions`. All file
+operations are restricted to the current workspace. By default, macher supports:
 
 - **`project`**: A project.el project
 - **`file`**: A single non-project file
+
+For `project` workspaces, only the `project-files` are exposed to the LLM. By default, this means
+that things like `.gitignore`'d files won't be visible to the LLM. If you've customized
+`project.el`, you might want to verify that your file listings exclude anything sensitive.
 
 A **`directory`** workspace type is also available for working in arbitrary directories (not managed
 by project.el). It is not enabled by default to avoid accidentally exposing broad directories to the
 LLM. To enable it, you can do something like:
 
 ```elisp
-(setq macher-workspace-functions '(macher-workspace-project macher-workspace-directory))
+(setopt macher-workspace-functions '(macher-workspace-project macher-workspace-directory))
 ```
 
 To add custom workspace types, customize `macher-workspace-types-alist` and
@@ -249,8 +260,9 @@ You can see customizable variables/sub-groups with `M-x customize-group RET mach
 | --------------------------------- | ------------------------------------------------------------------- |
 | `macher-actions-alist`            | Defines available actions (implement, revise, discuss, etc.)        |
 | `macher-focus-string`             | Function to generate description of current code location           |
+| `macher-action-buffer-function`   | Chooses the buffer each action runs in                              |
 | `macher-action-buffer-ui`         | UI style for action buffers: `'default`, `'org`, `'basic`, or `nil` |
-| `macher-action-buffer-setup-hook` | Hook run when creating action buffers                               |
+| `macher-action-buffer-setup-hook` | Hook run when setting up action buffers                             |
 | `macher-action-dispatch-hook`     | Hook run when invoking an action                                    |
 | `macher-before-action-functions`  | Functions run before sending the request                            |
 | `macher-after-action-functions`   | Functions run after request completes                               |
