@@ -5,8 +5,8 @@
   "description": "Development dependencies for macher.el",
   "scripts": {
     "test": "eask exec buttercup --stale-file-error tests/",
-    "//": "postinstall copies package files so elisp-autofmt can read macro definitions even when packages aren't installed in the user's Emacs",
-    "postinstall": "eask install-deps --dev && cp $(ls .eask/*/elpa/buttercup-*/buttercup.el | head -1) .eask/buttercup.el && cp $(ls .eask/*/elpa/gptel-*/gptel.el | head -1) .eask/gptel.el && cp $(ls .eask/*/elpa/gptel-*/gptel-ollama.el | head -1) .eask/gptel-ollama.el"
+    "//": "postinstall installs compat 31.1 on older Emacsen (see scripts/install-compat.el) and copies package files so elisp-autofmt can read macro definitions even when packages aren't installed in the user's Emacs",
+    "postinstall": "eask emacs --batch -l scripts/install-compat.el && eask install-deps --dev && cp $(ls .eask/*/elpa/buttercup-*/buttercup.el | head -1) .eask/buttercup.el && cp $(ls .eask/*/elpa/gptel-*/gptel.el | head -1) .eask/gptel.el && cp $(ls .eask/*/elpa/gptel-*/gptel-ollama.el | head -1) .eask/gptel-ollama.el"
   },
   "devDependencies": {
     "@emacs-eask/cli": "^0.12.9",
