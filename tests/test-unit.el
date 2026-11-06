@@ -4891,6 +4891,70 @@
           (expect (macher-action-buffer workspace) :to-be buffer)
           (expect (macher-action-buffer other-workspace) :to-be buffer)))
 
+      (it "makes macher-abort and macher-process-request-dwim act on each workspace's latest buffer"
+        (let* ((old (generate-new-buffer "*custom-action-old*"))
+               (new (generate-new-buffer "*custom-action-new*"))
+               (other (generate-new-buffer "*custom-action-other*"))
+               (old-fsm (gptel-make-fsm))
+               (new-fsm (gptel-make-fsm))
+               (other-fsm (gptel-make-fsm))
+               (next nil)
+               (macher-action-buffer-ui nil)
+               (macher-action-buffer-function (lambda (_workspace) next)))
+          (setq buffers (list old new other))
+          (spy-on 'gptel-abort)
+          (spy-on 'macher-process-request)
+          ;; Two actions in WORKSPACE, the second in a new buffer, and one in OTHER-WORKSPACE.
+          (setq next old)
+          (macher-action-buffer workspace t)
+          (setq next new)
+          (macher-action-buffer workspace t)
+          (setq next other)
+          (macher-action-buffer other-workspace t)
+          (with-current-buffer old
+            (setq macher--fsm-latest old-fsm))
+          (with-current-buffer new
+            (setq macher--fsm-latest new-fsm))
+          (with-current-buffer other
+            (setq macher--fsm-latest other-fsm))
+
+          ;; From a source buffer, each workspace resolves to its own latest buffer.
+          (with-temp-buffer
+            (setq-local macher--workspace workspace)
+            (macher-abort)
+            (macher-process-request-dwim 'test))
+          (expect 'gptel-abort :to-have-been-called-with new)
+          (expect 'macher-process-request :to-have-been-called-with 'test new-fsm)
+          (spy-calls-reset 'gptel-abort)
+          (spy-calls-reset 'macher-process-request)
+          (with-temp-buffer
+            (setq-local macher--workspace other-workspace)
+            (macher-abort)
+            (macher-process-request-dwim 'test))
+          (expect 'gptel-abort :to-have-been-called-with other)
+          (expect 'macher-process-request :to-have-been-called-with 'test other-fsm)
+
+          ;; From the older action buffer itself, abort still targets the latest buffer, while dwim
+          ;; prefers the buffer's own request.
+          (spy-calls-reset 'gptel-abort)
+          (spy-calls-reset 'macher-process-request)
+          (macher-abort old)
+          (with-current-buffer old
+            (macher-process-request-dwim 'test))
+          (expect 'gptel-abort :to-have-been-called-with new)
+          (expect 'macher-process-request :to-have-been-called-with 'test old-fsm)
+
+          ;; Once the latest buffer is killed, nothing falls back to the older one.
+          (kill-buffer new)
+          (spy-calls-reset 'gptel-abort)
+          (spy-calls-reset 'macher-process-request)
+          (with-temp-buffer
+            (setq-local macher--workspace workspace)
+            (macher-abort)
+            (macher-process-request-dwim 'test))
+          (expect 'gptel-abort :not :to-have-been-called)
+          (expect 'macher-process-request :to-have-been-called-with 'test nil)))
+
       (it "sets the default buffer's default-directory to the workspace root"
         (let* ((macher-action-buffer-ui nil)
                (buffer
