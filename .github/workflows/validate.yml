@@ -36,10 +36,7 @@ jobs:
     steps:
       - id: versions
         run: |
-          # "release-snapshot" is the pretest build of the current release branch (Emacs 31 as of
-          # writing). There's no tagged Emacs 31 in nix-emacs-ci yet; swap this for the version
-          # number once one exists.
-          echo "emacs-versions=[\"30.1\",\"release-snapshot\"]" >> "$GITHUB_OUTPUT"
+          echo "emacs-versions=[\"30.1\",\"31.1\"]" >> "$GITHUB_OUTPUT"
 
   compile:
     needs: prepare
@@ -86,7 +83,7 @@ jobs:
           emacs-version: ${{ matrix.emacs-version }}
 
       - name: Cache the model
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/llama-cache
           key: llama-${{ env.LLAMA_MODEL }}

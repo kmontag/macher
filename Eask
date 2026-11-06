@@ -1,4 +1,4 @@
-;; -*- mode: lisp -*-
+;; -*- mode: lisp; lexical-binding: t -*-
 (package "macher" "0.5.2" "LLM implementation toolset")
 
 (website-url "https://github.com/kmontag/macher")

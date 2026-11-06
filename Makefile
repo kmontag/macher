@@ -20,17 +20,9 @@ $(EASK) $(PRETTIER) .eask: package.json package-lock.json Eask
 # Analyze the Eask file itself for inconsistencies, and exit unsuccessfully if any are found.
 .PHONY: analyze
 analyze: $(EASK) .eask
-# This always seems to exit with status 0, and it's unclear whether output will be expected on
-# stdout or stderr, see https://github.com/emacs-eask/cli/issues/276. But in the successful case,
-# the output will be exactly "(Checked 1 file)" (possibly with blank lines and color encodings around
-# it, even when --no-color is passed - we strip these using sed and tr).
-	@OUTPUT=$$($(EASK) --strict --no-color analyze --json 2>&1); \
-	echo "$$OUTPUT"; \
-	CLEANED_OUTPUT=$$(echo "$$OUTPUT" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\n' ); \
-	if [ "$$CLEANED_OUTPUT" != "(Checked 1 file)" ]; then \
-		echo "Error: eask analyze output was '$$CLEANED_OUTPUT', expected '(Checked 1 file)'" >&2; \
-		exit 1; \
-	fi
+# --strict is what makes warnings (e.g. a version mismatch with macher.el) fail the build; without
+# it, only errors produce a non-zero exit status.
+	$(EASK) --strict analyze
 
 # Generic target for lint commands that take a list of files.
 .PHONY: lint.%

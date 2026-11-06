@@ -1,5 +1,29 @@
-FROM node:24-alpine3.23
-RUN apk add bash emacs-nox git grep make patch python3
+# Emacs built from source: elisp-autofmt reads argument lists out of the running Emacs, so the
+# formatting depends on the Emacs version, and this needs to match what the editor runs (31.1).
+# Alpine 3.24 packages 30.2, which formats some calls differently.
+#
+# The tarball is checked against EMACS_SHA256 whichever mirror answers. On a version bump, take the
+# hash from a tarball that passes
+#   gpgv --keyring gnu-keyring.gpg emacs-<version>.tar.xz.sig emacs-<version>.tar.xz
+# with all three files from https://mirrors.kernel.org/gnu/.
+#
+# --with-gnutls after --without-all, which would otherwise turn it off: eask fetches packages from
+# inside Emacs over HTTPS.
+FROM node:26-alpine3.24 AS emacs
+RUN apk add build-base curl gnutls-dev linux-headers ncurses-dev pkgconf
+ARG EMACS_VERSION=31.1
+ARG EMACS_SHA256=1da5790d9580c81932b5bf700633114468da7b3412d69faa767daebf974f4586
+RUN curl -fsSL -o /tmp/emacs.tar.xz "https://mirrors.kernel.org/gnu/emacs/emacs-${EMACS_VERSION}.tar.xz" \
+  && echo "${EMACS_SHA256}  /tmp/emacs.tar.xz" | sha256sum -c - \
+  && tar -xJf /tmp/emacs.tar.xz -C /tmp \
+  && cd "/tmp/emacs-${EMACS_VERSION}" \
+  && ./configure --prefix=/usr/local --without-all --without-x --with-modules=no --with-gnutls \
+  && make -j"$(nproc)" \
+  && make install
+
+FROM node:26-alpine3.24
+RUN apk add bash git gnutls grep make ncurses-libs patch python3
+COPY --from=emacs /usr/local/ /usr/local/
 
 # Warm the npm cache so postCreateCommand is fast.
 WORKDIR /tmp/macher-deps

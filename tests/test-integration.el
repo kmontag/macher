@@ -258,10 +258,9 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                (gptel-get-backend backend-name)))
             (response-buffer (generate-new-buffer " *test-response*")))
          (unless backend
-           (error
-            "No macher-test-backend found for hostname: %s (backend-name: %s)"
-            hostname
-            backend-name))
+           (error "No macher-test-backend found for hostname: %s (backend-name: %s)"
+                  hostname
+                  backend-name))
 
          ;; Store the request data on the correct backend instance.
          (when url-request-data
