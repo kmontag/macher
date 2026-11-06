@@ -4823,7 +4823,7 @@
           (when (buffer-live-p buffer)
             (kill-buffer buffer))))
 
-      (it "calls the function with the workspace and records its result as the latest buffer"
+      (it "calls the function with the workspace and makes its result the active buffer"
         (let* ((buffer (generate-new-buffer "*custom-action*"))
                (calls nil)
                (macher-action-buffer-ui nil)
@@ -4834,10 +4834,10 @@
           (push buffer buffers)
           (expect (macher-action-buffer workspace t) :to-be buffer)
           (expect (macher-action-buffer workspace) :to-be buffer)
-          ;; Looking up the latest buffer doesn't consult the function.
+          ;; Looking up the active buffer doesn't consult the function.
           (expect calls :to-equal (list workspace))))
 
-      (it "tracks the latest buffer when the function's result changes"
+      (it "tracks the active buffer when the function's result changes"
         (let* ((first (generate-new-buffer "*custom-action-1*"))
                (second (generate-new-buffer "*custom-action-2*"))
                (next first)
@@ -4864,7 +4864,7 @@
           (expect setup-count :to-equal 0)
           (expect (get-buffer (macher--buffer-name nil workspace)) :to-be nil)))
 
-      (it "returns nil once the latest buffer has been killed"
+      (it "returns nil once the active buffer has been killed"
         (let* ((buffer (generate-new-buffer "*custom-action*"))
                (macher-action-buffer-ui nil)
                (macher-action-buffer-function (lambda (_workspace) buffer)))
@@ -4891,7 +4891,7 @@
           (expect (macher-action-buffer workspace) :to-be buffer)
           (expect (macher-action-buffer other-workspace) :to-be buffer)))
 
-      (it "makes macher-abort and macher-process-request-dwim act on each workspace's latest buffer"
+      (it "makes macher-abort and macher-process-request-dwim act on each workspace's active buffer"
         (let* ((old (generate-new-buffer "*custom-action-old*"))
                (new (generate-new-buffer "*custom-action-new*"))
                (other (generate-new-buffer "*custom-action-other*"))
@@ -4918,7 +4918,7 @@
           (with-current-buffer other
             (setq macher--fsm-latest other-fsm))
 
-          ;; From a source buffer, each workspace resolves to its own latest buffer.
+          ;; From a source buffer, each workspace resolves to its own active buffer.
           (with-temp-buffer
             (setq-local macher--workspace workspace)
             (macher-abort)
@@ -4934,7 +4934,7 @@
           (expect 'gptel-abort :to-have-been-called-with other)
           (expect 'macher-process-request :to-have-been-called-with 'test other-fsm)
 
-          ;; From the older action buffer itself, abort still targets the latest buffer, while dwim
+          ;; From the older action buffer itself, abort still targets the active buffer, while dwim
           ;; prefers the buffer's own request.
           (spy-calls-reset 'gptel-abort)
           (spy-calls-reset 'macher-process-request)
@@ -4944,7 +4944,7 @@
           (expect 'gptel-abort :to-have-been-called-with new)
           (expect 'macher-process-request :to-have-been-called-with 'test old-fsm)
 
-          ;; Once the latest buffer is killed, nothing falls back to the older one.
+          ;; Once the active buffer is killed, nothing falls back to the older one.
           (kill-buffer new)
           (spy-calls-reset 'gptel-abort)
           (spy-calls-reset 'macher-process-request)
@@ -4981,7 +4981,7 @@
             (text-mode)
             ;; The mode change discarded the hooks installed by the setup.
             (expect (local-variable-p 'macher-before-action-functions) :to-be nil))
-          ;; Looking up the latest buffer never runs the setup.
+          ;; Looking up the active buffer never runs the setup.
           (expect (macher-action-buffer workspace) :to-be buffer)
           (expect setup-count :to-equal 1)
           (macher-action-buffer workspace t)

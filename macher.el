@@ -420,9 +420,9 @@ On every action, macher binds the buffer to WORKSPACE (see
 so e.g. relative links in a file-visiting buffer still resolve against
 the file's directory.  The first time a buffer is used, and again after
 its major mode changes, macher also applies `macher-action-buffer-ui'
-and runs `macher-action-buffer-setup-hook'.  The buffer is then
-remembered as the workspace's latest action buffer, which commands like
-`macher-abort' operate on.
+and runs `macher-action-buffer-setup-hook'.  The buffer then becomes
+the workspace's active action buffer, which commands like
+`macher-abort' operate on (see `macher-action-buffer').
 
 The workspace binding isn't saved with a file.  That only matters if
 you reopen a saved action buffer and send from it directly (e.g. with
@@ -1288,7 +1288,7 @@ workspace is loaded into in-memory editing buffers.")
 (put 'macher--workspace 'permanent-local t)
 
 (defvar macher--action-buffers (make-hash-table :test #'equal)
-  "Hash table mapping each workspace to its latest action buffer.
+  "Hash table mapping each workspace to its active action buffer.
 
 Updated each time `macher-action-buffer-function' picks a buffer for an
 action.")
@@ -2037,24 +2037,28 @@ single non-file buffer per workspace.  When the buffer is created, its
 `default-directory' is set to the workspace root."
   (car (macher--get-buffer nil workspace t)))
 
-(defun macher-action-buffer (&optional workspace select)
+(defun macher-action-buffer (&optional workspace activate)
   "Get the macher action buffer associated with WORKSPACE.
 
-The action buffer is where requests sent via `macher-action' run.
+The action buffer is where requests sent via `macher-action' run.  A
+workspace's active action buffer is the one most recently activated for
+an action.
 
-If SELECT is nil, return the latest action buffer used for WORKSPACE, or
-nil if there is none or it has been killed.  Nothing is created.
+If ACTIVATE is nil, return WORKSPACE's active action buffer, or nil if
+there is none or it has been killed.  Nothing is created.
 
-If SELECT is non-nil, choose the buffer for a new action by calling
-`macher-action-buffer-function', associate it with WORKSPACE, set it up
-if needed (see `macher-action-buffer-ui' and
-`macher-action-buffer-setup-hook'), and record it as WORKSPACE's latest
-action buffer.  `macher-action' does this once per action.
+If ACTIVATE is non-nil, call `macher-action-buffer-function' to get the
+buffer for a new action, associate it with WORKSPACE, set it up if
+needed (see `macher-action-buffer-ui' and
+`macher-action-buffer-setup-hook'), and make it WORKSPACE's active
+action buffer.  `macher-action' does this once per action.  Note that
+the function is consulted every time, so this may return a different
+buffer than the currently active one.
 
 When WORKSPACE is nil, use the current buffer's workspace as determined
 by `macher-workspace'."
   (let ((workspace (macher--resolve-workspace workspace)))
-    (if select
+    (if activate
         (let ((buffer (funcall macher-action-buffer-function workspace)))
           (unless (buffer-live-p buffer)
             (error "`macher-action-buffer-function' returned %S, not a live buffer" buffer))
@@ -4796,8 +4800,8 @@ implements one possible workflow."
 (defun macher-abort (&optional buf)
   "Abort any active macher action associated with buffer BUF.
 
-In other words, abort gptel requests running in the latest macher
-action buffer used for the `macher-workspace' of BUF (see
+In other words, abort gptel requests running in the active macher
+action buffer for the `macher-workspace' of BUF (see
 `macher-action-buffer').
 
 If a callback was provided to the original request, it will be called
@@ -4842,8 +4846,8 @@ can be provided.
 
 This function processes the most recent macher request in the current
 buffer (i.e. the local value of `macher--fsm-latest') if present,
-otherwise uses the most recent macher request in the latest action
-buffer used for the current workspace."
+otherwise uses the most recent macher request in the active action
+buffer for the current workspace (see `macher-action-buffer')."
   (interactive (list 'interactive))
   (let ((fsm
          (or macher--fsm-latest
