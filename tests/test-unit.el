@@ -4808,7 +4808,188 @@
             ;; Get the same buffer again
             (let ((buffer2 (macher-action-buffer nil nil)))
               (expect buffer2 :to-be buffer1)
-              (expect setup-hook-call-count :to-equal 1)))))))
+              (expect setup-hook-call-count :to-equal 1))))))
+
+    (describe "with a custom macher-action-buffer-function"
+      :var (workspace other-workspace buffers)
+
+      (before-each
+        (setq workspace (cons 'project project-dir))
+        (setq other-workspace (cons 'project (expand-file-name "subdir/" project-dir)))
+        (setq buffers nil))
+
+      (after-each
+        (dolist (buffer buffers)
+          (when (buffer-live-p buffer)
+            (kill-buffer buffer))))
+
+      (it "calls the function with the workspace and makes its result the active buffer"
+        (let* ((buffer (generate-new-buffer "*custom-action*"))
+               (calls nil)
+               (macher-action-buffer-ui nil)
+               (macher-action-buffer-function
+                (lambda (ws)
+                  (push ws calls)
+                  buffer)))
+          (push buffer buffers)
+          (expect (macher-action-buffer workspace t) :to-be buffer)
+          (expect (macher-action-buffer workspace) :to-be buffer)
+          ;; Looking up the active buffer doesn't consult the function.
+          (expect calls :to-equal (list workspace))))
+
+      (it "tracks the active buffer when the function's result changes"
+        (let* ((first (generate-new-buffer "*custom-action-1*"))
+               (second (generate-new-buffer "*custom-action-2*"))
+               (next first)
+               (macher-action-buffer-ui nil)
+               (macher-action-buffer-function (lambda (_workspace) next)))
+          (setq buffers (list first second))
+          (expect (macher-action-buffer workspace t) :to-be first)
+          (setq next second)
+          (expect (macher-action-buffer workspace t) :to-be second)
+          (expect (macher-action-buffer workspace) :to-be second)
+          ;; The earlier buffer keeps its workspace binding.
+          (expect (buffer-local-value 'macher--workspace first) :to-equal workspace)))
+
+      (it "returns nil without side effects when no buffer has been selected for the workspace"
+        (let* ((calls 0)
+               (setup-count 0)
+               (macher-action-buffer-setup-hook (list (lambda () (cl-incf setup-count))))
+               (macher-action-buffer-function
+                (lambda (ws)
+                  (cl-incf calls)
+                  (macher-action-buffer-default ws))))
+          (expect (macher-action-buffer workspace) :to-be nil)
+          (expect calls :to-equal 0)
+          (expect setup-count :to-equal 0)
+          (expect (get-buffer (macher--buffer-name nil workspace)) :to-be nil)))
+
+      (it "returns nil once the active buffer has been killed"
+        (let* ((buffer (generate-new-buffer "*custom-action*"))
+               (macher-action-buffer-ui nil)
+               (macher-action-buffer-function (lambda (_workspace) buffer)))
+          (macher-action-buffer workspace t)
+          (kill-buffer buffer)
+          (expect (macher-action-buffer workspace) :to-be nil)))
+
+      (it "signals an error when the function doesn't return a live buffer"
+        (let ((macher-action-buffer-function (lambda (_workspace) "not-a-buffer")))
+          (expect (macher-action-buffer workspace t) :to-throw 'error)))
+
+      (it "binds the buffer to the workspace on every call, leaving default-directory alone"
+        (let* ((buffer (generate-new-buffer "*custom-action*"))
+               (macher-action-buffer-ui nil)
+               (macher-action-buffer-function (lambda (_workspace) buffer)))
+          (push buffer buffers)
+          (with-current-buffer buffer
+            (setq default-directory temporary-file-directory))
+          (macher-action-buffer workspace t)
+          (expect (buffer-local-value 'macher--workspace buffer) :to-equal workspace)
+          (macher-action-buffer other-workspace t)
+          (expect (buffer-local-value 'macher--workspace buffer) :to-equal other-workspace)
+          (expect (buffer-local-value 'default-directory buffer) :to-equal temporary-file-directory)
+          (expect (macher-action-buffer workspace) :to-be buffer)
+          (expect (macher-action-buffer other-workspace) :to-be buffer)))
+
+      (it "makes macher-abort and macher-process-request-dwim act on each workspace's active buffer"
+        (let* ((old (generate-new-buffer "*custom-action-old*"))
+               (new (generate-new-buffer "*custom-action-new*"))
+               (other (generate-new-buffer "*custom-action-other*"))
+               (old-fsm (gptel-make-fsm))
+               (new-fsm (gptel-make-fsm))
+               (other-fsm (gptel-make-fsm))
+               (next nil)
+               (macher-action-buffer-ui nil)
+               (macher-action-buffer-function (lambda (_workspace) next)))
+          (setq buffers (list old new other))
+          (spy-on 'gptel-abort)
+          (spy-on 'macher-process-request)
+          ;; Two actions in WORKSPACE, the second in a new buffer, and one in OTHER-WORKSPACE.
+          (setq next old)
+          (macher-action-buffer workspace t)
+          (setq next new)
+          (macher-action-buffer workspace t)
+          (setq next other)
+          (macher-action-buffer other-workspace t)
+          (with-current-buffer old
+            (setq macher--fsm-latest old-fsm))
+          (with-current-buffer new
+            (setq macher--fsm-latest new-fsm))
+          (with-current-buffer other
+            (setq macher--fsm-latest other-fsm))
+
+          ;; From a source buffer, each workspace resolves to its own active buffer.
+          (with-temp-buffer
+            (setq-local macher--workspace workspace)
+            (macher-abort)
+            (macher-process-request-dwim 'test))
+          (expect 'gptel-abort :to-have-been-called-with new)
+          (expect 'macher-process-request :to-have-been-called-with 'test new-fsm)
+          (spy-calls-reset 'gptel-abort)
+          (spy-calls-reset 'macher-process-request)
+          (with-temp-buffer
+            (setq-local macher--workspace other-workspace)
+            (macher-abort)
+            (macher-process-request-dwim 'test))
+          (expect 'gptel-abort :to-have-been-called-with other)
+          (expect 'macher-process-request :to-have-been-called-with 'test other-fsm)
+
+          ;; From the older action buffer itself, abort still targets the active buffer, while dwim
+          ;; prefers the buffer's own request.
+          (spy-calls-reset 'gptel-abort)
+          (spy-calls-reset 'macher-process-request)
+          (macher-abort old)
+          (with-current-buffer old
+            (macher-process-request-dwim 'test))
+          (expect 'gptel-abort :to-have-been-called-with new)
+          (expect 'macher-process-request :to-have-been-called-with 'test old-fsm)
+
+          ;; Once the active buffer is killed, nothing falls back to the older one.
+          (kill-buffer new)
+          (spy-calls-reset 'gptel-abort)
+          (spy-calls-reset 'macher-process-request)
+          (with-temp-buffer
+            (setq-local macher--workspace workspace)
+            (macher-abort)
+            (macher-process-request-dwim 'test))
+          (expect 'gptel-abort :not :to-have-been-called)
+          (expect 'macher-process-request :to-have-been-called-with 'test nil)))
+
+      (it "sets the default buffer's default-directory to the workspace root"
+        (let* ((macher-action-buffer-ui nil)
+               (buffer
+                (with-temp-buffer
+                  (setq default-directory temporary-file-directory)
+                  (macher-action-buffer other-workspace t))))
+          (push buffer buffers)
+          (expect (buffer-local-value 'default-directory buffer)
+                  :to-equal (macher--workspace-root other-workspace))))
+
+      (it "sets up a pre-existing buffer once, and again after its major mode changes"
+        (let* ((buffer (generate-new-buffer "*custom-action*"))
+               (setup-count 0)
+               (macher-action-buffer-ui 'basic)
+               (macher-action-buffer-setup-hook (list (lambda () (cl-incf setup-count))))
+               (macher-action-buffer-function (lambda (_workspace) buffer)))
+          (push buffer buffers)
+          (with-current-buffer buffer
+            (insert "existing content"))
+          (macher-action-buffer workspace t)
+          (macher-action-buffer workspace t)
+          (expect setup-count :to-equal 1)
+          (with-current-buffer buffer
+            (text-mode)
+            ;; The mode change discarded the hooks installed by the setup.
+            (expect (local-variable-p 'macher-before-action-functions) :to-be nil))
+          ;; Looking up the active buffer never runs the setup.
+          (expect (macher-action-buffer workspace) :to-be buffer)
+          (expect setup-count :to-equal 1)
+          (macher-action-buffer workspace t)
+          (expect setup-count :to-equal 2)
+          (with-current-buffer buffer
+            (expect (member #'macher--before-action-insert-prompt macher-before-action-functions)
+                    :to-be-truthy)
+            (expect (buffer-string) :to-equal "existing content"))))))
 
   (describe "macher--action-buffer-setup"
     (it "sets up basic UI correctly"
@@ -4882,6 +5063,29 @@
           (expect (bound-and-true-p gptel-mode) :to-be nil)
           ;; Check that major mode is still fundamental-mode.
           (expect major-mode :to-be 'fundamental-mode))))
+
+    (it "leaves the major mode and gptel-mode alone when they're already enabled"
+      (let ((macher-action-buffer-ui 'org))
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          ;; Re-running the major mode would kill this.
+          (setq-local macher-test--marker t)
+          ;; Re-enabling gptel-mode would restore state from the visited file.
+          (spy-on 'gptel--restore-state)
+          (macher--action-buffer-setup)
+          (expect (bound-and-true-p macher-test--marker) :to-be t)
+          (expect 'gptel--restore-state :not :to-have-been-called)
+          (expect (member #'macher--before-action-insert-prompt macher-before-action-functions)
+                  :to-be-truthy))))
+
+    (it "leaves a mode derived from gptel-default-mode alone in the default UI"
+      (let ((macher-action-buffer-ui 'default)
+            (gptel-default-mode 'text-mode))
+        (with-temp-buffer
+          (org-mode)
+          (macher--action-buffer-setup)
+          (expect major-mode :to-be 'org-mode))))
 
     (it "raises error for unrecognized UI value"
       (let ((macher-action-buffer-ui 'invalid-value))

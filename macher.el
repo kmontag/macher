@@ -402,16 +402,47 @@ actions."
        (:summary (string :tag "Summarized prompt (optional)"))))))
   :group 'macher-actions)
 
+(defcustom macher-action-buffer-function #'macher-action-buffer-default
+  "Function that returns the buffer to run a macher action in.
+
+The function is called once per `macher-action' with the action's
+WORKSPACE, from the action's source buffer.  It must return a live
+buffer, e.g. one visiting a file via `find-file-noselect'.  The action
+stays in that buffer until its request finishes, so the function can
+return a different buffer each time (e.g. a new file per day).
+
+The default, `macher-action-buffer-default', returns one shared non-file
+buffer per workspace, with its `default-directory' set to the workspace
+root.
+
+On every action, macher binds the buffer to WORKSPACE (see
+`macher-workspace').  The first time a buffer is used, and again after
+its local variables are cleared (e.g. if the major mode changes), macher
+also applies `macher-action-buffer-ui' and runs
+`macher-action-buffer-setup-hook'.  The buffer then becomes the
+workspace's active action buffer, which commands like `macher-abort'
+operate on (see `macher-action-buffer').
+
+The workspace binding isn't saved with a file.  That only matters if
+you reopen a saved action buffer and send from it directly (e.g. with
+`gptel-send') before running another action in it: the workspace is
+then determined from the file's own location.  To avoid that, store the
+workspace in the file from a `macher-before-action-functions' entry and
+read it back from a `macher-workspace-functions' entry."
+  :type 'function
+  :group 'macher-actions)
+
 (defcustom macher-action-buffer-ui 'default
   "Specifies a base UI configuration to use for action buffers.
 
-The action buffer for a workspace is the shared buffer where gptel
-requests are made when using `macher-action' (or its wrappers like
-`macher-implement').
+An action buffer is a buffer where gptel requests are made when using
+`macher-action' (or its wrappers like `macher-implement').  See
+`macher-action-buffer-function'.
 
-This value controls the buffer-local setup that happens just after an
-action buffer is created, and just before the
-`macher-action-buffer-setup-hook' is fired.  It effectively sets up a
+This value controls the buffer-local setup that happens when a buffer is
+first used as an action buffer, just before the
+`macher-action-buffer-setup-hook' is fired.  The setup runs again if the
+buffer's local variables are cleared.  It effectively sets up a
 predefined \"pre\" function for the `macher-action-buffer-setup-hook'.
 
 The choices are:
@@ -422,11 +453,13 @@ The choices are:
 
 - ='default' - like ='basic', but also enables `gptel-mode' and the
   global `gptel-default-mode' (e.g. markdown or org), and ensures tool
-  calls are rendered.
+  calls are rendered.  The major mode is left alone if the buffer is
+  already in (a mode derived from) `gptel-default-mode'.
 
 - ='org' - like ='default', but instead of the `gptel-default-mode',
-  enables `org-mode'.  If you're already using `org-mode' as your
-  `gptel-default-mode', this will behave exactly the same as ='default'.
+  enables `org-mode' unless the buffer is already in an Org mode.  If
+  you're already using `org-mode' as your `gptel-default-mode', this
+  will behave exactly the same as ='default'.
 
 - nil - don't perform any action buffer setup.  The action buffer will
   just be a `fundamental-mode' buffer which receives the responses from
@@ -446,12 +479,14 @@ change."
   :group 'macher-actions)
 
 (defcustom macher-action-buffer-setup-hook nil
-  "Hook run when creating new macher action buffers.
+  "Hook run when setting up a buffer as a macher action buffer.
 
-Functions in this hook are called with no arguments in the newly created
-action buffer.  The buffer will already have its workspace set up (i.e.
-`macher-workspace' can be used to get the associated workspace) and
-`default-directory' set to the workspace root.
+Functions in this hook are called with no arguments in the action buffer
+the first time it's used for an action, and again after its local
+variables are cleared (see `macher-action-buffer-function').  The buffer
+may already have content, e.g. if it visits an existing file.  The
+buffer will already have its workspace set up, i.e. `macher-workspace'
+can be used to get the associated workspace.
 
 The base UI configuration is controlled by `macher-action-buffer-ui'
 and is applied before this hook runs.  This hook can be used for
@@ -1250,6 +1285,19 @@ workspace is loaded into in-memory editing buffers.")
 ;; `kill-all-local-variables'.
 (put 'macher--workspace 'permanent-local t)
 
+(defvar macher--action-buffers (make-hash-table :test #'equal)
+  "Hash table mapping each workspace to its active action buffer.
+
+Updated each time `macher-action-buffer-function' picks a buffer for an
+action.")
+
+(defvar-local macher--action-buffer-setup-p nil
+  "Non-nil if the current buffer has been set up as an action buffer.
+
+This is deliberately not permanent-local: a major mode change discards
+the buffer-local hooks installed by the setup, and clearing this flag
+along with them makes the next action redo the setup.")
+
 (defvar-local macher--fsm-latest nil
   "The most recent macher FSM for the current buffer.
 
@@ -1584,8 +1632,10 @@ buffer-locally, and sets up hooks to scroll the window and, for a draft,
 select the action buffer window so the prompt can be edited."
   ;; Include tool calls in output.
   (setq-local gptel-include-tool-results t)
-  ;; Enable gptel-mode for a nice header and LLM interaction feedback.
-  (gptel-mode 1)
+  ;; Enable gptel-mode for a nice header and LLM interaction feedback.  Enabling it restores state
+  ;; from the visited file, so don't re-enable it in a buffer that may have unsaved changes since.
+  (unless gptel-mode
+    (gptel-mode 1))
   ;; Like `macher--action-buffer-setup-basic', these hooks are appended so they run in the order
   ;; written, after the insert/display hooks set up there.  The window/point hooks (scroll, focus)
   ;; depend on the prompt having been inserted and the buffer displayed first.
@@ -1648,12 +1698,15 @@ before running the `macher-action-buffer-setup-hook'."
      (macher--action-buffer-setup-basic))
     ('default
      ;; Use the global gptel default mode (e.g., markdown-mode)
-     (funcall (or gptel-default-mode #'text-mode))
+     (let ((mode (or gptel-default-mode #'text-mode)))
+       (unless (derived-mode-p mode)
+         (funcall mode)))
      (macher--action-buffer-setup-basic)
      (macher--action-buffer-setup-ui))
     ('org
      ;; Use org as the major mode.  Tool output blocks will be auto-folded.
-     (org-mode)
+     (unless (derived-mode-p 'org-mode)
+       (org-mode))
      (macher--action-buffer-setup-basic)
      (macher--action-buffer-setup-ui))
     ;; nil: no automatic setup
@@ -1922,6 +1975,29 @@ CONTEXT and FSM are the same as passed to the
       ;; Start the preparation chain.
       (funcall process-next-function))))
 
+(defun macher--resolve-workspace (workspace)
+  "Return WORKSPACE, or the current buffer's workspace if it's nil.
+
+Signals a `user-error' if no workspace can be determined."
+  (let ((workspace (or workspace (macher-workspace))))
+    (unless (consp workspace)
+      (user-error
+       (concat
+        "No macher workspace found for the current buffer; " "see `macher-workspace-functions'")))
+    workspace))
+
+(defun macher--buffer-name (buffer-type workspace)
+  "Return the name of the macher buffer with BUFFER-TYPE for WORKSPACE.
+
+BUFFER-TYPE can be any string or nil."
+  (format "*macher%s:%s@%s<%s>*"
+          (if buffer-type
+              (format "-%s" buffer-type)
+            "")
+          (car workspace) (macher--workspace-name workspace)
+          ;; Use a shorter hash in buffer names.
+          (macher--workspace-hash workspace 4)))
+
 (defun macher--get-buffer (buffer-type &optional workspace create)
   "Get a macher buffer with BUFFER-TYPE associated with WORKSPACE.
 
@@ -1937,62 +2013,68 @@ by `macher-workspace'.
 Returns a cons cell (BUFFER . CREATED-P) where BUFFER is the target
 buffer and CREATED-P is t if the buffer was newly created, nil
 otherwise."
-  (let* ((workspace (or workspace (macher-workspace))))
+  (let* ((workspace (macher--resolve-workspace workspace))
+         (buffer-name (macher--buffer-name buffer-type workspace))
+         (target-buffer (get-buffer buffer-name))
+         created-p)
+    (when (and (not target-buffer) create)
+      (setq target-buffer (get-buffer-create buffer-name))
+      (setq created-p t)
+      (with-current-buffer target-buffer
+        (setq-local macher--workspace workspace)
+        ;; Set the context directory for operations like diff application or 'project.el' lookups.
+        (setq-local default-directory (macher--workspace-root workspace))))
+    (when target-buffer
+      (cons target-buffer created-p))))
 
-    (unless (consp workspace)
-      (user-error
-       (concat
-        "No macher workspace found for the current buffer; " "see `macher-workspace-functions'")))
+(defun macher-action-buffer-default (workspace)
+  "Return the shared action buffer for WORKSPACE, creating it if needed.
 
-    (let* ((workspace-type (car workspace))
-           (workspace-name (macher--workspace-name workspace))
-           (buffer-type-segment
-            (if buffer-type
-                (format "-%s" buffer-type)
-              ""))
-           (buffer-name
-            (format "*macher%s:%s@%s<%s>*"
-                    buffer-type-segment workspace-type workspace-name
-                    ;; Use a shorter hash in buffer names.
-                    (macher--workspace-hash workspace 4)))
-           target-buffer
-           created-p)
+This is the default `macher-action-buffer-function'.  It returns a
+single non-file buffer per workspace.  When the buffer is created, its
+`default-directory' is set to the workspace root."
+  (car (macher--get-buffer nil workspace t)))
 
-      (setq target-buffer (and buffer-name (get-buffer buffer-name)))
-      (when (and (not target-buffer) create buffer-name)
-        (setq target-buffer (get-buffer-create buffer-name))
-        (setq created-p t)
-        (with-current-buffer target-buffer
-          ;; Track workspace for this buffer.
-          (setq-local macher--workspace workspace)
-          ;; Set the context directory for operations like diff application or 'project.el' lookups.
-          (let ((base-dir (macher--workspace-root workspace)))
-            (setq-local default-directory base-dir))))
-      (when target-buffer
-        (cons target-buffer created-p)))))
-
-(defun macher-action-buffer (&optional workspace create)
+(defun macher-action-buffer (&optional workspace activate)
   "Get the macher action buffer associated with WORKSPACE.
 
-The action buffer is used for requests sent via `macher-action', and is
-shared across all files in the same workspace.
+The action buffer is where requests sent via `macher-action' run.  A
+workspace's active action buffer is the one most recently activated for
+an action.
 
-If CREATE is non-nil, create the buffer if it doesn't already exist.
-Otherwise, return nil if the buffer doesn't already exist.
+If ACTIVATE is nil, return WORKSPACE's active action buffer, or nil if
+there is none or it has been killed.  Nothing is created.
+
+If ACTIVATE is non-nil, call `macher-action-buffer-function' to get the
+buffer for a new action, associate it with WORKSPACE, set it up if
+needed (see `macher-action-buffer-ui' and
+`macher-action-buffer-setup-hook'), and make it WORKSPACE's active
+action buffer.  `macher-action' does this once per action.  Note that
+the function is consulted every time, so this may return a different
+buffer than the currently active one.
 
 When WORKSPACE is nil, use the current buffer's workspace as determined
 by `macher-workspace'."
-  (let ((result (macher--get-buffer nil workspace create)))
-    (when result
-      (let ((target-buffer (car result))
-            (created-p (cdr result)))
-        (when created-p
-          (with-current-buffer target-buffer
-            ;; Apply base UI configuration first.
-            (macher--action-buffer-setup)
-            ;; Then run user hooks.
-            (run-hooks 'macher-action-buffer-setup-hook)))
-        target-buffer))))
+  (let ((workspace (macher--resolve-workspace workspace)))
+    (if activate
+        (let ((buffer (funcall macher-action-buffer-function workspace)))
+          (unless (buffer-live-p buffer)
+            (error "`macher-action-buffer-function' returned %S, not a live buffer" buffer))
+          (with-current-buffer buffer
+            (setq-local macher--workspace workspace)
+            (unless macher--action-buffer-setup-p
+              ;; Apply base UI configuration first.
+              (macher--action-buffer-setup)
+              ;; Then run user hooks.
+              (run-hooks 'macher-action-buffer-setup-hook)
+              (setq macher--action-buffer-setup-p t)))
+          (puthash workspace buffer macher--action-buffers)
+          buffer)
+      (let ((buffer (gethash workspace macher--action-buffers)))
+        (if (buffer-live-p buffer)
+            buffer
+          (remhash workspace macher--action-buffers)
+          nil)))))
 
 (defun macher-patch-buffer (&optional workspace create)
   "Get the macher patch buffer associated with WORKSPACE.
@@ -4550,8 +4632,9 @@ sending macher requests:
 1. Generate a prompt based on contextual information, e.g. the cursor
    position or selected region.
 
-2. Send the prompt from a shared workspace buffer (the
-   `macher-action-buffer'), using a gptel preset that provides macher
+2. Send the prompt from an action buffer chosen by
+   `macher-action-buffer-function' (by default, a buffer shared by all
+   files in the workspace), using a gptel preset that provides macher
    tools.
 
 Lifecycle hooks are also run to allow modifying or otherwise handling
@@ -4626,7 +4709,9 @@ implements one possible workflow."
       (let* ((prompt (plist-get action-plist :prompt))
              (preset (or (plist-get action-plist :preset) 'macher))
              (summary (plist-get action-plist :summary))
-             ;; Get the action buffer for this workspace.
+             ;; Pick the action buffer.  Everything below uses this value rather than looking it up
+             ;; again, so the action stays in this buffer even if `macher-action-buffer-function'
+             ;; would pick a different one later.
              (action-buffer (macher-action-buffer nil t))
              ;; Store the source buffer (where the action was initiated).
              (source-buffer (current-buffer))
@@ -4706,8 +4791,9 @@ implements one possible workflow."
 (defun macher-abort (&optional buf)
   "Abort any active macher action associated with buffer BUF.
 
-In other words, abort gptel requests running in the macher
-action buffer associated with the `macher-workspace' for BUF.
+In other words, abort gptel requests running in the active macher
+action buffer for the `macher-workspace' of BUF (see
+`macher-action-buffer').
 
 If a callback was provided to the original request, it will be called
 with the ='abort' symbol as the error parameter.
@@ -4751,8 +4837,8 @@ can be provided.
 
 This function processes the most recent macher request in the current
 buffer (i.e. the local value of `macher--fsm-latest') if present,
-otherwise uses the most recent macher request in the action buffer
-associated with the current workspace."
+otherwise uses the most recent macher request in the active action
+buffer for the current workspace (see `macher-action-buffer')."
   (interactive (list 'interactive))
   (let ((fsm
          (or macher--fsm-latest

@@ -2565,8 +2565,91 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                 (expect content :to-match "use workspace tools to implement"))
               ;; Point should be left at the end of the inserted prompt, ready for editing.
               (expect (point) :to-equal (point-max))
-              (expect (window-point (get-buffer-window action-buffer t))
-                      :to-equal (point-max))))))))
+              (expect (window-point (get-buffer-window action-buffer t)) :to-equal (point-max)))))))
+
+    (it "keeps a running action in the buffer it was dispatched to"
+      (funcall setup-backend '("Response content"))
+      (let* ((first-buffer (generate-new-buffer "*macher-test-first*"))
+             (second-buffer (generate-new-buffer "*macher-test-second*"))
+             (next-buffer first-buffer)
+             (macher-action-buffer-function (lambda (_workspace) next-buffer)))
+        (unwind-protect
+            (with-current-buffer project-file-buffer
+              (macher-discuss "Test request" callback)
+              ;; While the request is still running, point new actions at another buffer.
+              (expect callback-called :to-be nil)
+              (setq next-buffer second-buffer)
+              (expect (macher-action-buffer nil t) :to-be second-buffer)
+              ;; Wait for the async response.
+              (let ((timeout 0))
+                (while (and (not callback-called) (< timeout 100))
+                  (sleep-for 0.1)
+                  (setq timeout (1+ timeout))))
+
+              (expect exit-code :to-be nil)
+              (expect (with-current-buffer first-buffer
+                        (buffer-substring-no-properties (point-min) (point-max)))
+                      :to-equal
+                      (funcall action-buffer-content
+                               "Test request"
+                               "\n\nResponse content\n"
+                               'discuss
+                               t))
+              (expect (with-current-buffer second-buffer
+                        (buffer-string))
+                      :to-equal ""))
+          (kill-buffer first-buffer)
+          (kill-buffer second-buffer))))
+
+    (it "restores the workspace of a saved file-backed action buffer via user hooks"
+      ;; This is the recipe for reopening saved action conversations: store the workspace from a
+      ;; global `macher-before-action-functions' entry, and read it back from an entry in
+      ;; `macher-workspace-functions'.
+      ;;
+      ;; Nothing is sent, but gptel needs a backend to save its state into the file.
+      (funcall setup-backend '("Response that should never be sent"))
+      (let* ((conversation-file (make-temp-file "macher-test-conversation" nil ".org"))
+             (store-workspace
+              (lambda (_execution)
+                (when (derived-mode-p 'org-mode)
+                  (org-entry-put
+                   (point-min) "MACHER_WORKSPACE" (prin1-to-string (macher-workspace))))))
+             (restore-workspace
+              (lambda ()
+                (when-let* (((derived-mode-p 'org-mode))
+                            (value (org-entry-get (point-min) "MACHER_WORKSPACE")))
+                  (read value))))
+             (original-workspace-functions macher-workspace-functions)
+             (macher-action-buffer-ui 'org)
+             (macher-action-buffer-function
+              (lambda (_workspace) (find-file-noselect conversation-file)))
+             (macher-before-action-functions (list store-workspace))
+             (macher-workspace-functions (cons restore-workspace macher-workspace-functions))
+             (workspace (macher-workspace project-file-buffer)))
+        (unwind-protect
+            (progn
+              ;; Draft mode, so nothing is sent.
+              (save-window-excursion
+                (with-current-buffer project-file-buffer
+                  (let ((current-prefix-arg '(4)))
+                    (macher-discuss "Test request" callback))))
+              (with-current-buffer (get-file-buffer conversation-file)
+                (save-buffer)
+                (kill-buffer))
+              (with-current-buffer (find-file-noselect conversation-file)
+                (unwind-protect
+                    (progn
+                      (expect macher--workspace :to-be nil)
+                      (expect (macher-workspace) :to-equal workspace)
+                      ;; Without the restore function, the workspace comes from the file's location.
+                      (let ((macher-workspace-functions original-workspace-functions))
+                        (expect (macher-workspace) :not :to-equal workspace)))
+                  (kill-buffer))))
+          (when-let* ((buffer (get-file-buffer conversation-file)))
+            (with-current-buffer buffer
+              (set-buffer-modified-p nil))
+            (kill-buffer buffer))
+          (delete-file conversation-file)))))
 
   (describe "search_in_workspace"
     (before-each
