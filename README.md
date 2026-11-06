@@ -11,9 +11,10 @@ form of patches, potentially involving multiple files. You can apply the patches
 project, or send them back for revision.
 
 macher is a lightweight Emacs-native take on LLM file editing. In a world filled with excellent
-agentic development tools, macher is focused on the simple joys of editing text. I reach for it when
-I'm actively coding/writing and want to drive stick. Use it on its own or alongside your other
-tools, to stay nimble when a heavier agentic stack is unavailable or undesired.
+agentic development tools, macher is focused on the simple joys of reading and editing text. I reach
+for it when I'm researching a codebase, or when I'm actively coding/writing and want to drive stick.
+Use it on its own or alongside your other tools, to stay nimble when a heavier agentic stack is
+unavailable or undesired.
 
 macher's tools are designed to run safely without per-call confirmation. [By default](#workspaces),
 file access is restricted to the current `project.el` project, or to a single projectless file.
