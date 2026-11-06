@@ -164,8 +164,8 @@ e.g. a file, set `macher-action-buffer-function`.
 
 ### Workspace context
 
-macher can add information about the current workspace (project name, location, file listings) to
-your system prompt.
+macher can add information about the current workspace (by default, its name) to your system
+prompt.
 
 If you've called `(macher-enable)` and/or activated `@macher-base`, any instances of the
 `macher-context-string-placeholder` (default: `"[macher_placeholder]"`) in your system prompt will
@@ -275,7 +275,6 @@ You can see customizable variables/sub-groups with `M-x customize-group RET mach
 | `macher-context-string-placeholder`  | System prompt placeholder string for dynamic context injection |
 | `macher-context-string-marker-start` | Start marker for context in system prompt                      |
 | `macher-context-string-marker-end`   | End marker for context in system prompt                        |
-| `macher-context-string-max-files`    | Max files to list in workspace context                         |
 
 ### Processing
 

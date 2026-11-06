@@ -639,27 +639,23 @@ you can set both this and `macher-context-string-placeholder' to nil."
   :type '(function :tag "Workspace string function")
   :group 'macher-workspace)
 
-(defcustom macher-context-string-max-files 50
-  "Maximum number of files to include in the workspace context string.
+(defun macher--warn-context-string-max-files (&rest _)
+  "Warn once that `macher-context-string-max-files' has no effect."
+  (remove-variable-watcher 'macher-context-string-max-files #'macher--warn-context-string-max-files)
+  (display-warning
+   'macher
+   (concat
+    "`macher-context-string-max-files' no longer has any effect, since the "
+    "workspace context no longer lists files.  Remove it from your configuration.")))
 
-When using the default `macher-context-string-function', only up to this
-many files will be listed.
+(make-obsolete-variable
+ 'macher-context-string-max-files "the workspace context no longer lists files." "0.6.0")
 
-Files from the gptel context are always included in the workspace
-context (even if their count exceeds this limit).  Additional workspace
-files will be included up to the remaining limit.
-
-Files are listed in the same order as returned by the workspace's files
-function - for built-in workspace types, this means files are listed in
-alphabetical order.
-
-Set to nil to disable the limit entirely.
-
-Note: This value is used within the default `macher--context-string'
-function.  If you customize `macher-context-string-function' to use a
-different function, this value will have no effect."
-  :type '(choice (natnum :tag "Maximum number of files") (const :tag "No limit" nil))
-  :group 'macher-workspace)
+;; Users may have set the variable before macher was loaded (e.g. via `use-package' :custom), or
+;; may set it afterwards.  Either way they get one warning, rather than an error or silence.
+(if (boundp 'macher-context-string-max-files)
+    (macher--warn-context-string-max-files)
+  (add-variable-watcher 'macher-context-string-max-files #'macher--warn-context-string-max-files))
 
 ;;;; Result processing
 
@@ -1550,36 +1546,14 @@ Returns a list of absolute file paths."
 (defun macher--context-string ()
   "Generate workspace information string for the current workspace.
 
-Returns a workspace information string to be added to the request."
+Returns a workspace information string to be added to the request.
+
+This runs on every request, so it deliberately doesn't list the
+workspace's files: that can take seconds on large or remote workspaces,
+and the model can explore the workspace with the tools instead."
   (when-let* ((workspace (macher-workspace)))
-    (let* ((workspace-name (macher--workspace-name workspace))
-           (workspace-files (macher--workspace-files workspace))
-           ;; This might get trimmed if there are too many files.
-           (files-for-listing workspace-files))
-
-      ;; Trim the files list if there's a limit.
-      (when macher-context-string-max-files
-        (when (> (length files-for-listing) macher-context-string-max-files)
-          (setq files-for-listing (seq-take files-for-listing macher-context-string-max-files))))
-
-      (with-temp-buffer
-        (insert
-         (format "The user is currently working on a project named: \"%s\"\n" workspace-name))
-        (if workspace-files
-            (progn
-              (insert (format "Files in the \"%s\" project:" workspace-name))
-              (dolist (file-path files-for-listing)
-                (let ((rel-path (file-relative-name file-path (macher--workspace-root workspace))))
-                  (insert (format "\n    %s" rel-path))))
-              ;; Add a note if files were truncated due to the limit.
-              (when macher-context-string-max-files
-                (let* ((total-files (length workspace-files))
-                       (listed-files (length files-for-listing))
-                       (truncated-files (- total-files listed-files)))
-                  (when (> truncated-files 0)
-                    (insert (format "\n    ... and %d more files" truncated-files))))))
-          (insert (format "There are no files in the \"%s\" project." workspace-name)))
-        (buffer-string)))))
+    (format "The user is currently working on a project named: \"%s\""
+            (macher--workspace-name workspace))))
 
 (defun macher--workspace-hash (workspace &optional length)
   "Generate a unique hash for WORKSPACE.
