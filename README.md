@@ -155,6 +155,9 @@ action buffer using `gptel-send`.
 
 You can define custom actions in `macher-actions-alist`.
 
+By default, actions run in a single ephemeral buffer per workspace. To send them somewhere else,
+e.g. a file, set `macher-action-buffer-function`.
+
 ### Workspace context
 
 macher can add information about the current workspace (project name, location, file listings) to
@@ -247,8 +250,9 @@ You can see customizable variables/sub-groups with `M-x customize-group RET mach
 | --------------------------------- | ------------------------------------------------------------------- |
 | `macher-actions-alist`            | Defines available actions (implement, revise, discuss, etc.)        |
 | `macher-focus-string`             | Function to generate description of current code location           |
+| `macher-action-buffer-function`   | Chooses the buffer each action runs in                              |
 | `macher-action-buffer-ui`         | UI style for action buffers: `'default`, `'org`, `'basic`, or `nil` |
-| `macher-action-buffer-setup-hook` | Hook run when creating action buffers                               |
+| `macher-action-buffer-setup-hook` | Hook run when setting up action buffers                             |
 | `macher-action-dispatch-hook`     | Hook run when invoking an action                                    |
 | `macher-before-action-functions`  | Functions run before sending the request                            |
 | `macher-after-action-functions`   | Functions run after request completes                               |
