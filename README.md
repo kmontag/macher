@@ -10,17 +10,20 @@ https://github.com/user-attachments/assets/af8bed3d-913b-4365-9f71-85d969810d22
 form of patches, potentially involving multiple files. You can apply the patches directly to your
 project, or send them back for revision.
 
-macher is a lightweight Emacs-native take on the editing workflows of more full-featured tools like
-[Aider](https://aider.chat/) or [Plandex](https://plandex.ai/). It works with any gptel backend that
+macher is a lightweight Emacs-native take on LLM file editing. In a world with a lot of great tools
+for this purpose, macher is focused on the simple joys of editing text. I reach for it when I'm
+actively coding or writing and want to keep it in manual. It also helps me stay nimble in
+environments without a full agentic stack.
+
+macher's tools are designed to be run without manual confirmation. [By default](#workspaces), file
+access is restricted to the current `project.el` project, or to a single projectless file. Edits
+happen in-memory and get proposed as an aggregate patch, with nothing written to disk until you
+apply it.
+
+macher takes inspiration from gptel's flexibility and visibility. You can use the presets and tools
+in your own workflows, or use the built-in action commands for a quick and easy editing setup. It
+doesn't touch your gptel globals (unless you tell it to), and works with any gptel backend that
 supports tool use.
-
-It's great for "pseudo-agentic" workflows, for example when you want your LLM to implement a set of
-changes, maybe call other tools to do research, etc - but you want to review the aggregate changes
-before writing them to disk.
-
-macher takes inspiration from gptel's flexibility and visibility. It doesn't touch your gptel
-globals (unless you tell it to) - it's just a set of presets, tools, and transforms that you can use
-as you like. Or you can use the built-in action commands for a quick and easy workflow.
 
 ## Installation and configuration
 
@@ -181,18 +184,23 @@ The workspace description can be customized by setting the `macher-context-strin
 
 The **workspace** is the set of files macher can read and edit.
 
-The workspace is determined by `macher-workspace-functions`. All file operations are restricted to
-the current workspace. By default, macher supports:
+The workspace is determined from the current buffer by `macher-workspace-functions`. All file
+operations are restricted to the current workspace. By default, macher supports:
 
 - **`project`**: A project.el project
 - **`file`**: A single non-project file
+
+For `project` workspace types, only the `project-files` are exposed to the LLM. By default, this
+means that things like `.gitignore`'d files will be automatically unreadable - though if you've
+customized `project.el`, you might want to verify that your setup excludes anything sensitive from
+your project file listings.
 
 A **`directory`** workspace type is also available for working in arbitrary directories (not managed
 by project.el). It is not enabled by default to avoid accidentally exposing broad directories to the
 LLM. To enable it, you can do something like:
 
 ```elisp
-(setq macher-workspace-functions '(macher-workspace-project macher-workspace-directory))
+(setopt macher-workspace-functions '(macher-workspace-project macher-workspace-directory))
 ```
 
 To add custom workspace types, customize `macher-workspace-types-alist` and
