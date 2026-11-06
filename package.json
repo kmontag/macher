@@ -9,13 +9,13 @@
     "postinstall": "eask install-deps --dev && cp $(ls .eask/*/elpa/buttercup-*/buttercup.el | head -1) .eask/buttercup.el && cp $(ls .eask/*/elpa/gptel-*/gptel.el | head -1) .eask/gptel.el && cp $(ls .eask/*/elpa/gptel-*/gptel-ollama.el | head -1) .eask/gptel-ollama.el"
   },
   "devDependencies": {
-    "@emacs-eask/cli": "^0.11.1",
-    "@semantic-release/changelog": "^6.0.3",
+    "@emacs-eask/cli": "^0.12.9",
+    "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/exec": "^7.1.0",
-    "@semantic-release/git": "^10.0.1",
-    "@sourcemeta/jsonschema": "^10.0.0",
-    "@tsconfig/node-lts": "^22.0.1",
-    "prettier": "^3.7.1",
-    "semantic-release": "^25.0.2"
+    "@semantic-release/git": "^11.0.1",
+    "@sourcemeta/jsonschema": "^17.3.2",
+    "@tsconfig/node-lts": "^24.0.1",
+    "prettier": "^3.9.10",
+    "semantic-release": "^25.0.9"
   }
 }
