@@ -1,0 +1,127 @@
+# Temporary: replaces the PR checks while investigating why installing gptel fails under Emacs
+# 30.1 with eask 0.12. Every step runs regardless of earlier failures, so one run answers all the
+# questions at once. See .github/investigate/diag.el.
+---
+name: Investigate Emacs 30.1 install
+on:
+  pull_request:
+
+jobs:
+  investigate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emacs-version: ["30.1", "31.1"]
+    name: investigate (emacs ${{ matrix.emacs-version }})
+    env:
+      DIAG: ${{ github.workspace }}/.github/investigate/diag.el
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: purcell/setup-emacs@34c6ded44899fd1bf74d2889558befd1750e61a7
+        with:
+          version: ${{ matrix.emacs-version }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "lts/*"
+          cache: npm
+
+      - name: Install npm packages without the eask postinstall
+        run: npm ci --ignore-scripts
+
+      - name: Environment
+        env:
+          DIAG_MODE: env
+        run: emacs --batch -l "$DIAG"
+
+      # A: plain package.el, no eask, everything in one process. Is the error eask's doing?
+      - name: "A: package.el installs gptel in one process"
+        continue-on-error: true
+        env:
+          DIAG_MODE: install
+          DIAG_ELPA: /tmp/elpa-a
+          DIAG_PACKAGES: gptel
+        run: emacs --batch -l "$DIAG"
+
+      - name: "A: load the result in a fresh process"
+        continue-on-error: true
+        env:
+          DIAG_MODE: load
+          DIAG_ELPA: /tmp/elpa-a
+        run: emacs --batch -l "$DIAG"
+
+      # B: transient (and its dependencies) installed in their own process first, so nothing of the
+      # built-in transient can be loaded when gptel is compiled.
+      - name: "B: package.el installs transient, then gptel in a second process"
+        continue-on-error: true
+        env:
+          DIAG_ELPA: /tmp/elpa-b
+        run: |
+          DIAG_MODE=install DIAG_PACKAGES=transient emacs --batch -l "$DIAG"
+          DIAG_MODE=install DIAG_PACKAGES=gptel emacs --batch -l "$DIAG"
+
+      - name: "B: load the result in a fresh process"
+        continue-on-error: true
+        env:
+          DIAG_MODE: load
+          DIAG_ELPA: /tmp/elpa-b
+        run: emacs --batch -l "$DIAG"
+
+      # C: what CI does today, verbosely, and with --debug for a backtrace.
+      - name: "C: eask 0.12 install-deps"
+        continue-on-error: true
+        run: |
+          rm -rf .eask
+          node_modules/.bin/eask --version
+          node_modules/.bin/eask install-deps --dev --verbose 5
+
+      - name: "C: eask 0.12 install-deps --debug"
+        continue-on-error: true
+        run: |
+          rm -rf .eask
+          node_modules/.bin/eask install-deps --dev --debug --verbose 5
+
+      - name: "C: load the result in a fresh process"
+        continue-on-error: true
+        env:
+          DIAG_MODE: load
+        run: DIAG_ELPA="$PWD/.eask/${{ matrix.emacs-version }}/elpa" emacs --batch -l "$DIAG"
+
+      # D: the eask main uses, to confirm it only passes because it swallows the same error.
+      - name: "D: eask 0.11.7 install-deps"
+        continue-on-error: true
+        run: |
+          rm -rf .eask
+          npx -y @emacs-eask/cli@0.11.7 --version
+          npx -y @emacs-eask/cli@0.11.7 install-deps --dev --verbose 5
+
+      - name: "D: load the result in a fresh process"
+        continue-on-error: true
+        env:
+          DIAG_MODE: load
+        run: DIAG_ELPA="$PWD/.eask/${{ matrix.emacs-version }}/elpa" emacs --batch -l "$DIAG"
+
+      # E: candidate workaround. Install transient into eask's package directory in its own process,
+      # then let eask 0.12 install the rest.
+      - name: "E: transient preinstalled, then eask 0.12 install-deps"
+        continue-on-error: true
+        run: |
+          rm -rf .eask
+          export DIAG_ELPA="$PWD/.eask/${{ matrix.emacs-version }}/elpa"
+          DIAG_MODE=install DIAG_PACKAGES=transient emacs --batch -l "$DIAG"
+          node_modules/.bin/eask install-deps --dev
+
+      - name: "E: load the result in a fresh process"
+        continue-on-error: true
+        env:
+          DIAG_MODE: load
+        run: DIAG_ELPA="$PWD/.eask/${{ matrix.emacs-version }}/elpa" emacs --batch -l "$DIAG"
+
+      - name: "E: make compile and make test.unit"
+        continue-on-error: true
+        run: make compile test.unit
