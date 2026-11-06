@@ -4863,19 +4863,30 @@
         (let ((macher-action-buffer-function (lambda (_workspace) "not-a-buffer")))
           (expect (macher-action-buffer workspace t) :to-throw 'error)))
 
-      (it "binds the buffer to the workspace on every call"
+      (it "binds the buffer to the workspace on every call, leaving default-directory alone"
         (let* ((buffer (generate-new-buffer "*custom-action*"))
                (macher-action-buffer-ui nil)
                (macher-action-buffer-function (lambda (_workspace) buffer)))
           (push buffer buffers)
+          (with-current-buffer buffer
+            (setq default-directory temporary-file-directory))
           (macher-action-buffer workspace t)
           (expect (buffer-local-value 'macher--workspace buffer) :to-equal workspace)
           (macher-action-buffer other-workspace t)
           (expect (buffer-local-value 'macher--workspace buffer) :to-equal other-workspace)
-          (expect (buffer-local-value 'default-directory buffer)
-                  :to-equal (macher--workspace-root other-workspace))
+          (expect (buffer-local-value 'default-directory buffer) :to-equal temporary-file-directory)
           (expect (macher-action-buffer workspace) :to-be buffer)
           (expect (macher-action-buffer other-workspace) :to-be buffer)))
+
+      (it "sets the default buffer's default-directory to the workspace root"
+        (let* ((macher-action-buffer-ui nil)
+               (buffer
+                (with-temp-buffer
+                  (setq default-directory temporary-file-directory)
+                  (macher-action-buffer other-workspace t))))
+          (push buffer buffers)
+          (expect (buffer-local-value 'default-directory buffer)
+                  :to-equal (macher--workspace-root other-workspace))))
 
       (it "sets up a pre-existing buffer once, and again after its major mode changes"
         (let* ((buffer (generate-new-buffer "*custom-action*"))

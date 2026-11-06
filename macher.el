@@ -412,20 +412,22 @@ stays in that buffer until its request finishes, so the function can
 return a different buffer each time (e.g. a new file per day).
 
 The default, `macher-action-buffer-default', returns one shared non-file
-buffer per workspace.
+buffer per workspace, with its `default-directory' set to the workspace
+root.
 
 On every action, macher binds the buffer to WORKSPACE (see
-`macher-workspace') and sets its `default-directory' to the workspace
-root.  The first time a buffer is used, and again after its major mode
-changes, macher also applies `macher-action-buffer-ui' and runs
-`macher-action-buffer-setup-hook'.  The buffer is then remembered as the
-workspace's latest action buffer, which commands like `macher-abort'
-operate on.
+`macher-workspace').  It leaves the buffer's `default-directory' alone,
+so e.g. relative links in a file-visiting buffer still resolve against
+the file's directory.  The first time a buffer is used, and again after
+its major mode changes, macher also applies `macher-action-buffer-ui'
+and runs `macher-action-buffer-setup-hook'.  The buffer is then
+remembered as the workspace's latest action buffer, which commands like
+`macher-abort' operate on.
 
-These bindings aren't saved with a file.  That only matters if you
-reopen a saved action buffer and send from it directly (e.g. with
-`gptel-send') before running another action in it: the workspace is then
-determined from the file's own location.  To avoid that, store the
+The workspace binding isn't saved with a file.  That only matters if
+you reopen a saved action buffer and send from it directly (e.g. with
+`gptel-send') before running another action in it: the workspace is
+then determined from the file's own location.  To avoid that, store the
 workspace in the file from a `macher-before-action-functions' entry and
 read it back from a `macher-workspace-functions' entry."
   :type 'function
@@ -485,9 +487,8 @@ Functions in this hook are called with no arguments in the action buffer
 the first time it's used for an action, and again after its major mode
 changes (see `macher-action-buffer-function').  The buffer may already
 have content, e.g. if it visits an existing file.  The buffer will
-already have its workspace set up (i.e. `macher-workspace' can be used
-to get the associated workspace) and `default-directory' set to the
-workspace root.
+already have its workspace set up, i.e. `macher-workspace' can be used
+to get the associated workspace.
 
 The base UI configuration is controlled by `macher-action-buffer-ui'
 and is applied before this hook runs.  This hook can be used for
@@ -1999,12 +2000,6 @@ BUFFER-TYPE can be any string or nil."
           ;; Use a shorter hash in buffer names.
           (macher--workspace-hash workspace 4)))
 
-(defun macher--set-buffer-workspace (workspace)
-  "Associate the current buffer with WORKSPACE."
-  (setq-local macher--workspace workspace)
-  ;; Set the context directory for operations like diff application or 'project.el' lookups.
-  (setq-local default-directory (macher--workspace-root workspace)))
-
 (defun macher--get-buffer (buffer-type &optional workspace create)
   "Get a macher buffer with BUFFER-TYPE associated with WORKSPACE.
 
@@ -2028,7 +2023,9 @@ otherwise."
       (setq target-buffer (get-buffer-create buffer-name))
       (setq created-p t)
       (with-current-buffer target-buffer
-        (macher--set-buffer-workspace workspace)))
+        (setq-local macher--workspace workspace)
+        ;; Set the context directory for operations like diff application or 'project.el' lookups.
+        (setq-local default-directory (macher--workspace-root workspace))))
     (when target-buffer
       (cons target-buffer created-p))))
 
@@ -2036,8 +2033,9 @@ otherwise."
   "Return the shared action buffer for WORKSPACE, creating it if needed.
 
 This is the default `macher-action-buffer-function'.  It returns a
-single non-file buffer per workspace."
-  (get-buffer-create (macher--buffer-name nil workspace)))
+single non-file buffer per workspace.  When the buffer is created, its
+`default-directory' is set to the workspace root."
+  (car (macher--get-buffer nil workspace t)))
 
 (defun macher-action-buffer (&optional workspace select)
   "Get the macher action buffer associated with WORKSPACE.
@@ -2061,7 +2059,7 @@ by `macher-workspace'."
           (unless (buffer-live-p buffer)
             (error "`macher-action-buffer-function' returned %S, not a live buffer" buffer))
           (with-current-buffer buffer
-            (macher--set-buffer-workspace workspace)
+            (setq-local macher--workspace workspace)
             (unless macher--action-buffer-setup-p
               ;; Apply base UI configuration first.
               (macher--action-buffer-setup)
