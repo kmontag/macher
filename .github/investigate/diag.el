@@ -67,8 +67,6 @@
        (apply orig name args)
      (error
       (diag-state (format "ERROR for %s: %s" name (error-message-string err)))
-      (diag "backtrace follows")
-      (backtrace)
       (signal (car err) (cdr err))))))
 
 ;; Report the first `require' of transient or compat, with who asked for it.  `require' calls
@@ -78,8 +76,7 @@
  :before
  (lambda (feature &rest _)
    (when (and (memq feature '(transient compat)) (not (featurep feature)))
-     (diag "first require of %s, would load %S" feature (locate-library (symbol-name feature)))
-     (backtrace))))
+     (diag "first require of %s, would load %S" feature (locate-library (symbol-name feature))))))
 
 ;; Report every explicit load of a transient or compat file.
 (advice-add
@@ -97,6 +94,17 @@
    (package-initialize)
    (package-refresh-contents)
    (diag-state "before install")
+   ;; Which compat and transient the archives offer, and what package.el plans to install.
+   (dolist (pkg '(compat transient))
+     (diag "archive versions of %s: %S" pkg
+           (mapcar (lambda (d) (cons (package-desc-archive d) (package-version-join (package-desc-version d))))
+                   (alist-get pkg package-archive-contents))))
+   (dolist (name (split-string (or (getenv "DIAG_PACKAGES") "") " " t))
+     (diag "plan for %s: %S" name
+           (condition-case err
+               (mapcar #'package-desc-full-name
+                       (package-compute-transaction nil (list (list (intern name)))))
+             (error err))))
    (dolist (name (split-string (or (getenv "DIAG_PACKAGES") "") " " t))
      (diag "installing %s" name)
      (package-install (intern name)))
