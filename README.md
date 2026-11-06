@@ -155,8 +155,8 @@ action buffer using `gptel-send`.
 
 You can define custom actions in `macher-actions-alist`.
 
-By default, actions run in a single buffer per workspace. To send them somewhere else, e.g. a file
-that keeps the conversation, set `macher-action-buffer-function`.
+By default, actions run in a single ephemeral buffer per workspace. To send them somewhere else,
+e.g. a file, set `macher-action-buffer-function`.
 
 ### Workspace context
 
