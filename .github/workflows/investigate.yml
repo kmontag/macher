@@ -34,48 +34,26 @@ jobs:
       - name: Install npm packages without the eask postinstall
         run: npm ci --ignore-scripts
 
-      # A: what package.el plans to install for gptel, and which compat the archives offer. Round 1
-      # showed MELPA's transient needs compat 31.1, nothing installed it, and transient then failed
-      # to load with `static-when' void.
-      - name: "A: package.el plan and install for gptel"
-        continue-on-error: true
-        env:
-          DIAG_MODE: install
-          DIAG_ELPA: /tmp/elpa-a
-          DIAG_PACKAGES: gptel
-        run: emacs --batch -l "$DIAG"
-
-      # F: compat installed explicitly first, then gptel.
-      - name: "F: package.el installs compat, then gptel"
-        continue-on-error: true
-        env:
-          DIAG_MODE: install
-          DIAG_ELPA: /tmp/elpa-f
-          DIAG_PACKAGES: compat gptel
-        run: emacs --batch -l "$DIAG"
-
-      - name: "F: load the result in a fresh process"
-        continue-on-error: true
-        env:
-          DIAG_MODE: load
-          DIAG_ELPA: /tmp/elpa-f
-        run: emacs --batch -l "$DIAG"
-
-      # G: candidate fix. Declare compat 31.1 in the Eask file ahead of gptel, then do what CI does.
-      - name: "G: Eask depends on compat 31.1, then npm ci"
+      # Round 2 showed that under 30.1 package.el counts the built-in compat as satisfying
+      # transient's compat 31.1 requirement, so it never installs GNU ELPA's compat 31.1, and
+      # `package-install' and eask both skip compat as "already installed".
+      #
+      # H: candidate fix. Force GNU ELPA's compat into eask's package directory by descriptor, then
+      # run the unmodified eask install the way CI does, and the checks CI runs.
+      - name: "H: force-install compat, then npm ci"
         continue-on-error: true
         run: |
           rm -rf .eask
-          sed -i 's/^(depends-on "gptel"/(depends-on "compat" "31.1")\n(depends-on "gptel"/' Eask
-          grep -n depends-on Eask
+          DIAG_MODE=install DIAG_FORCE=compat \
+            DIAG_ELPA="$PWD/.eask/${{ matrix.emacs-version }}/elpa" emacs --batch -l "$DIAG"
           npm ci
 
-      - name: "G: load the result in a fresh process"
+      - name: "H: load the result in a fresh process"
         continue-on-error: true
         env:
           DIAG_MODE: load
         run: DIAG_ELPA="$PWD/.eask/${{ matrix.emacs-version }}/elpa" emacs --batch -l "$DIAG"
 
-      - name: "G: make compile analyze test.unit"
+      - name: "H: make compile analyze test.unit"
         continue-on-error: true
         run: make compile analyze test.unit

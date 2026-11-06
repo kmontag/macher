@@ -105,6 +105,12 @@
                (mapcar #'package-desc-full-name
                        (package-compute-transaction nil (list (list (intern name)))))
              (error err))))
+   ;; DIAG_FORCE: install the archive's newest version of each package by its descriptor, which
+   ;; `package-install' does even when a built-in version counts as installed.
+   (dolist (name (split-string (or (getenv "DIAG_FORCE") "") " " t))
+     (let ((desc (car (alist-get (intern name) package-archive-contents))))
+       (diag "force-installing %s" (package-desc-full-name desc))
+       (package-install desc)))
    (dolist (name (split-string (or (getenv "DIAG_PACKAGES") "") " " t))
      (diag "installing %s" name)
      (package-install (intern name)))
