@@ -1434,17 +1434,17 @@ the project when it's actually needed."
 
 (defun macher--project-files (project-id)
   "Get list of files in PROJECT-ID using project.el.
-Returns a list of relative file paths."
+Returns a list of absolute file paths."
   ;; project.el allows a nil ID (in which case it just looks at the current buffer), but this
   ;; would give inconsistent results and introduce a security risk that files from unexpected
   ;; projects could be exposed to the workspace.
   (unless (stringp project-id)
     (error "Project ID must be a string, got %s (%s)" (type-of project-id) project-id))
   (require 'project)
-  (when-let* ((proj (project-current nil project-id))
-              (files (project-files proj)))
-    ;; Return files relative to project root.
-    (mapcar (lambda (f) (file-relative-name f project-id)) files)))
+  ;; Returned as-is: `file-relative-name' on every file of a large project is expensive (it can
+  ;; hit the filesystem, e.g. to check case sensitivity), and callers want absolute paths anyway.
+  (when-let* ((proj (project-current nil project-id)))
+    (project-files proj)))
 
 (defun macher--directory-root (directory-id)
   "Get the root for DIRECTORY-ID, validating it's a real directory."
@@ -1460,9 +1460,8 @@ Returns a list of relative file paths."
 
 (defun macher--directory-files (directory-id)
   "Get list of files in DIRECTORY-ID recursively.
-Returns a list of relative file paths."
-  (mapcar
-   (lambda (f) (file-relative-name f directory-id)) (directory-files-recursively directory-id "")))
+Returns a list of absolute file paths."
+  (directory-files-recursively (expand-file-name directory-id) ""))
 
 (defun macher-workspace (&optional buffer)
   "Get the workspace information for BUFFER.
