@@ -3192,7 +3192,9 @@
                           :ensure nil
                           :demand t
                           :custom (macher-context-string-max-files 10)))))
-          (expect (cdr result) :to-equal "")
+          ;; Emacs itself may print unrelated notes (e.g. cus-start reporting built-in variables
+          ;; missing from this build), so check only for errors and warnings about the variable.
+          (expect (cdr result) :not :to-match "Warning\\|macher-context-string-max-files")
           (expect (car result) :to-equal 0)))
 
       (it "accepts settings made before macher is loaded"
@@ -3202,7 +3204,9 @@
                         '(setopt macher-context-string-max-files 20)
                         '(setq macher-context-string-max-files 30)
                         '(require 'macher))))
-          (expect (cdr result) :to-equal "")
+          ;; Emacs itself may print unrelated notes (e.g. cus-start reporting built-in variables
+          ;; missing from this build), so check only for errors and warnings about the variable.
+          (expect (cdr result) :not :to-match "Warning\\|macher-context-string-max-files")
           (expect (car result) :to-equal 0)))
 
       (it "accepts settings made after macher is loaded"
@@ -3213,7 +3217,9 @@
                         '(customize-set-variable 'macher-context-string-max-files 20)
                         '(setopt macher-context-string-max-files nil)
                         '(setq macher-context-string-max-files 30))))
-          (expect (cdr result) :to-equal "")
+          ;; Emacs itself may print unrelated notes (e.g. cus-start reporting built-in variables
+          ;; missing from this build), so check only for errors and warnings about the variable.
+          (expect (cdr result) :not :to-match "Warning\\|macher-context-string-max-files")
           (expect (car result) :to-equal 0)))))
 
   (describe "Workspace detection functions"
