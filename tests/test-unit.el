@@ -4851,6 +4851,19 @@
           ;; The earlier buffer keeps its workspace binding.
           (expect (buffer-local-value 'macher--workspace first) :to-equal workspace)))
 
+      (it "returns nil without side effects when no buffer has been selected for the workspace"
+        (let* ((calls 0)
+               (setup-count 0)
+               (macher-action-buffer-setup-hook (list (lambda () (cl-incf setup-count))))
+               (macher-action-buffer-function
+                (lambda (ws)
+                  (cl-incf calls)
+                  (macher-action-buffer-default ws))))
+          (expect (macher-action-buffer workspace) :to-be nil)
+          (expect calls :to-equal 0)
+          (expect setup-count :to-equal 0)
+          (expect (get-buffer (macher--buffer-name nil workspace)) :to-be nil)))
+
       (it "returns nil once the latest buffer has been killed"
         (let* ((buffer (generate-new-buffer "*custom-action*"))
                (macher-action-buffer-ui nil)
@@ -4904,6 +4917,9 @@
             (text-mode)
             ;; The mode change discarded the hooks installed by the setup.
             (expect (local-variable-p 'macher-before-action-functions) :to-be nil))
+          ;; Looking up the latest buffer never runs the setup.
+          (expect (macher-action-buffer workspace) :to-be buffer)
+          (expect setup-count :to-equal 1)
           (macher-action-buffer workspace t)
           (expect setup-count :to-equal 2)
           (with-current-buffer buffer
