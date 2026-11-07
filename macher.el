@@ -598,8 +598,10 @@ macher requests."
   :type 'string
   :group 'macher-workspace)
 
-(defcustom macher-system-prompt-marker-end "\n</macher>\n"
+(defcustom macher-system-prompt-marker-end "</macher>\n"
   "A marker for the end of macher's content in the system prompt.
+
+It directly follows the content, which ends with a newline.
 
 For now this is purely cosmetic, but you should avoid using this exact
 string elsewhere in your system prompt, as it may be used for additional
@@ -615,8 +617,11 @@ Each element is either a string, or a function that takes the current
 workspace (see `macher-workspace') and returns a string or nil.  The
 workspace is nil outside a workspace.  Functions are called in the
 buffer where the request is being sent (or a preset is being applied).
-Sections that come out nil or empty are skipped, and the rest are joined
-with blank lines.
+Sections that come out nil or empty are skipped.
+
+By convention, each section ends with a single newline.  Sections are
+joined with one more newline, so conforming sections are separated by a
+blank line.  Section text is used as-is; nothing is added or trimmed.
 
 For compatibility with the obsolete `macher-context-string-function',
 functions that take no arguments are called without the workspace.
@@ -1576,7 +1581,7 @@ is the same for every workspace."
      "- A file's contents are captured the first time you access it, so later changes on disk by "
      "other processes are NOT reflected in the workspace.\n"
      "- The workspace is cleared every time the user sends a request. Between requests, the user "
-     "may apply all, some, or none of your changes, and may make additional edits.")))
+     "may apply all, some, or none of your changes, and may make additional edits.\n")))
 
 (defun macher-system-prompt-workspace (workspace)
   "Name WORKSPACE for the system prompt.
@@ -1587,7 +1592,7 @@ nil if WORKSPACE is nil.
 This gives only the workspace's name, not its root, so that the user's
 filesystem paths aren't sent to the model by default."
   (when workspace
-    (format "The user is currently working on a project named: \"%s\""
+    (format "The user is currently working on a project named: \"%s\"\n"
             (macher--workspace-name workspace))))
 
 (defun macher--system-prompt-content ()
@@ -1620,7 +1625,7 @@ Returns nil if no section produces any text."
                   text)))
             sections))))
     (when texts
-      (string-join texts "\n\n"))))
+      (string-join texts "\n"))))
 
 (defun macher--workspace-hash (workspace &optional length)
   "Generate a unique hash for WORKSPACE.

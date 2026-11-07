@@ -3153,7 +3153,8 @@
       (it "names the workspace without revealing its path"
         (spy-on 'macher--workspace-files :and-call-through)
         (let ((result (macher-system-prompt-workspace '(file . "/some/dir/file.txt"))))
-          (expect result :to-equal "The user is currently working on a project named: \"file.txt\"")
+          (expect result
+                  :to-equal "The user is currently working on a project named: \"file.txt\"\n")
           (expect result :not :to-match "/some/dir"))
         ;; Listing files can be slow on large or remote workspaces, and this runs on every request.
         (expect 'macher--workspace-files :not :to-have-been-called)))
@@ -3161,8 +3162,17 @@
     (describe "macher--system-prompt-content"
       (it "joins sections with blank lines, skipping nil and empty ones"
         (let ((macher-system-prompt-sections
-               (list "First." (lambda () nil) (lambda () "") (lambda () "Second.") "")))
-          (expect (macher--system-prompt-content) :to-equal "First.\n\nSecond.")))
+               (list "First.\n" (lambda () nil) (lambda () "") (lambda () "Second.\n") "")))
+          (expect (macher--system-prompt-content) :to-equal "First.\n\nSecond.\n")))
+
+      (it "uses section text as-is"
+        (let ((macher-system-prompt-sections (list "First.\n" "Second.\n\n" "Third.")))
+          (expect (macher--system-prompt-content) :to-equal "First.\n\nSecond.\n\n\nThird.")))
+
+      (it "follows the newline convention in the built-in sections"
+        (dolist (section '(macher-system-prompt-instructions macher-system-prompt-workspace))
+          (let ((text (funcall section '(project . "/some/project/"))))
+            (expect text :to-match "[^\n]\n\\'"))))
 
       (it "accepts a single function"
         (let ((macher-system-prompt-sections (lambda () "Only.")))
@@ -3193,7 +3203,7 @@
 
       (it "calls functions that take no arguments without the workspace"
         (let ((macher-system-prompt-sections
-               (list (lambda () "None.") (lambda (&optional workspace) (format "%S" workspace)))))
+               (list (lambda () "None.\n") (lambda (&optional workspace) (format "%S" workspace)))))
           (with-temp-buffer
             (setq-local macher--workspace '(project . "/some/project/"))
             (expect (macher--system-prompt-content)
