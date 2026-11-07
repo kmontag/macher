@@ -235,14 +235,16 @@ server](https://github.com/modelcontextprotocol/servers).
 
 Available tools:
 
-- `read_file_in_workspace`: Read file contents
-- `search_in_workspace`: Regex search (grep-like)
-- `list_directory_in_workspace`: List directory contents
-- `edit_file_in_workspace`: Make exact string replacements
-- `multi_edit_file_in_workspace`: Multiple edits to one file
-- `write_file_in_workspace`: Create or overwrite files
-- `move_file_in_workspace`: Move/rename files
-- `delete_file_in_workspace`: Delete files
+- `macher_read_file`: Read file contents
+- `macher_search`: Regex search (grep-like)
+- `macher_list_directory`: List directory contents
+- `macher_edit_file`: Make exact string replacements
+- `macher_multi_edit_file`: Multiple edits to one file
+- `macher_write_file`: Create or overwrite files
+- `macher_move_file`: Move/rename files
+- `macher_delete_file`: Delete files
+
+The `macher_` prefix comes from `macher-tool-prefix`.
 
 When `macher-install` is called, these tools are registered with gptel but not activated. The
 `@macher` and `@macher-ro` presets activate the appropriate subsets.
@@ -298,6 +300,7 @@ You can see customizable variables/sub-groups with `M-x customize-group RET mach
 | `macher-tools`                  | Tool definitions for reading/editing files                         |
 | `macher-presets-alist`          | Preset definitions (macher, macher-ro, etc.)                       |
 | `macher-tool-category`          | Category for macher tools in gptel registry                        |
+| `macher-tool-prefix`            | Prefix for macher tool names                                       |
 | `macher-match-max-columns`      | Max line length for search results                                 |
 | `macher-tool-output-max-length` | Max characters any macher tool may return (errors out if exceeded) |
 

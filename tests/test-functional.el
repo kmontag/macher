@@ -320,7 +320,7 @@ CALLBACK-TEST is a function that verifies the result."
     :var*
     ((replace-file-prompt
       (concat
-       "Use the \"write_file_in_workspace\" tool to replace the entire contents "
+       "Use the \"macher_write_file\" tool to replace the entire contents "
        "of main.txt with exactly this text: \"Hi there.\""))
      (verify-replace-file
       (lambda (patch-buffer test-files)

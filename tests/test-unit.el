@@ -2692,14 +2692,14 @@
         ;; Create a test file with content that includes parentheses.
         (setq temp-file (expand-file-name "test-search.el" project-dir))
         (with-temp-buffer
-          (insert "(describe \"search_in_workspace\"\n")
+          (insert "(describe \"macher_search\"\n")
           (insert "  (it \"test case\"\n")
           (insert "    (expect true :to-be-truthy)))\n")
           (write-region (point-min) (point-max) temp-file)))
 
       (it "handles invalid regex patterns in search"
         ;; Test pattern with unmatched opening parenthesis - this should trigger regex parse error.
-        (expect (macher--tool-search context "\\(describe \"search_in_workspace\"")
+        (expect (macher--tool-search context "\\(describe \"macher_search\"")
                 :to-throw 'user-error)))
 
     (describe "comprehensive tests"
@@ -3137,10 +3137,11 @@
       (it "returns nil without a workspace"
         (expect (macher-system-prompt-section-instructions nil) :to-be nil))
 
-      (it "names every tool"
-        (let ((text (macher-system-prompt-section-instructions '(project . "/some/project/"))))
+      (it "names every tool with the prefix"
+        (let* ((macher-tool-prefix "custom__")
+               (text (macher-system-prompt-section-instructions '(project . "/some/project/"))))
           (dolist (tool macher-tools)
-            (expect (format "`%s`" (plist-get tool :name)) :to-appear-once-in text))))
+            (expect (format "`custom__%s`" (plist-get tool :name)) :to-appear-once-in text))))
 
       (it "doesn't depend on the workspace"
         (expect (macher-system-prompt-section-instructions '(project . "/a/"))
@@ -3900,9 +3901,7 @@
                    :to-be-truthy)
            ;; Verify that macher tools are also present.
            (expect (cl-find-if
-                    (lambda (tool)
-                      (string= (gptel-tool-name tool) "read_file_in_workspace"))
-                    gptel-tools)
+                    (lambda (tool) (string= (gptel-tool-name tool) "macher_read_file")) gptel-tools)
                    :to-be-truthy)))
         ;; Verify that the global tools list is restored after the preset.
         (expect gptel-tools :to-equal (list existing-tool))
@@ -3964,7 +3963,7 @@
       (expect gptel--known-tools :not :to-be nil)
       ;; Check that each tool from macher-tools is registered.
       (dolist (tool-def macher-tools)
-        (let* ((tool-name (plist-get tool-def :name))
+        (let* ((tool-name (concat macher-tool-prefix (plist-get tool-def :name)))
                (registry-tool (gptel-get-tool (list macher-tool-category tool-name))))
           (expect registry-tool :to-be-truthy)
           (expect (gptel-tool-name registry-tool) :to-equal tool-name)
@@ -3978,7 +3977,7 @@
 
     (it "creates tools with wrapped functions that require context"
       (macher--install-tools)
-      (let* ((tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+      (let* ((tool (gptel-get-tool (list macher-tool-category "macher_read_file")))
              (tool-fn (gptel-tool-function tool))
              (warn-called nil))
         (spy-on 'warn :and-call-fake (lambda (&rest _args) (setq warn-called t)))
@@ -3988,10 +3987,10 @@
 
     (it "idempotently reinstalls tools"
       (macher--install-tools)
-      (let ((first-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace"))))
+      (let ((first-tool (gptel-get-tool (list macher-tool-category "macher_read_file"))))
         (macher--install-tools)
         ;; Tool should still be retrievable.
-        (let ((second-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace"))))
+        (let ((second-tool (gptel-get-tool (list macher-tool-category "macher_read_file"))))
           (expect second-tool :to-be-truthy)
           (expect (gptel-tool-name second-tool) :to-equal (gptel-tool-name first-tool))))))
 
@@ -4022,12 +4021,12 @@
                ;; Check for specific tools.
                (expect (cl-find-if
                         (lambda (tool)
-                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                          (string= (gptel-tool-name tool) "macher_read_file"))
                         gptel-tools)
                        :to-be-truthy)
                (expect (cl-find-if
                         (lambda (tool)
-                          (string= (gptel-tool-name tool) "edit_file_in_workspace"))
+                          (string= (gptel-tool-name tool) "macher_edit_file"))
                         gptel-tools)
                        :to-be-truthy))))))
 
@@ -4052,7 +4051,7 @@
                ;; Should also have macher tools.
                (expect (cl-find-if
                         (lambda (tool)
-                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                          (string= (gptel-tool-name tool) "macher_read_file"))
                         gptel-tools)
                        :to-be-truthy))))))
 
@@ -4095,28 +4094,27 @@
                ;; Should have read tools.
                (expect (cl-find-if
                         (lambda (tool)
-                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                          (string= (gptel-tool-name tool) "macher_read_file"))
                         gptel-tools)
                        :to-be-truthy)
                (expect (cl-find-if
                         (lambda (tool)
-                          (string= (gptel-tool-name tool) "list_directory_in_workspace"))
+                          (string= (gptel-tool-name tool) "macher_list_directory"))
                         gptel-tools)
                        :to-be-truthy)
                (expect (cl-find-if
-                        (lambda (tool)
-                          (string= (gptel-tool-name tool) "search_in_workspace"))
+                        (lambda (tool) (string= (gptel-tool-name tool) "macher_search"))
                         gptel-tools)
                        :to-be-truthy)
                ;; Should NOT have write tools.
                (expect (cl-find-if
                         (lambda (tool)
-                          (string= (gptel-tool-name tool) "edit_file_in_workspace"))
+                          (string= (gptel-tool-name tool) "macher_edit_file"))
                         gptel-tools)
                        :to-be nil)
                (expect (cl-find-if
                         (lambda (tool)
-                          (string= (gptel-tool-name tool) "write_file_in_workspace"))
+                          (string= (gptel-tool-name tool) "macher_write_file"))
                         gptel-tools)
                        :to-be nil))))))
 
@@ -4125,7 +4123,7 @@
           (find-file project-file)
           ;; Install tools first to get the edit tool.
           (macher--install-tools)
-          (let* ((edit-tool (gptel-get-tool (list macher-tool-category "edit_file_in_workspace")))
+          (let* ((edit-tool (gptel-get-tool (list macher-tool-category "macher_edit_file")))
                  (gptel-tools (list edit-tool)))
             (macher--with-preset
              'macher-ro
@@ -4133,13 +4131,13 @@
                ;; Edit tool should be removed.
                (expect (cl-find-if
                         (lambda (tool)
-                          (string= (gptel-tool-name tool) "edit_file_in_workspace"))
+                          (string= (gptel-tool-name tool) "macher_edit_file"))
                         gptel-tools)
                        :to-be nil)
                ;; Read tools should be present.
                (expect (cl-find-if
                         (lambda (tool)
-                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                          (string= (gptel-tool-name tool) "macher_read_file"))
                         gptel-tools)
                        :to-be-truthy)))))))
 
@@ -4223,17 +4221,17 @@
                ;; Should have all macher tools.
                (expect (cl-find-if
                         (lambda (tool)
-                          (string= (gptel-tool-name tool) "read_file_in_workspace"))
+                          (string= (gptel-tool-name tool) "macher_read_file"))
                         gptel-tools)
                        :to-be-truthy)
                (expect (cl-find-if
                         (lambda (tool)
-                          (string= (gptel-tool-name tool) "edit_file_in_workspace"))
+                          (string= (gptel-tool-name tool) "macher_edit_file"))
                         gptel-tools)
                        :to-be-truthy)
                (expect (cl-find-if
                         (lambda (tool)
-                          (string= (gptel-tool-name tool) "write_file_in_workspace"))
+                          (string= (gptel-tool-name tool) "macher_write_file"))
                         gptel-tools)
                        :to-be-truthy))))))
 
@@ -4468,7 +4466,7 @@
               :args '((:name "arg" :type string)))))
         ;; Tool should be created.
         (expect (gptel-tool-p tool) :to-be-truthy)
-        (expect (gptel-tool-name tool) :to-equal "test_tool")
+        (expect (gptel-tool-name tool) :to-equal (concat macher-tool-prefix "test_tool"))
         ;; Tool should NOT be in registry.
         (expect gptel--known-tools :to-be nil)))
 
@@ -4483,7 +4481,15 @@
         ;; Tool should be created.
         (expect (gptel-tool-p tool) :to-be-truthy)
         ;; Tool should be in registry.
-        (expect (gptel-get-tool (list macher-tool-category "registered_tool")) :to-be-truthy)))
+        (expect (gptel-get-tool
+                 (list macher-tool-category (concat macher-tool-prefix "registered_tool")))
+                :to-be-truthy)))
+
+    (it "prefixes the name with macher-tool-prefix"
+      (let ((macher-tool-prefix "custom__"))
+        (expect (gptel-tool-name
+                 (macher--make-tool t :name "a_tool" :function #'ignore :description "A tool"))
+                :to-equal "custom__a_tool")))
 
     (it "uses macher-tool-category regardless of provided category"
       (let ((tool
@@ -4557,7 +4563,7 @@
       ;; Install tools first.
       (macher--install-tools)
       (let* ((tool-def (car macher-tools))
-             (tool-name (plist-get tool-def :name))
+             (tool-name (concat macher-tool-prefix (plist-get tool-def :name)))
              (resolved (macher-resolve-tool tool-def))
              (registry-tool (gptel-get-tool (list macher-tool-category tool-name))))
         ;; Should return the same tool from registry.
@@ -4565,7 +4571,7 @@
 
     (it "creates anonymous tool if not in registry"
       (let* ((tool-def (car macher-tools))
-             (tool-name (plist-get tool-def :name))
+             (tool-name (concat macher-tool-prefix (plist-get tool-def :name)))
              (resolved (macher-resolve-tool tool-def)))
         ;; Should create a tool.
         (expect (gptel-tool-p resolved) :to-be-truthy)
@@ -4593,7 +4599,7 @@
       (macher--install-tools)
       (let* ((context (macher--make-context :workspace `(project . ,project-dir)))
              (get-context (lambda () context))
-             (read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+             (read-tool (gptel-get-tool (list macher-tool-category "macher_read_file")))
              (fsm (gptel-make-fsm))
              (info (gptel-fsm-info fsm)))
         ;; Add macher tool to FSM.
@@ -4607,7 +4613,7 @@
           (expect (gptel-tool-category processed-tool)
                   :to-equal (format "%s__processed" macher-tool-category))
           ;; Tool name should be unchanged.
-          (expect (gptel-tool-name processed-tool) :to-equal "read_file_in_workspace"))))
+          (expect (gptel-tool-name processed-tool) :to-equal "macher_read_file"))))
 
     (it "preserves non-macher tools unchanged"
       (let* ((other-tool
@@ -4638,8 +4644,8 @@
               (lambda ()
                 (setq get-context-calls (1+ get-context-calls))
                 context))
-             (read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
-             (list-tool (gptel-get-tool (list macher-tool-category "list_directory_in_workspace")))
+             (read-tool (gptel-get-tool (list macher-tool-category "macher_read_file")))
+             (list-tool (gptel-get-tool (list macher-tool-category "macher_list_directory")))
              (fsm (gptel-make-fsm))
              (info (gptel-fsm-info fsm)))
         ;; Add multiple macher tools.
@@ -4659,7 +4665,7 @@
     (it "handles nil context from get-context"
       (macher--install-tools)
       (let* ((get-context (lambda () nil))
-             (read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+             (read-tool (gptel-get-tool (list macher-tool-category "macher_read_file")))
              (fsm (gptel-make-fsm))
              (info (gptel-fsm-info fsm))
              (warn-called nil))
@@ -4749,7 +4755,7 @@
                (macher--context-for-fsm fsm)))
 
       (it "captures only the most recent user message as the context prompt"
-        (let* ((read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+        (let* ((read-tool (gptel-get-tool (list macher-tool-category "macher_read_file")))
                ;; No handlers: we only want the transition handlers that the transform itself
                ;; installs, not gptel's own request-sending handlers.
                (fsm (gptel-make-fsm :table gptel-request--transitions :handlers nil))
@@ -4769,7 +4775,7 @@
             (expect (macher-context-prompt context) :to-equal "second message"))))
 
       (it "captures the whole buffer text when there is no conversation history"
-        (let* ((read-tool (gptel-get-tool (list macher-tool-category "read_file_in_workspace")))
+        (let* ((read-tool (gptel-get-tool (list macher-tool-category "macher_read_file")))
                (fsm (gptel-make-fsm :table gptel-request--transitions :handlers nil)))
           (setf (gptel-fsm-info fsm)
                 (plist-put

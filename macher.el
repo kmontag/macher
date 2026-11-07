@@ -815,9 +815,23 @@ adding tools to this category directly; instead, customize
   :type 'string
   :group 'macher-tools)
 
+(defcustom macher-tool-prefix "macher_"
+  "Prefix for the names of macher tools.
+
+This is prepended to each name in `macher-tools' when the tools are
+created, i.e. by `macher-install', or when a preset uses tools that
+aren't installed.  `macher-system-prompt-section-instructions' refers to
+the tools by their prefixed names.
+
+Set this before calling `macher-install'.  Tools that are already
+installed keep the names they were created with, and saved gptel
+sessions refer to tools by name, so changing it later is up to you."
+  :type 'string
+  :group 'macher-tools)
+
 (defcustom macher-tools
   `((:name
-     "read_file_in_workspace"
+     "read_file"
      :category "read"
      :function macher--tool-read-file
      :description
@@ -863,7 +877,7 @@ adding tools to this category directly; instead, customize
          "line number and a tab character)"))))
 
     (:name
-     "list_directory_in_workspace"
+     "list_directory"
      :category "read"
      :function macher--tool-list-directory
      :description
@@ -892,7 +906,7 @@ adding tools to this category directly; instead, customize
        :description "If true, include file sizes in the output")))
 
     (:name
-     "search_in_workspace"
+     "search"
      :category "read"
      :function macher--tool-search
      :description
@@ -963,7 +977,7 @@ adding tools to this category directly; instead, customize
        :description "Limit output to first N lines (equivalent to piping through `head -N`)")))
 
     (:name
-     "edit_file_in_workspace"
+     "edit_file"
      :function macher--tool-edit-file
      :description
      ,(concat
@@ -997,7 +1011,7 @@ adding tools to this category directly; instead, customize
        :description "If true, replace all occurrences. If false (default), error if multiple matches exist")))
 
     (:name
-     "multi_edit_file_in_workspace"
+     "multi_edit_file"
      :function macher--tool-multi-edit-file
      :description
      ,(concat
@@ -1038,13 +1052,13 @@ adding tools to this category directly; instead, customize
         :required ["old_text" "new_text"]))))
 
     (:name
-     "write_file_in_workspace"
+     "write_file"
      :function macher--tool-write-file
      :description
      ,(concat
        "Create new file or completely replace existing file content in your workspace.\n"
        "\n"
-       "WARNING: Overwrites ALL existing content. Use edit_file_in_workspace for partial changes.\n"
+       "WARNING: Overwrites ALL existing content. Use the edit_file tool for partial changes.\n"
        "\n"
        "Returns a summary of the change (lines added/deleted) on success. Fails if the path is "
        "invalid or outside the workspace."
@@ -1060,7 +1074,7 @@ adding tools to this category directly; instead, customize
        :description "Complete new content that will replace the entire file")))
 
     (:name
-     "move_file_in_workspace"
+     "move_file"
      :function macher--tool-move-file
      :description
      ,(concat
@@ -1084,7 +1098,7 @@ adding tools to this category directly; instead, customize
        :description "New path for the file, relative to workspace root")))
 
     (:name
-     "delete_file_in_workspace"
+     "delete_file"
      :function macher--tool-delete-file
      :description
      ,(concat
@@ -1114,6 +1128,8 @@ that:
   `macher-tool-category'), but can be used for internal organization -
   currently, the \"@macher-ro\" preset uses the value \"read\" to select
   tools, though the exact behavior here is subject to change.
+
+NAME is prefixed with `macher-tool-prefix' when the tool is created.
 
 These tools will be installed to gptel's global tool registry (but not
 to the global variable `gptel-tools') when calling `macher-install'.
@@ -1559,13 +1575,15 @@ descriptions themselves only carry a one-line reminder, so without this
 section (or your own equivalent), models get much less guidance about
 the workspace.
 
-The tools are named from `macher-tools'.  Returns nil if WORKSPACE is
-nil, since the tools don't work outside a workspace.  Otherwise the text
-is the same for every workspace."
+The tools are named from `macher-tools' and `macher-tool-prefix'.
+Returns nil if WORKSPACE is nil, since the tools don't work outside a
+workspace.  Otherwise the text is the same for every workspace."
   (when workspace
     (concat
      "The following tools, if available to you, operate on the workspace: "
-     (mapconcat (lambda (tool) (format "`%s`" (plist-get tool :name))) macher-tools ", ")
+     (mapconcat
+      (lambda (tool) (format "`%s%s`" macher-tool-prefix (plist-get tool :name))) macher-tools
+      ", ")
      ".\n\n"
      "The workspace is an in-memory snapshot of files from the user's current project.\n"
      "- You read from and modify this snapshot, NOT the actual files on disk. Reads and searches "
@@ -4032,13 +4050,13 @@ TOOL is a plist of the same form as elements of `macher-tools'.
 
 First looks for an existing tool in the global gptel registry, under the
 `macher-tool-category', with the same name as the provided TOOL
-definition.  If found, returns it.
+definition (prefixed with `macher-tool-prefix').  If found, returns it.
 
 Otherwise, creates an anonymous tool based on the provided definition.
 
 This might be useful, for example, in custom preset definitions if tools
 have not have been installed globally."
-  (let* ((tool-name (plist-get tool :name))
+  (let* ((tool-name (concat macher-tool-prefix (plist-get tool :name)))
          ;; Look up the tool in the gptel registry using category and name.
          (registry-tool
           (condition-case nil
@@ -4635,10 +4653,12 @@ SLOTS are as described in the `gptel-make-tool' docstring, except that:
 
 - CATEGORY is ignored, and the `macher-tool-category' is used.
 
+- NAME is prefixed with `macher-tool-prefix'.
+
 If ANON is non-nil, don't register the tool with the gptel registry."
   ;; Extract the original function from slots.
   (let*
-      ((name (plist-get slots :name))
+      ((name (concat macher-tool-prefix (plist-get slots :name)))
        (orig-fn (plist-get slots :function))
        ;; Wrap the provided tool function with a sanity check to ensure that the macher context has
        ;; been provided as the first argument.  This happens via the
@@ -4661,6 +4681,7 @@ If ANON is non-nil, don't register the tool with the gptel registry."
                               (apply orig-fn args)))
                          orig-fn))
        (slots (plist-put (copy-sequence slots) :category macher-tool-category))
+       (slots (plist-put slots :name name))
        (slots (plist-put slots :function wrapped-fn)))
     (apply (if anon
                ;; Use the internal constructor to avoid interacting with the global registry at all.
