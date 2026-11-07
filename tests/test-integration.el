@@ -258,10 +258,9 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                (gptel-get-backend backend-name)))
             (response-buffer (generate-new-buffer " *test-response*")))
          (unless backend
-           (error
-            "No macher-test-backend found for hostname: %s (backend-name: %s)"
-            hostname
-            backend-name))
+           (error "No macher-test-backend found for hostname: %s (backend-name: %s)"
+                  hostname
+                  backend-name))
 
          ;; Store the request data on the correct backend instance.
          (when url-request-data
@@ -1548,6 +1547,55 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           (when (file-exists-p temp-file)
             (delete-file temp-file)))))
 
+    (describe "workspace instructions"
+      :var (send)
+
+      (before-each
+        ;; Send PROMPT with PRESET from a project file, and return the request that was sent.
+        (setq send
+              (lambda (preset)
+                (funcall setup-backend '("Test response"))
+                (funcall setup-project "instructions" '(("src/main.el" . "main content")))
+                (let ((callback-called nil))
+                  (with-temp-buffer
+                    (set-visited-file-name project-file)
+                    (macher-test--send
+                     preset "Test prompt"
+                     (macher-test--make-once-only-callback
+                      (lambda (_exit-code _fsm) (setq callback-called t))))
+                    (let ((timeout 0))
+                      (while (and (not callback-called) (< timeout 100))
+                        (sleep-for 0.1)
+                        (setq timeout (1+ timeout))))
+                    (expect callback-called :to-be-truthy)
+                    (car (funcall received-requests)))))))
+
+      (it "appear once in the system prompt, and not in the tool descriptions"
+        (let* ((request (funcall send 'macher))
+               (contents
+                (mapconcat (lambda (msg) (plist-get msg :content)) (plist-get request :messages)
+                           " "))
+               (descriptions
+                (mapcar
+                 (lambda (tool)
+                   (plist-get (plist-get tool :function) :description))
+                 (plist-get request :tools))))
+          (expect "operate on the workspace:" :to-appear-once-in contents)
+          (expect (length descriptions) :to-equal (length macher-tools))
+          (dolist (description descriptions)
+            ;; Each tool keeps a one-line reminder, but not the full explanation.
+            (expect description :to-match "in-memory workspace")
+            (expect description :not :to-match "in-memory snapshot"))))
+
+      (it "are left out by @macher-tools"
+        (let* ((request (funcall send 'macher-tools))
+               (contents
+                (mapconcat
+                 (lambda (msg) (format "%s" (plist-get msg :content))) (plist-get request :messages)
+                 " ")))
+          (expect (length (plist-get request :tools)) :to-equal (length macher-tools))
+          (expect contents :not :to-match "operate on the workspace:"))))
+
     ;; Anthropic expects an input_schema parameter, which contains a valid JSON schema describing
     ;; the tool arguments. This parameter gets added in the custom `gptel--parse-tools'
     ;; implementation for Anthropic backends.
@@ -1667,19 +1715,15 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (let ((system-content
                      (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
                 ;; Check for workspace description.
-                (expect "The user is currently working on a project named:"
+                (expect (format "The user is currently working on a project named: \"%s\""
+                                (file-name-nondirectory (directory-file-name project-dir)))
                         :to-appear-once-in system-content)
-                ;; Check that files are listed.
-                (expect (format "Files in the \"%s\" project:" (file-name-nondirectory project-dir))
-                        :to-appear-once-in system-content)
-                ;; Check that files appear in the listing.
-                (expect system-content :to-match "    README\\.md")
-                (expect system-content :to-match "    src/main\\.el")
-                (expect system-content :to-match "    src/util\\.el")
-                (expect system-content :to-match "    test/test-main\\.el")
-                ;; Check that it mentions the project name in the description.
-                (expect (format "project named: \"%s\"" (file-name-nondirectory project-dir))
-                        :to-appear-once-in system-content)))))))
+                ;; The user's filesystem paths aren't sent by default.
+                (expect system-content
+                        :not
+                        :to-match (regexp-quote (directory-file-name project-dir)))
+                ;; Files aren't listed.
+                (expect system-content :not :to-match "src/main\\.el")))))))
 
     (it "does not duplicate macher context string when macher-system applied multiple times"
       ;; This test verifies that applying @macher-system multiple times (e.g. in nested presets or
@@ -1732,12 +1776,9 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (let ((system-content
                      (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
                 ;; The workspace context marker should appear exactly once.
-                (expect macher-context-string-marker-start :to-appear-once-in system-content)
+                (expect macher-system-prompt-marker-start :to-appear-once-in system-content)
                 ;; The workspace description should appear exactly once.
                 (expect "The user is currently working on a project named:"
-                        :to-appear-once-in system-content)
-                ;; The file listing header should appear exactly once.
-                (expect (format "Files in the \"%s\" project:" (file-name-nondirectory project-dir))
                         :to-appear-once-in system-content))))))))
 
   (it "handles nil workspace without error"
@@ -1781,7 +1822,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (expect messages :to-be-truthy)
             (expect (> (length messages) 0) :to-be-truthy)
             ;; Should contain the empty context markers with nothing in between.
-            (expect (concat macher-context-string-marker-start macher-context-string-marker-end)
+            (expect (concat macher-system-prompt-marker-start macher-system-prompt-marker-end)
                     :to-appear-once-in system-content))))
       (delete-directory non-project-dir t)))
 
@@ -1897,7 +1938,8 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
                     ;; The gptel context should appear at the beginning.
                     (let ((macher-pos
-                           (string-match "The user is currently working on a project" all-content))
+                           (string-match
+                            "The user is currently working on a project named" all-content))
                           (gptel-pos
                            (string-match "MODIFIED_BUFFER_CONTENT_FOR_CONTEXT" all-content)))
                       (expect macher-pos :to-be-truthy)
@@ -2321,7 +2363,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (gptel-system-prompt
              (list
               (concat
-               "SYSTEM_WITH_PLACEHOLDER" macher-context-string-placeholder "END_MARKER")
+               "SYSTEM_WITH_PLACEHOLDER" macher-system-prompt-placeholder "END_MARKER")
               "Few-shot user" "Few-shot assistant")))
 
         (with-temp-buffer
@@ -2359,13 +2401,11 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Content after placeholder should appear.
               (expect system-content :to-match "END_MARKER")
               ;; Placeholder should be replaced with actual context.
-              (expect system-content
-                      :not
-                      :to-match (regexp-quote macher-context-string-placeholder))
+              (expect system-content :not :to-match (regexp-quote macher-system-prompt-placeholder))
               ;; macher workspace context should appear between them.
               (expect system-content :to-match "The user is currently working on a project named:")
               ;; Context marker should appear exactly once.
-              (expect macher-context-string-marker-start :to-appear-once-in system-content))))))
+              (expect macher-system-prompt-marker-start :to-appear-once-in system-content))))))
 
     (it "handles function directive with nested function call"
       ;; A function directive that itself calls another function should work correctly.
@@ -2535,7 +2575,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (let ((buffer-content (buffer-substring-no-properties (point-min) (point-max))))
                 ;; Check for topic heading.
                 (expect buffer-content
-                        :to-match "^\\* main\\.el: Test successful request with org :discuss:$")
+                        :to-match "^\\* main\\.el:1: Test successful request with org :discuss:$")
                 ;; Check for GPTEL_TOPIC property.
                 (expect
                  buffer-content
