@@ -1703,18 +1703,45 @@ the content with `org-escape-code-in-string'."
             (insert "#+begin_src " lang "\n" (org-escape-code-in-string content) "#+end_src")))))
     (buffer-string)))
 
-(defun macher--action-source-name (execution)
-  "Return the source buffer's name for EXECUTION, or nil.
+(defun macher--action-source-location (execution)
+  "Return the source location for EXECUTION, or nil.
 
-NAME is the base filename of the source buffer's file, or the buffer
-name for non-file buffers.  Returns nil if the source buffer is not
-set or no longer live."
+The location is NAME:LINE, where NAME is the base filename of the source
+buffer's file (or the buffer name for non-file buffers), and LINE is the
+line at point.  When the region is active, LINE is the range of lines it
+covers, e.g. 12-20, or a single line if it covers only one.  Returns nil
+if the source buffer is not set or no longer live."
   (when-let* ((source (macher-action-execution-source execution))
               ((buffer-live-p source)))
     (with-current-buffer source
-      (if buffer-file-name
-          (file-name-nondirectory buffer-file-name)
-        (buffer-name)))))
+      (let* ((name
+              (if buffer-file-name
+                  (file-name-nondirectory buffer-file-name)
+                (buffer-name)))
+             (region (use-region-p))
+             (start
+              (line-number-at-pos
+               (if region
+                   (region-beginning)
+                 (point))
+               t))
+             (end
+              (if region
+                  ;; A region ending at the start of a line (e.g. from selecting whole lines)
+                  ;; doesn't include that line.
+                  (let ((end-pos (region-end)))
+                    (line-number-at-pos
+                     (if (and (> end-pos (region-beginning))
+                              (save-excursion
+                                (goto-char end-pos)
+                                (bolp)))
+                         (1- end-pos)
+                       end-pos)
+                     t))
+                start)))
+        (if (= start end)
+            (format "%s:%d" name start)
+          (format "%s:%d-%d" name start end))))))
 
 (defun macher--before-action-insert-prompt (execution)
   "Insert the action prompt into the current buffer.
@@ -1747,26 +1774,37 @@ This is added buffer-locally to `macher-before-action-functions' by
       ;; Add another newline if we're not at the beginning of the buffer, for visual clarity.
       (unless (bobp)
         (insert "\n"))
-      (let* ((name (macher--action-source-name execution))
-             (header-prefix
-              (if name
-                  (format "* %s: " name)
-                "* "))
-             (header-postfix (format " :%s:" action))
+      (let* ((name (macher--action-source-location execution))
              (summary (macher-action-execution-summary execution))
-             ;; Extract the first non-whitespace line from the summary and truncate to fill-column.
+             ;; The first non-whitespace line of the summary, or nil if there is none, e.g. for a
+             ;; draft started without a region.
+             (first-line (car (split-string (or summary "") "[\r\n]+" t "[[:space:]]*")))
+             (header-prefix
+              (cond
+               ((and name first-line)
+                (format "* %s: " name))
+               (name
+                (format "* %s" name))
+               (first-line
+                "* ")
+               ;; The postfix supplies the space after the stars.
+               (t
+                "*")))
+             (header-postfix (format " :%s:" action))
              (truncated-summary
-              (let* ((lines (split-string summary "[\r\n]+" t "[[:space:]]*"))
-                     (first-line (or (car lines) ""))
-                     ;; Calculate available space: total fill-column minus prefix and postfix.
-                     (used-length (+ (length header-prefix) (length header-postfix)))
-                     (available-length (max 10 (- (or fill-column 70) used-length))))
-                (truncate-string-to-width first-line available-length nil nil "...")))
+              (if first-line
+                  ;; Truncate to fit within fill-column along with the prefix and postfix.
+                  (let* ((used-length (+ (length header-prefix) (length header-postfix)))
+                         (available-length (max 10 (- (or fill-column 70) used-length))))
+                    (truncate-string-to-width first-line available-length nil nil "..."))
+                ""))
              (topic
-              (format "macher-%s-%s-%s"
-                      action
-                      (format-time-string "%Y%m%d%H%M%S" (current-time))
-                      (replace-regexp-in-string "[[:space:]]+" "-" (downcase truncated-summary)))))
+              (concat
+               (format "macher-%s-%s" action (format-time-string "%Y%m%d%H%M%S" (current-time)))
+               (when first-line
+                 (concat
+                  "-"
+                  (replace-regexp-in-string "[[:space:]]+" "-" (downcase truncated-summary)))))))
         ;; Use the 'ignore property to omit the header from requests sent via normal gptel
         ;; conversational methods.
         (insert
