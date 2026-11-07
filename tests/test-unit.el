@@ -3003,6 +3003,40 @@
     (it "signals error for non-existent files"
       (expect (macher--tool-read-file context "nonexistent.txt") :to-throw))
 
+    (describe "binary files"
+      :var (write-bytes)
+
+      (before-each
+        (setq write-bytes
+              (lambda (name bytes)
+                (let ((coding-system-for-write 'binary))
+                  (write-region
+                   (apply #'unibyte-string bytes) nil (expand-file-name name temp-dir))))))
+
+      (it "signals a JSON-safe error for undecodable bytes"
+        (funcall write-bytes "image.png" '(#x89 ?P ?N ?G 13 10 #x1a 10 #xff #xfe))
+        (let ((err
+               (condition-case e
+                   (macher--tool-read-file context "image.png")
+                 (error
+                  e))))
+          (expect (error-message-string err) :to-match "looks like a binary file")
+          ;; The error is what reaches the model, so it must survive the request encoding.
+          (expect (json-serialize (list :result (error-message-string err))) :to-be-truthy)))
+
+      (it "signals an error for files containing NUL"
+        (funcall write-bytes "data.dat" '(?a 0 ?b))
+        (expect (condition-case e
+                    (macher--tool-read-file context "data.dat")
+                  (error
+                   (error-message-string e)))
+                :to-match "looks like a binary file"))
+
+      (it "reads non-ASCII text"
+        (let ((coding-system-for-write 'utf-8))
+          (write-region "héllo wörld ✓" nil (expand-file-name "unicode.txt" temp-dir)))
+        (expect (macher--tool-read-file context "unicode.txt") :to-equal "héllo wörld ✓")))
+
     (it "errors when workspace-files includes a file not on disk"
       ;; When a custom workspace type's :get-files returns stale entries,
       ;; read-file should error rather than silently returning nil.

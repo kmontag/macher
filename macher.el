@@ -2574,8 +2574,14 @@ found in the workspace."
         ;; would resolve the path a second time.
         (let* ((contents (macher-context--contents-for-file full-path context))
                (new-content (cdr contents)))
-          (if (not new-content)
-              (error "File '%s' not found in workspace" path)
+          (cond
+           ((not new-content)
+            (error "File '%s' not found in workspace" path))
+           ;; Binary content can't be returned to the model: raw bytes aren't valid JSON, and the
+           ;; request fails before the model sees any error.
+           ((macher--binary-string-p new-content)
+            (error "File '%s' looks like a binary file, and can't be read as text" path))
+           (t
             ;; Some LLMs (for example qwen3-coder at time of writing) seem to have trouble
             ;; invoking tools with integer inputs - they'll always pass e.g. '1.0' instead of
             ;; '1'.  Therefore we need to support float inputs, which in general we handle by
@@ -2589,7 +2595,14 @@ found in the workspace."
                    (processed-content
                     (macher--read-string new-content parsed-offset parsed-limit show-line-numbers)))
               (macher--check-output-length processed-content "File content")
-              processed-content)))))))
+              processed-content))))))))
+
+(defun macher--binary-string-p (string)
+  "Return non-nil if STRING looks like binary rather than text content.
+
+That is, if it contains raw bytes that weren't decoded into characters,
+or a NUL character (the heuristic git uses)."
+  (or (string-search "\0" string) (memq 'eight-bit (find-charset-string string))))
 
 (defun macher--tool-list-directory (context path &optional recursive sizes)
   "List directory contents at PATH within the workspace.
