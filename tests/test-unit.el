@@ -3032,10 +3032,67 @@
                    (error-message-string e)))
                 :to-match "looks like a binary file"))
 
+      (it "signals an error for common binary formats"
+        ;; Named .dat so that neither project.el's ignores nor `auto-compression-mode' get involved.
+        (dolist (file
+                 '(("gzip.dat" . (#x1f #x8b 8 0 0 0 0 0 0 3))
+                   ("elf.dat" . (#x7f ?E ?L ?F 2 1 1 0))
+                   ("jpeg.dat" . (#xff #xd8 #xff #xe0 0 16 ?J ?F ?I ?F))
+                   ("zip.dat" . (?P ?K 3 4 20 0 0 0 8 0))))
+          (funcall write-bytes (car file) (cdr file))
+          (expect (condition-case e
+                      (macher--tool-read-file context (car file))
+                    (error
+                     (error-message-string e)))
+                  :to-match "looks like a binary file")))
+
+      (it "signals an error regardless of offset, limit and line numbers"
+        ;; A slice of a binary file could happen to contain only text, but the whole file is still
+        ;; refused, so the model gets a consistent answer.
+        (funcall write-bytes "mostly-text.dat" `(,@ (string-to-list "line one\nline two\n") 0 10))
+        (expect (macher--tool-read-file context "mostly-text.dat" 1 1) :to-throw 'error)
+        (expect (macher--tool-read-file context "mostly-text.dat" nil nil t) :to-throw 'error))
+
       (it "reads non-ASCII text"
         (let ((coding-system-for-write 'utf-8))
           (write-region "héllo wörld ✓" nil (expand-file-name "unicode.txt" temp-dir)))
-        (expect (macher--tool-read-file context "unicode.txt") :to-equal "héllo wörld ✓")))
+        (expect (macher--tool-read-file context "unicode.txt") :to-equal "héllo wörld ✓"))
+
+      (it "reads text in other encodings that Emacs can decode"
+        (dolist (file
+                 `(("latin1.txt" ,(encode-coding-string "café\n" 'iso-latin-1) "café\n")
+                   ("utf16.txt"
+                    ,(encode-coding-string "hi there\n" 'utf-16le-with-signature)
+                    "hi there\n")
+                   ("bom.txt" ,(encode-coding-string "hi\n" 'utf-8-with-signature) "hi\n")
+                   ("crlf.txt" "a\r\nb\r\n" "a\nb\n")
+                   ("empty.txt" "" "")))
+          (funcall write-bytes (nth 0 file) (string-to-list (nth 1 file)))
+          (let ((result (macher--tool-read-file context (nth 0 file))))
+            (expect result :to-equal (nth 2 file))
+            (expect (json-serialize (list :result result)) :to-be-truthy))))
+
+      (it "reads text with stray invalid UTF-8 as JSON-safe text"
+        ;; Emacs falls back to a single-byte encoding for such files, so this decodes (as
+        ;; mojibake) rather than being refused.
+        (funcall write-bytes
+                 "stray.txt"
+                 (append (string-to-list (encode-coding-string "héllo\n" 'utf-8)) '(#xff ?x 10)))
+        (let ((result (macher--tool-read-file context "stray.txt")))
+          (expect result :to-match "llo\n")
+          (expect (json-serialize (list :result result)) :to-be-truthy))))
+
+    (describe "macher--binary-string-p"
+      (it "is nil for text"
+        (dolist (text '("" "plain ascii\n" "héllo wörld ✓ 😀" "tabs\tand\r\nnewlines"))
+          (expect (macher--binary-string-p text) :to-be nil)))
+
+      (it "is non-nil for NUL characters"
+        (expect (macher--binary-string-p "a\0b") :to-be-truthy))
+
+      (it "is non-nil for raw bytes"
+        (expect (macher--binary-string-p (string ?a (unibyte-char-to-multibyte #xff)))
+                :to-be-truthy)))
 
     (it "errors when workspace-files includes a file not on disk"
       ;; When a custom workspace type's :get-files returns stale entries,
