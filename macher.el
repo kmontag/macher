@@ -1579,18 +1579,16 @@ is the same for every workspace."
      "may apply all, some, or none of your changes, and may make additional edits.")))
 
 (defun macher-system-prompt-workspace (workspace)
-  "Describe WORKSPACE for the system prompt.
+  "Name WORKSPACE for the system prompt.
 
 This is a default element of `macher-system-prompt-sections'.  Returns
-nil if WORKSPACE is nil.  The root is abbreviated the way gptel shows
-file paths, e.g. with \"~\" for the home directory.
+nil if WORKSPACE is nil.
 
-This runs on every request, so it deliberately sticks to the workspace
-root: listing files or looking up the project name can take seconds on
-large or remote workspaces."
+This gives only the workspace's name, not its root, so that the user's
+filesystem paths aren't sent to the model by default."
   (when workspace
-    (format "The user's current workspace is rooted at: %s"
-            (abbreviate-file-name (macher--workspace-root workspace)))))
+    (format "The user is currently working on a project named: \"%s\""
+            (macher--workspace-name workspace))))
 
 (defun macher--system-prompt-content ()
   "Render `macher-system-prompt-sections' in the current buffer.

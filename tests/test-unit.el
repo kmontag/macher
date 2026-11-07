@@ -3150,23 +3150,13 @@
       (it "returns nil without a workspace"
         (expect (macher-system-prompt-workspace nil) :to-be nil))
 
-      (it "names the root of a project workspace"
+      (it "names the workspace without revealing its path"
         (spy-on 'macher--workspace-files :and-call-through)
-        (spy-on 'macher--workspace-name :and-call-through)
-        (expect (macher-system-prompt-workspace '(project . "/some/project/"))
-                :to-equal "The user's current workspace is rooted at: /some/project/")
-        ;; This runs on every request, and both of these can be slow on large or remote workspaces.
-        (expect 'macher--workspace-files :not :to-have-been-called)
-        (expect 'macher--workspace-name :not :to-have-been-called))
-
-      (it "names the containing directory of a single-file workspace"
-        (expect (macher-system-prompt-workspace '(file . "/some/dir/file.txt"))
-                :to-equal "The user's current workspace is rooted at: /some/dir/"))
-
-      (it "abbreviates the home directory"
-        (expect (macher-system-prompt-workspace
-                 (cons 'project (expand-file-name "some-project/" "~")))
-                :to-equal "The user's current workspace is rooted at: ~/some-project/")))
+        (let ((result (macher-system-prompt-workspace '(file . "/some/dir/file.txt"))))
+          (expect result :to-equal "The user is currently working on a project named: \"file.txt\"")
+          (expect result :not :to-match "/some/dir"))
+        ;; Listing files can be slow on large or remote workspaces, and this runs on every request.
+        (expect 'macher--workspace-files :not :to-have-been-called)))
 
     (describe "macher--system-prompt-content"
       (it "joins sections with blank lines, skipping nil and empty ones"

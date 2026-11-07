@@ -99,8 +99,9 @@ Built-in presets:
   tool descriptions only briefly mention the workspace, so you're responsible for explaining it in
   your own system prompt, e.g. with the text from `macher-system-prompt-instructions`.
 
-- **`@macher-system`**: Ensure the system prompt includes macher's content (by default, the
-  workspace root). See `macher-system-prompt-placeholder` and `macher-system-prompt-sections`.
+- **`@macher-system`**: Ensure the system prompt includes macher's content (by default,
+  instructions for the tools and the project name). See `macher-system-prompt-placeholder` and
+  `macher-system-prompt-sections`.
 
 - **`@macher-system-commit`**: Commits the current workspace context into the system prompt,
   replacing the dynamic placeholder with a static snapshot. Useful to avoid cache churn in long
@@ -166,7 +167,7 @@ e.g. a file, set `macher-action-buffer-function`.
 ### System prompt
 
 macher can add content to your system prompt, built from `macher-system-prompt-sections`. By
-default this explains how macher's tools and workspace work, and gives the root of the current
+default this explains how macher's tools and workspace work, and gives the name of the current
 workspace.
 
 If you've called `(macher-enable)` and/or activated `@macher-base`, any instances of the
