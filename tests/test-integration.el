@@ -613,14 +613,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
         (when (file-exists-p temp-file)
           (delete-file temp-file)))))
 
-  (describe "read_file_in_workspace"
+  (describe "macher_read_file"
     (before-each
       (funcall setup-project "read-tool" '(("test-file.txt" . "line1\nline2\nline3\nline4"))))
 
     (it "returns full file content when called with no arguments"
       (funcall setup-backend
                '((:tool-calls
-                  [(:function (:name "read_file_in_workspace" :arguments (:path "test-file.txt")))])
+                  [(:function (:name "macher_read_file" :arguments (:path "test-file.txt")))])
                  "I read the file"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -654,7 +654,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "read_file_in_workspace"
+                     "macher_read_file"
                      :arguments (:path "test-file.txt" :offset 2 :limit 2)))])
                  "I read specific lines from the file"))
       (let ((callback-called nil)
@@ -689,7 +689,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "read_file_in_workspace"
+                     "macher_read_file"
                      :arguments (:path "test-file.txt" :show_line_numbers t)))])
                  "I read the file with line numbers"))
       (let ((callback-called nil)
@@ -731,7 +731,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (funcall setup-backend
                        '((:tool-calls
                           [(:function
-                            (:name "read_file_in_workspace" :arguments (:path "large-file.txt")))])
+                            (:name "macher_read_file" :arguments (:path "large-file.txt")))])
                          "I tried to read a large file"))
               (let ((callback-called nil)
                     (exit-code nil))
@@ -772,7 +772,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "read_file_in_workspace"
+                     "macher_read_file"
                      :arguments (:path "test-file.txt" :offset 2.7 :limit 1.4)))])
                  "I read specific lines with float parameters"))
       (let ((callback-called nil)
@@ -804,7 +804,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             ;; Second request should contain line3 (offset 2.7 -> 3, limit 1.4 -> 1).
             (expect (cadr tool-messages) :to-equal '("line3")))))))
 
-  (describe "edit_file_in_workspace"
+  (describe "macher_edit_file"
     (before-each
       (funcall setup-project
                "edit-tool"
@@ -815,7 +815,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "edit_file_in_workspace"
+                     "macher_edit_file"
                      :arguments
                      (:path "test-file.txt" :old_text "hello universe" :new_text "hi universe")))])
                  "I edited the file"))
@@ -851,7 +851,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "edit_file_in_workspace"
+                     "macher_edit_file"
                      :arguments
                      (:path "test-file.txt" :old_text "hello" :new_text "hi" :replace_all t)))])
                  "I edited all occurrences in the file"))
@@ -882,7 +882,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             ;; Second request should contain the change summary.
             (expect (cadr tool-messages) :to-equal '("test-file.txt: +3 -3")))))))
 
-  (describe "multi_edit_file_in_workspace"
+  (describe "macher_multi_edit_file"
     (before-each
       (funcall setup-project
                "multi-edit-tool"
@@ -893,7 +893,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "multi_edit_file_in_workspace"
+                     "macher_multi_edit_file"
                      :arguments
                      (:path
                       "test-file.txt"
@@ -933,7 +933,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "multi_edit_file_in_workspace"
+                     "macher_multi_edit_file"
                      :arguments
                      (:path
                       "test-file.txt"
@@ -968,7 +968,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             ;; Second request should contain the change summary.
             (expect (cadr tool-messages) :to-equal '("test-file.txt: +3 -3")))))))
 
-  (describe "delete_file_in_workspace"
+  (describe "macher_delete_file"
     (before-each
       (funcall setup-project
                "delete-tool"
@@ -978,8 +978,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
     (it "deletes an existing file successfully"
       (funcall setup-backend
                '((:tool-calls
-                  [(:function
-                    (:name "delete_file_in_workspace" :arguments (:path "test-file.txt")))])
+                  [(:function (:name "macher_delete_file" :arguments (:path "test-file.txt")))])
                  "I deleted the file"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -1012,7 +1011,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (funcall setup-backend
                '((:tool-calls
                   [(:function
-                    (:name "delete_file_in_workspace" :arguments (:path "non-existent-file.txt")))])
+                    (:name "macher_delete_file" :arguments (:path "non-existent-file.txt")))])
                  "I tried to delete a file that doesn't exist"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -1050,8 +1049,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
     (it "generates proper diff when file is deleted"
       (funcall setup-backend
                `((:tool-calls
-                  [(:function
-                    (:name "delete_file_in_workspace" :arguments (:path "test-file.txt")))])
+                  [(:function (:name "macher_delete_file" :arguments (:path "test-file.txt")))])
                  "Finished deleting file"))
       (let* ((callback-called nil)
              (exit-code nil)
@@ -1092,7 +1090,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Should contain the prompt for reference
               (expect "Test prompt to delete a file" :to-appear-once-in patch)))))))
 
-  (describe "write_file_in_workspace"
+  (describe "macher_write_file"
     (before-each
       (funcall setup-project "write-tool" '(("existing-file.txt" . "existing content"))))
 
@@ -1101,7 +1099,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "write_file_in_workspace"
+                     "macher_write_file"
                      :arguments (:path "new-file.txt" :content "new file content")))])
                  "I created a new file"))
       (let ((callback-called nil)
@@ -1136,7 +1134,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "write_file_in_workspace"
+                     "macher_write_file"
                      :arguments (:path "existing-file.txt" :content "overwritten content")))])
                  "I overwrote the existing file"))
       (let ((callback-called nil)
@@ -1171,7 +1169,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                `((:tool-calls
                   [(:function
                     (:name
-                     "write_file_in_workspace"
+                     "macher_write_file"
                      :arguments (:path "created-file.txt" :content "created content")))])
                  "Finished creating file"))
       (let* ((callback-called nil)
@@ -1213,7 +1211,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Should contain the prompt for reference
               (expect "Test prompt to create a file" :to-appear-once-in patch)))))))
 
-  (describe "move_file_in_workspace"
+  (describe "macher_move_file"
     (before-each
       (funcall setup-project
                "move-tool"
@@ -1224,7 +1222,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "move_file_in_workspace"
+                     "macher_move_file"
                      :arguments
                      (:source_path "source-file.txt" :destination_path "destination-file.txt")))])
                  "I moved the file"))
@@ -1261,7 +1259,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "move_file_in_workspace"
+                     "macher_move_file"
                      :arguments
                      (:source_path "source-file.txt" :destination_path "renamed-file.txt")))])
                  "I renamed the file"))
@@ -1298,7 +1296,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "move_file_in_workspace"
+                     "macher_move_file"
                      :arguments
                      (:source_path "non-existent.txt" :destination_path "destination.txt")))])
                  "I tried to move a non-existent file"))
@@ -1337,7 +1335,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "move_file_in_workspace"
+                     "macher_move_file"
                      :arguments
                      (:source_path "source-file.txt" :destination_path "other-file.txt")))])
                  "I tried to move to an existing file"))
@@ -1376,7 +1374,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                `((:tool-calls
                   [(:function
                     (:name
-                     "move_file_in_workspace"
+                     "macher_move_file"
                      :arguments
                      (:source_path "source-file.txt" :destination_path "moved-file.txt")))])
                  "Finished moving file"))
@@ -1471,7 +1469,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                   (expect (seq-find
                            (lambda (t)
                              (string=
-                              (plist-get (plist-get t :function) :name) "write_file_in_workspace"))
+                              (plist-get (plist-get t :function) :name) "macher_write_file"))
                            tools)
                           :to-be-truthy))))
           ;; Clean up.
@@ -2692,7 +2690,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (kill-buffer buffer))
           (delete-file conversation-file)))))
 
-  (describe "search_in_workspace"
+  (describe "macher_search"
     (before-each
       (funcall setup-project
                "search-tool"
@@ -2716,8 +2714,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
     (it "searches with files mode (default)"
       (funcall setup-backend
-               '((:tool-calls
-                  [(:function (:name "search_in_workspace" :arguments (:pattern "hello")))])
+               '((:tool-calls [(:function (:name "macher_search" :arguments (:pattern "hello")))])
                  "I found hello in multiple files"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -2755,7 +2752,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "search_in_workspace"
+                     "macher_search"
                      :arguments
                      (:pattern
                       "hello"
@@ -2802,9 +2799,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (funcall setup-backend
                '((:tool-calls
                   [(:function
-                    (:name
-                     "search_in_workspace"
-                     :arguments (:pattern "hello" :file_regexp "\\.js$")))])
+                    (:name "macher_search" :arguments (:pattern "hello" :file_regexp "\\.js$")))])
                  "I found hello in JavaScript files"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -2843,9 +2838,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (funcall setup-backend
                '((:tool-calls
                   [(:function
-                    (:name
-                     "search_in_workspace"
-                     :arguments (:pattern "HElLO" :case_insensitive t)))])
+                    (:name "macher_search" :arguments (:pattern "HElLO" :case_insensitive t)))])
                  "I found HELLO case-insensitively"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -2882,8 +2875,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
     (it "limits results with head_limit parameter"
       (funcall setup-backend
                '((:tool-calls
-                  [(:function
-                    (:name "search_in_workspace" :arguments (:pattern "hello" :head_limit 2)))])
+                  [(:function (:name "macher_search" :arguments (:pattern "hello" :head_limit 2)))])
                  "I found hello with limited results"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -2916,8 +2908,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
     (it "searches in specific directory path"
       (funcall setup-backend
                '((:tool-calls
-                  [(:function
-                    (:name "search_in_workspace" :arguments (:pattern "hello" :path "src")))])
+                  [(:function (:name "macher_search" :arguments (:pattern "hello" :path "src")))])
                  "I found hello in src directory"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -2956,14 +2947,14 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                '((:tool-calls
                   [(:function
                     (:name
-                     "edit_file_in_workspace"
+                     "macher_edit_file"
                      :arguments
                      (:path
                       "src/main.js"
                       :old_text "'hello universe'"
                       :new_text "'hello UNIQUEWORD'")))
                    (:function
-                    (:name "search_in_workspace" :arguments (:pattern "hello" :mode "content")))])
+                    (:name "macher_search" :arguments (:pattern "hello" :mode "content")))])
                  "I modified a file and searched for hello"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -3006,7 +2997,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                 ;; This proves the edit worked: UNIQUEWORD present, universe absent
                 (expect search-content :to-equal expected-content))))))))
 
-  (describe "list_directory_in_workspace"
+  (describe "macher_list_directory"
     (before-each
       (funcall setup-project
                "list-dir-tool"
@@ -3017,8 +3008,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
 
     (it "lists directory contents without recursion or sizes"
       (funcall setup-backend
-               '((:tool-calls
-                  [(:function (:name "list_directory_in_workspace" :arguments (:path ".")))])
+               '((:tool-calls [(:function (:name "macher_list_directory" :arguments (:path ".")))])
                  "I listed the directory"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -3053,8 +3043,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
     (it "lists directory contents with sizes"
       (funcall setup-backend
                '((:tool-calls
-                  [(:function
-                    (:name "list_directory_in_workspace" :arguments (:path "." :sizes t)))])
+                  [(:function (:name "macher_list_directory" :arguments (:path "." :sizes t)))])
                  "I listed the directory with sizes"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -3088,8 +3077,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
     (it "lists directory contents recursively"
       (funcall setup-backend
                '((:tool-calls
-                  [(:function
-                    (:name "list_directory_in_workspace" :arguments (:path "." :recursive t)))])
+                  [(:function (:name "macher_list_directory" :arguments (:path "." :recursive t)))])
                  "I listed the directory recursively"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -3124,7 +3112,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
     (it "lists subdirectory contents"
       (funcall setup-backend
                '((:tool-calls
-                  [(:function (:name "list_directory_in_workspace" :arguments (:path "subdir")))])
+                  [(:function (:name "macher_list_directory" :arguments (:path "subdir")))])
                  "I listed the subdirectory"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -3158,8 +3146,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
     (it "returns error when directory doesn't exist"
       (funcall setup-backend
                '((:tool-calls
-                  [(:function
-                    (:name "list_directory_in_workspace" :arguments (:path "nonexistent")))])
+                  [(:function (:name "macher_list_directory" :arguments (:path "nonexistent")))])
                  "I tried to list a nonexistent directory"))
       (let ((callback-called nil)
             (exit-code nil))
@@ -3254,11 +3241,11 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect (cl-some (lambda (f) (string-match-p "\\.git/" f)) workspace-files)
                       :to-be nil))))))
 
-    (describe "list_directory_in_workspace"
+    (describe "macher_list_directory"
       (it "does not list .git directory"
         (funcall setup-backend
                  '((:tool-calls
-                    [(:function (:name "list_directory_in_workspace" :arguments (:path ".")))])
+                    [(:function (:name "macher_list_directory" :arguments (:path ".")))])
                    "Listed the directory"))
 
         (with-temp-buffer
@@ -3300,7 +3287,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (it "does not list gitignored files"
         (funcall setup-backend
                  '((:tool-calls
-                    [(:function (:name "list_directory_in_workspace" :arguments (:path ".")))])
+                    [(:function (:name "macher_list_directory" :arguments (:path ".")))])
                    "Listed the directory"))
 
         (with-temp-buffer
@@ -3336,11 +3323,11 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                 (expect (car listing) :not :to-match "api\\.secret")
                 (expect (car listing) :not :to-match "secrets")))))))
 
-    (describe "read_file_in_workspace"
+    (describe "macher_read_file"
       (it "cannot read files in .git directory"
         (funcall setup-backend
                  '((:tool-calls
-                    [(:function (:name "read_file_in_workspace" :arguments (:path ".git/config")))])
+                    [(:function (:name "macher_read_file" :arguments (:path ".git/config")))])
                    "Tried to read git config"))
 
         (with-temp-buffer
@@ -3375,7 +3362,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (it "cannot read gitignored files"
         (funcall setup-backend
                  '((:tool-calls
-                    [(:function (:name "read_file_in_workspace" :arguments (:path "api.secret")))])
+                    [(:function (:name "macher_read_file" :arguments (:path "api.secret")))])
                    "Tried to read secret file"))
 
         (with-temp-buffer
@@ -3411,7 +3398,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
         (funcall setup-backend
                  '((:tool-calls
                     [(:function
-                      (:name "read_file_in_workspace" :arguments (:path "secrets/passwords.txt")))])
+                      (:name "macher_read_file" :arguments (:path "secrets/passwords.txt")))])
                    "Tried to read file in gitignored directory"))
 
         (with-temp-buffer
@@ -3443,11 +3430,10 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                 (expect "not in the workspace files list"
                         :to-appear-once-in (car error-message))))))))
 
-    (describe "search_in_workspace"
+    (describe "macher_search"
       (it "does not search in .git directory"
         (funcall setup-backend
-                 '((:tool-calls
-                    [(:function (:name "search_in_workspace" :arguments (:pattern "test")))])
+                 '((:tool-calls [(:function (:name "macher_search" :arguments (:pattern "test")))])
                    "Searched for test"))
 
         (with-temp-buffer
@@ -3484,7 +3470,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
       (it "does not search gitignored files"
         (funcall setup-backend
                  '((:tool-calls
-                    [(:function (:name "search_in_workspace" :arguments (:pattern "password")))])
+                    [(:function (:name "macher_search" :arguments (:pattern "password")))])
                    "Searched for password"))
 
         (with-temp-buffer
@@ -3558,7 +3544,7 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                    `((:tool-calls
                       [(:function
                         (:name
-                         "write_file_in_workspace"
+                         "macher_write_file"
                          :arguments (:content ,new-content :path "test.txt")))])
                      "Modified file"))
           (funcall setup-project "diff-apply-test" `(("test.txt" . ,old-content)))
@@ -3674,7 +3660,7 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                `((:tool-calls
                   [(:function
                     (:name
-                     "write_file_in_workspace"
+                     "macher_write_file"
                      :arguments (:content "hello test" :path "created.txt")))])
                  "Finished creating file"))
       (funcall setup-project "patch-with-changes")
@@ -3721,7 +3707,7 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                `((:tool-calls
                   [(:function
                     (:name
-                     "write_file_in_workspace"
+                     "macher_write_file"
                      :arguments (:content "main content" :path "main.txt")))])
                  "Finished updating file with same content"))
       (funcall setup-project "no-changes-warning" '(("main.txt" . "main content")))
@@ -3768,7 +3754,7 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                `((:tool-calls
                   [(:function
                     (:name
-                     "edit_file_in_workspace"
+                     "macher_edit_file"
                      :arguments
                      (:path
                       "modified.txt"
@@ -3776,9 +3762,9 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                       :new_text "modified content\n")))
                    (:function
                     (:name
-                     "write_file_in_workspace"
+                     "macher_write_file"
                      :arguments (:path "created.txt" :content "new file content\n")))
-                   (:function (:name "delete_file_in_workspace" :arguments (:path "deleted.txt")))])
+                   (:function (:name "macher_delete_file" :arguments (:path "deleted.txt")))])
                  "Made all requested changes"))
       (funcall setup-project
                "patch-apply-test"
@@ -3866,12 +3852,10 @@ Sets `test-patch-content' to the generated patch content for additional assertio
       (funcall setup-backend
                '((:tool-calls
                   [(:function
-                    (:name
-                     "write_file_in_workspace"
-                     :arguments (:path "file1.txt" :content "content1")))
+                    (:name "macher_write_file" :arguments (:path "file1.txt" :content "content1")))
                    (:function
                     (:name
-                     "write_file_in_workspace"
+                     "macher_write_file"
                      :arguments (:path "file2.txt" :content "content2")))])
                  "Created both files"))
       (funcall setup-project "context-sharing-multi-tool")
@@ -3970,11 +3954,10 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                '((:tool-calls
                   [(:function
                     (:name
-                     "write_file_in_workspace"
+                     "macher_write_file"
                      :arguments (:path "shared-test.txt" :content "written by tool")))])
                  (:tool-calls
-                  [(:function
-                    (:name "read_file_in_workspace" :arguments (:path "shared-test.txt")))])
+                  [(:function (:name "macher_read_file" :arguments (:path "shared-test.txt")))])
                  "Read the file I just wrote"))
       (funcall setup-project "context-sharing-read-write")
       (let ((callback-called nil)
@@ -4021,13 +4004,13 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                '((:tool-calls
                   [(:function
                     (:name
-                     "edit_file_in_workspace"
+                     "macher_edit_file"
                      :arguments
                      (:path "edit-test.txt" :old_text "original" :new_text "first-edit")))])
                  (:tool-calls
                   [(:function
                     (:name
-                     "edit_file_in_workspace"
+                     "macher_edit_file"
                      :arguments
                      (:path "edit-test.txt" :old_text "first-edit" :new_text "second-edit")))])
                  "Both edits complete"))
@@ -4117,7 +4100,7 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                '((:tool-calls
                   [(:function
                     (:name
-                     "edit_file_in_workspace"
+                     "macher_edit_file"
                      :arguments
                      (:path
                       "test.txt"
@@ -4374,13 +4357,13 @@ Sets `test-patch-content' to the generated patch content for additional assertio
                '((:tool-calls
                   [(:function
                     (:name
-                     "write_file_in_workspace"
+                     "macher_write_file"
                      :arguments (:path "first.txt" :content "first content")))])
                  "First action response"
                  (:tool-calls
                   [(:function
                     (:name
-                     "write_file_in_workspace"
+                     "macher_write_file"
                      :arguments (:path "second.txt" :content "second content")))])
                  "Second action response"))
 
