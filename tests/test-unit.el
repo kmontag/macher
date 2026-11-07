@@ -5457,7 +5457,7 @@
             (macher--before-action-insert-prompt execution)
             (let ((content (buffer-substring-no-properties (point-min) (point-max))))
               ;; The source name is rendered in the heading before the summary.
-              (expect content :to-match "^\\* source\\.el: Do the thing :implement:$")))))
+              (expect content :to-match "^\\* source\\.el:1: Do the thing :implement:$")))))
 
       (it "omits a blank summary from the heading and topic"
         ;; A draft started without a region (e.g. `C-u M-x macher-implement') has an empty summary.
@@ -5475,7 +5475,7 @@
                     :source source)))
               (macher--before-action-insert-prompt execution)
               (let ((content (buffer-substring-no-properties (point-min) (point-max))))
-                (expect content :to-match "^\\* source\\.el :implement:$")
+                (expect content :to-match "^\\* source\\.el:1 :implement:$")
                 (expect content :to-match ":GPTEL_TOPIC: macher-implement-[0-9]\\{14\\}$"))))))
 
       (it "omits a blank summary from the heading when source is not set"
@@ -5494,16 +5494,16 @@
               (expect content :to-match "^\\* :implement:$")
               (expect content :to-match ":GPTEL_TOPIC: macher-implement-[0-9]\\{14\\}$")))))))
 
-  (describe "macher--action-source-name"
+  (describe "macher--action-source-location"
     (it "returns nil when the execution has no source buffer"
       (let ((execution (macher--make-action-execution :action 'test)))
-        (expect (macher--action-source-name execution) :to-be nil)))
+        (expect (macher--action-source-location execution) :to-be nil)))
 
     (it "returns nil when the source buffer has been killed"
       (let ((buf (generate-new-buffer "*test-dead-source*")))
         (kill-buffer buf)
         (let ((execution (macher--make-action-execution :action 'test :source buf)))
-          (expect (macher--action-source-name execution) :to-be nil))))
+          (expect (macher--action-source-location execution) :to-be nil))))
 
     (it "uses the base filename for file buffers"
       (with-temp-buffer
@@ -5513,7 +5513,7 @@
         (goto-char (point-min))
         (forward-line 1)
         (let ((execution (macher--make-action-execution :action 'test :source (current-buffer))))
-          (expect (macher--action-source-name execution) :to-equal "test.js"))))
+          (expect (macher--action-source-location execution) :to-equal "test.js:2"))))
 
     (it "uses the buffer name for non-file buffers"
       (let ((buf (generate-new-buffer "*test-source-name*")))
@@ -5522,8 +5522,63 @@
               (insert "hello\nworld\n")
               (goto-char (point-min))
               (let ((execution (macher--make-action-execution :action 'test :source buf)))
-                (expect (macher--action-source-name execution) :to-equal "*test-source-name*")))
-          (kill-buffer buf)))))
+                (expect (macher--action-source-location execution)
+                        :to-equal "*test-source-name*:1")))
+          (kill-buffer buf))))
+
+    (describe "with an active region"
+      :var (buf)
+
+      (before-each
+        (setq buf (generate-new-buffer "*test-source-region*"))
+        (with-current-buffer buf
+          (insert "one\ntwo\nthree\nfour\n")))
+
+      (after-each
+        (kill-buffer buf))
+
+      (it "uses the range of lines covered by the region"
+        (with-current-buffer buf
+          (let ((transient-mark-mode t))
+            (goto-char (point-min))
+            (forward-line 1)
+            (push-mark (point) t t)
+            (forward-line 1)
+            (end-of-line)
+            (let ((execution (macher--make-action-execution :action 'test :source buf)))
+              (expect (macher--action-source-location execution)
+                      :to-equal "*test-source-region*:2-3")))))
+
+      (it "excludes the line a region ends at the start of"
+        (with-current-buffer buf
+          (let ((transient-mark-mode t))
+            (goto-char (point-min))
+            (forward-line 1)
+            (push-mark (point) t t)
+            (forward-line 2)
+            (let ((execution (macher--make-action-execution :action 'test :source buf)))
+              (expect (macher--action-source-location execution)
+                      :to-equal "*test-source-region*:2-3")))))
+
+      (it "uses a single line for a region within one line"
+        (with-current-buffer buf
+          (let ((transient-mark-mode t))
+            (goto-char (point-min))
+            (forward-line 2)
+            (push-mark (point) t t)
+            (forward-char 3)
+            (let ((execution (macher--make-action-execution :action 'test :source buf)))
+              (expect (macher--action-source-location execution)
+                      :to-equal "*test-source-region*:3")))))
+
+      (it "counts lines from the start of the buffer when narrowed"
+        (with-current-buffer buf
+          (goto-char (point-min))
+          (forward-line 2)
+          (narrow-to-region (point) (point-max))
+          (let ((execution (macher--make-action-execution :action 'test :source buf)))
+            (expect (macher--action-source-location execution)
+                    :to-equal "*test-source-region*:3"))))))
 
 
   (describe "macher--before-action-scroll"

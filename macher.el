@@ -1703,18 +1703,45 @@ the content with `org-escape-code-in-string'."
             (insert "#+begin_src " lang "\n" (org-escape-code-in-string content) "#+end_src")))))
     (buffer-string)))
 
-(defun macher--action-source-name (execution)
-  "Return the source buffer's name for EXECUTION, or nil.
+(defun macher--action-source-location (execution)
+  "Return the source location for EXECUTION, or nil.
 
-NAME is the base filename of the source buffer's file, or the buffer
-name for non-file buffers.  Returns nil if the source buffer is not
-set or no longer live."
+The location is NAME:LINE, where NAME is the base filename of the source
+buffer's file (or the buffer name for non-file buffers), and LINE is the
+line at point.  When the region is active, LINE is the range of lines it
+covers, e.g. 12-20, or a single line if it covers only one.  Returns nil
+if the source buffer is not set or no longer live."
   (when-let* ((source (macher-action-execution-source execution))
               ((buffer-live-p source)))
     (with-current-buffer source
-      (if buffer-file-name
-          (file-name-nondirectory buffer-file-name)
-        (buffer-name)))))
+      (let* ((name
+              (if buffer-file-name
+                  (file-name-nondirectory buffer-file-name)
+                (buffer-name)))
+             (region (use-region-p))
+             (start
+              (line-number-at-pos
+               (if region
+                   (region-beginning)
+                 (point))
+               t))
+             (end
+              (if region
+                  ;; A region ending at the start of a line (e.g. from selecting whole lines)
+                  ;; doesn't include that line.
+                  (let ((end-pos (region-end)))
+                    (line-number-at-pos
+                     (if (and (> end-pos (region-beginning))
+                              (save-excursion
+                                (goto-char end-pos)
+                                (bolp)))
+                         (1- end-pos)
+                       end-pos)
+                     t))
+                start)))
+        (if (= start end)
+            (format "%s:%d" name start)
+          (format "%s:%d-%d" name start end))))))
 
 (defun macher--before-action-insert-prompt (execution)
   "Insert the action prompt into the current buffer.
@@ -1747,7 +1774,7 @@ This is added buffer-locally to `macher-before-action-functions' by
       ;; Add another newline if we're not at the beginning of the buffer, for visual clarity.
       (unless (bobp)
         (insert "\n"))
-      (let* ((name (macher--action-source-name execution))
+      (let* ((name (macher--action-source-location execution))
              (summary (macher-action-execution-summary execution))
              ;; The first non-whitespace line of the summary, or nil if there is none, e.g. for a
              ;; draft started without a region.
