@@ -97,9 +97,8 @@ Built-in presets:
 
 - **`@macher-tools`**: Tools only. Enables all macher tools without modifying the system prompt.
 
-- **`@macher-system`**: Ensure system prompt includes workspace context (project name and files
-  list). Useful when you want the LLM to understand your project structure but don't need file
-  access. See `macher-system-prompt-placeholder` and `macher-system-prompt-function`.
+- **`@macher-system`**: Ensure the system prompt includes macher's content (by default, the
+  workspace root). See `macher-system-prompt-placeholder` and `macher-system-prompt-sections`.
 
 - **`@macher-system-commit`**: Commits the current workspace context into the system prompt,
   replacing the dynamic placeholder with a static snapshot. Useful to avoid cache churn in long
@@ -162,14 +161,14 @@ You can define custom actions in `macher-actions-alist`.
 By default, actions run in a single ephemeral buffer per workspace. To send them somewhere else,
 e.g. a file, set `macher-action-buffer-function`.
 
-### Workspace context
+### System prompt
 
-macher can add information about the current workspace (by default, its name) to your system
-prompt.
+macher can add content to your system prompt, built from `macher-system-prompt-sections`. By
+default this is the root of the current workspace.
 
 If you've called `(macher-enable)` and/or activated `@macher-base`, any instances of the
 `macher-system-prompt-placeholder` (default: `"[macher_placeholder]"`) in your system prompt will
-be replaced with a description of the request buffer's workspace.
+be replaced with that content, rendered in the request buffer.
 
 The `@macher`, `@macher-ro`, and `@macher-system` presets will append the placeholder automatically
 to your system prompt (unless it's already there).
@@ -177,7 +176,9 @@ to your system prompt (unless it's already there).
 You can also use the `macher-system-prompt-placeholder` in your own directives to control placement
 or add info about the current project to any gptel request.
 
-The workspace description can be customized by setting the `macher-system-prompt-function`.
+Each element of `macher-system-prompt-sections` is a string, or a function that takes the current
+workspace and returns one. Add your own, or reuse the built-in ones (e.g.
+`macher-system-prompt-workspace`) in your own directives.
 
 ## Advanced usage
 
@@ -271,7 +272,7 @@ You can see customizable variables/sub-groups with `M-x customize-group RET mach
 | ----------------------------------- | -------------------------------------------------------------- |
 | `macher-workspace-functions`        | Functions to determine the workspace for a buffer              |
 | `macher-workspace-types-alist`      | Defines workspace types (project, file, etc.)                  |
-| `macher-system-prompt-function`     | Generates workspace context information for requests           |
+| `macher-system-prompt-sections`     | Sections of macher's content in the system prompt              |
 | `macher-system-prompt-placeholder`  | System prompt placeholder string for dynamic context injection |
 | `macher-system-prompt-marker-start` | Start marker for context in system prompt                      |
 | `macher-system-prompt-marker-end`   | End marker for context in system prompt                        |

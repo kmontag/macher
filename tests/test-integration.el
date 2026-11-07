@@ -1597,9 +1597,10 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (let ((system-content
                      (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
                 ;; Check for workspace description.
-                (expect (format "The user is currently working on a project named: \"%s\""
-                                (file-name-nondirectory project-dir))
+                (expect "The user's current workspace is rooted at:"
                         :to-appear-once-in system-content)
+                (expect system-content
+                        :to-match (regexp-quote (file-name-nondirectory project-dir)))
                 ;; Files aren't listed.
                 (expect system-content :not :to-match "src/main\\.el")))))))
 
@@ -1656,7 +1657,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                 ;; The workspace context marker should appear exactly once.
                 (expect macher-system-prompt-marker-start :to-appear-once-in system-content)
                 ;; The workspace description should appear exactly once.
-                (expect "The user is currently working on a project named:"
+                (expect "The user's current workspace is rooted at:"
                         :to-appear-once-in system-content))))))))
 
   (it "handles nil workspace without error"
@@ -1753,8 +1754,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; gptel context file content should appear in the request.
               (expect all-content :to-match "GPTEL_CONTEXT_FILE_CONTENT")
               ;; macher workspace context should also appear.
-              (expect all-content
-                      :to-match "The user is currently working on a project named:"))))))
+              (expect all-content :to-match "The user's current workspace is rooted at:"))))))
 
     (it "preserves gptel buffer context alongside macher workspace context"
       (funcall setup-backend '("I see the buffer context"))
@@ -1811,12 +1811,11 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                     ;; Original disk content should NOT appear.
                     (expect all-content :not :to-match "BUFFER_FILE_ORIGINAL_CONTENT")
                     ;; macher workspace context should also appear.
-                    (expect all-content
-                            :to-match "The user is currently working on a project named:")
+                    (expect all-content :to-match "The user's current workspace is rooted at:")
 
                     ;; The gptel context should appear at the beginning.
                     (let ((macher-pos
-                           (string-match "The user is currently working on a project" all-content))
+                           (string-match "The user's current workspace is rooted at" all-content))
                           (gptel-pos
                            (string-match "MODIFIED_BUFFER_CONTENT_FOR_CONTEXT" all-content)))
                       (expect macher-pos :to-be-truthy)
@@ -1875,7 +1874,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; gptel context file content should appear.
               (expect all-content :to-match "IMPORTANT_GPTEL_CONTEXT_CONTENT")
               ;; macher workspace context should appear.
-              (expect all-content :to-match "The user is currently working on a project named:")
+              (expect all-content :to-match "The user's current workspace is rooted at:")
               ;; Tools should be present.
               (expect tools :to-be-truthy)
               (expect (> (length tools) 0) :to-be-truthy))))))
@@ -1932,8 +1931,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (expect all-content :to-match "SECOND_CONTEXT_FILE_CONTENT")
               (expect all-content :to-match "THIRD_CONTEXT_FILE_IN_DOCS")
               ;; macher workspace context should also appear.
-              (expect all-content
-                      :to-match "The user is currently working on a project named:"))))))
+              (expect all-content :to-match "The user's current workspace is rooted at:"))))))
 
     (it "preserves gptel context when context is placed in user message"
       ;; Test with gptel-use-context set to 'user instead of 'system.
@@ -2084,8 +2082,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; The function's return value should be in the system message.
               (expect system-content :to-match "DYNAMIC_FUNCTION_DIRECTIVE_CONTENT")
               ;; macher workspace context should also appear.
-              (expect system-content
-                      :to-match "The user is currently working on a project named:"))))))
+              (expect system-content :to-match "The user's current workspace is rooted at:"))))))
 
     (it "handles function directive that returns a list"
       ;; When gptel-system-prompt is a function returning a list (few-shot template), macher
@@ -2130,7 +2127,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; The system message from the list should appear.
               (expect all-content :to-match "FEW_SHOT_SYSTEM_FROM_FUNCTION")
               ;; macher workspace context should appear.
-              (expect all-content :to-match "The user is currently working on a project named:")
+              (expect all-content :to-match "The user's current workspace is rooted at:")
               ;; The few-shot examples should also be present.
               (expect all-content :to-match "Example user message")
               (expect all-content :to-match "Example assistant response"))))))
@@ -2176,7 +2173,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
                     (mapconcat (lambda (msg) (or (plist-get msg :content) "")) messages " ")))
               ;; The first element (system message) should appear with macher context.
               (expect all-content :to-match "LIST_BASED_SYSTEM_PROMPT")
-              (expect all-content :to-match "The user is currently working on a project named:")
+              (expect all-content :to-match "The user's current workspace is rooted at:")
               ;; The few-shot examples should be present.
               (expect all-content :to-match "User example for few-shot")
               (expect all-content :to-match "Assistant example response"))))))
@@ -2226,8 +2223,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Dynamic buffer-local value should appear.
               (expect system-content :to-match "BUFFER_LOCAL_DYNAMIC_VALUE")
               ;; macher workspace context should also appear.
-              (expect system-content
-                      :to-match "The user is currently working on a project named:"))))))
+              (expect system-content :to-match "The user's current workspace is rooted at:"))))))
 
     (it "handles list directive with placeholder already present"
       ;; When the list directive's first element already contains the macher placeholder, it should
@@ -2280,7 +2276,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Placeholder should be replaced with actual context.
               (expect system-content :not :to-match (regexp-quote macher-system-prompt-placeholder))
               ;; macher workspace context should appear between them.
-              (expect system-content :to-match "The user is currently working on a project named:")
+              (expect system-content :to-match "The user's current workspace is rooted at:")
               ;; Context marker should appear exactly once.
               (expect macher-system-prompt-marker-start :to-appear-once-in system-content))))))
 
@@ -2326,8 +2322,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; The nested function result should appear.
               (expect system-content :to-match "INNER_RESULT")
               ;; macher workspace context should also appear.
-              (expect system-content
-                      :to-match "The user is currently working on a project named:")))))))
+              (expect system-content :to-match "The user's current workspace is rooted at:")))))))
 
   (describe "default before-action handler"
     :var*

@@ -146,13 +146,13 @@ placeholder in the system prompt at request-time.")
 
 (defconst macher-preset-system-commit
   '(:description
-    "Commit the current macher context string to the system prompt"
+    "Commit the current macher content to the system prompt"
     :system (:function macher--system-replace-placeholder))
   "Preset spec to commit the current macher workspace context in the system prompt.
 
 Replaces all instances of the `macher-system-prompt-placeholder' in the
-system prompt with the current result of the
-`macher-system-prompt-function'.
+system prompt with the current rendering of
+`macher-system-prompt-sections'.
 
 This preset is a no-op unless the system prompt contains the
 `macher-system-prompt-placeholder'.
@@ -585,10 +585,10 @@ Call function `macher-focus-string' interactively to yank this value."
 (define-obsolete-variable-alias
   'macher-context-string-marker-end 'macher-system-prompt-marker-end "0.6.0")
 (define-obsolete-variable-alias
-  'macher-context-string-function 'macher-system-prompt-function "0.6.0")
+  'macher-context-string-function 'macher-system-prompt-sections "0.6.0")
 
 (defcustom macher-system-prompt-placeholder "\n[macher_placeholder]\n"
-  "A placeholder in the system prompt for the macher context string.
+  "A placeholder in the system prompt for macher's content.
 
 This gets inserted (if not already present) into the gptel system
 message when applying the \"@macher\", \"@macher-ro\", and
@@ -597,30 +597,30 @@ directives if you want finer control over placement.
 
 At request time, as long as you've activated the \"@macher-base\"
 preset (or are using one of the other built-in presets), this will be
-replaced with the current result of the `macher-system-prompt-function'
+replaced with the current rendering of `macher-system-prompt-sections'
 in your system prompt.
 
 Setting this to nil will disable request-time modification of the
 outgoing system prompt.  Note, though, that in that case
-\"@macher-system\" etc. will still insert the _current_ result of
-`macher-system-prompt-function' (if not already present) directly into
+\"@macher-system\" etc. will still insert the _current_ rendering of
+`macher-system-prompt-sections' (if not already present) directly into
 the system prompt when applied.  If you want to disable macher's
 interaction with the system prompt entirely, you can set both this and
-`macher-system-prompt-function' to nil."
+`macher-system-prompt-sections' to nil."
   :type '(choice (string :tag "Placeholder string") (const :tag "Disabled" nil))
   :group 'macher-workspace)
 
-(defcustom macher-system-prompt-marker-start "\n<current-project>\n"
-  "A marker for the start of the macher context string in the system prompt.
+(defcustom macher-system-prompt-marker-start "\n<macher>\n"
+  "A marker for the start of macher's content in the system prompt.
 
 You should avoid using this exact string elsewhere in your system
-prompt, otherwise the workspace context string might not get added to
+prompt, otherwise macher's content might not get added to
 macher requests."
   :type 'string
   :group 'macher-workspace)
 
-(defcustom macher-system-prompt-marker-end "\n</current-project>\n"
-  "A marker for the end of the macher context string in the system prompt.
+(defcustom macher-system-prompt-marker-end "\n</macher>\n"
+  "A marker for the end of macher's content in the system prompt.
 
 For now this is purely cosmetic, but you should avoid using this exact
 string elsewhere in your system prompt, as it may be used for additional
@@ -628,26 +628,37 @@ system transforms in the future."
   :type 'string
   :group 'macher-workspace)
 
-(defcustom macher-system-prompt-function #'macher--system-prompt-default
-  "Function for generating workspace information strings during macher requests.
+(defcustom macher-system-prompt-sections '(macher-system-prompt-workspace)
+  "Sections of macher's content in the system prompt.
 
-This function will be called from the buffer where the request is being
-sent (or a preset is being applied).  It receives no arguments.  You can
-use `macher-workspace' to get the buffer's current workspace.
+Each element is either a string, or a function that takes the current
+workspace (see `macher-workspace') and returns a string or nil.  The
+workspace is nil outside a workspace.  Functions are called in the
+buffer where the request is being sent (or a preset is being applied).
+Sections that come out nil or empty are skipped, and the rest are joined
+with blank lines.
 
-The function should return a workspace information string that can be
-included in the system prompt.
+For compatibility with the obsolete `macher-context-string-function',
+functions that take no arguments are called without the workspace.
+
+The value can also be a single function or string, which is treated as
+a list of one.  `add-to-list' and friends need an actual list, though.
 
 As long as `macher-preset-base' is applied, any instances of the
 `macher-system-prompt-placeholder' in the system prompt will be
-replaced with the result of this function.
+replaced with the result, between `macher-system-prompt-marker-start'
+and `macher-system-prompt-marker-end'.
 
-Set this to nil to disable workspace context injection.  Note that in
-that case, \"@macher-system\" etc. will still insert the
+Set this to nil to add nothing.  Note that in that case,
+\"@macher-system\" etc. will still insert the
 `macher-system-prompt-placeholder' into the raw system prompt.  If you
 want to disable macher's interaction with the system prompt entirely,
 you can set both this and `macher-system-prompt-placeholder' to nil."
-  :type '(function :tag "Workspace string function")
+  :type
+  '(choice
+    (repeat :tag "Sections" (choice (function :tag "Function") (string :tag "Text")))
+    (function :tag "Single function")
+    (string :tag "Single text"))
   :group 'macher-workspace)
 
 ;; Kept as a real option so existing configurations (`setopt', `use-package' :custom, Customize)
@@ -1547,17 +1558,51 @@ Returns a list of absolute file paths."
                (expand-file-name f root-path)))
            files))))))
 
-(defun macher--system-prompt-default ()
-  "Generate workspace information string for the current workspace.
+(defun macher-system-prompt-workspace (workspace)
+  "Describe WORKSPACE for the system prompt.
 
-Returns a workspace information string to be added to the request.
+This is a default element of `macher-system-prompt-sections'.  Returns
+nil if WORKSPACE is nil.  The root is abbreviated the way gptel shows
+file paths, e.g. with \"~\" for the home directory.
 
-This runs on every request, so it deliberately doesn't list the
-workspace's files: that can take seconds on large or remote workspaces,
-and the model can explore the workspace with the tools instead."
-  (when-let* ((workspace (macher-workspace)))
-    (format "The user is currently working on a project named: \"%s\""
-            (macher--workspace-name workspace))))
+This runs on every request, so it deliberately sticks to the workspace
+root: listing files or looking up the project name can take seconds on
+large or remote workspaces."
+  (when workspace
+    (format "The user's current workspace is rooted at: %s"
+            (abbreviate-file-name (macher--workspace-root workspace)))))
+
+(defun macher--system-prompt-content ()
+  "Render `macher-system-prompt-sections' in the current buffer.
+
+Returns nil if no section produces any text."
+  (let* ((workspace (macher-workspace))
+         (sections macher-system-prompt-sections)
+         ;; Check `functionp' first, since a lambda is also a list.
+         (sections
+          (if (or (functionp sections) (stringp sections))
+              (list sections)
+            sections))
+         (texts
+          (delq
+           nil
+           (mapcar
+            (lambda (section)
+              (let ((text
+                     (cond
+                      ((stringp section)
+                       section)
+                      ((functionp section)
+                       (if (eql (cdr (func-arity section)) 0)
+                           (funcall section)
+                         (funcall section workspace)))
+                      (t
+                       (error "Invalid element in `macher-system-prompt-sections': %S" section)))))
+                (unless (or (null text) (string-empty-p text))
+                  text)))
+            sections))))
+    (when texts
+      (string-join texts "\n\n"))))
 
 (defun macher--workspace-hash (workspace &optional length)
   "Generate a unique hash for WORKSPACE.
@@ -3964,7 +4009,7 @@ methods."
          (cons directive))))
 
 (defun macher--system-ensure-placeholder-or-content (system)
-  "Ensure there's a macher placeholder or actual context string in SYSTEM prompt.
+  "Ensure there's a macher placeholder or actual content in SYSTEM prompt.
 
 If the system prompt already contains the `macher-system-prompt-placeholder'
 or the `macher-system-prompt-marker-start', this is a no-op.
@@ -3991,15 +4036,15 @@ SYSTEM can be nil, a string, a function, or a list:
   then handles the result as with other strings/lists.
 
 If `macher-system-prompt-placeholder' is nil, simply appends the
-current result of `macher-system-prompt-function' (if no start marker
+current rendering of `macher-system-prompt-sections' (if no start marker
 already present), i.e. goes straight to the \"@macher-system-commit\"
 state.
 
 If both `macher-system-prompt-placeholder' AND
-`macher-system-prompt-function' are nil, does nothing."
-  ;; No placeholder to append or context function to call. Treat this as a special case, bail
+`macher-system-prompt-sections' are nil, does nothing."
+  ;; No placeholder to append or sections to render. Treat this as a special case, bail
   ;; immediately.
-  (if (not (or macher-system-prompt-function macher-system-prompt-placeholder))
+  (if (not (or macher-system-prompt-sections macher-system-prompt-placeholder))
       system
     (cl-etypecase system
       ;; Must precede the `list' case, which nil also matches.
@@ -4015,22 +4060,18 @@ If both `macher-system-prompt-placeholder' AND
          (concat system macher-system-prompt-placeholder))
         ;; Placeholder is nil, append demarcated context directly.
         ((not macher-system-prompt-placeholder)
-         ;; Note the `macher-system-prompt-function' can't be nil at this point, due to the first
-         ;; bail check.  Also note that even if the context string is nil, we render this block it
-         ;; for parity with the `macher--system-replace-placeholder' result, i.e. treat this exactly
-         ;; as if we appended an "anonymous" placeholder at the end and then committed it.  This seems
-         ;; like the most consistent way to handle things.
-         (let ((context-string (funcall macher-system-prompt-function)))
+         ;; Note that even if the content is nil, we render this block for parity with the
+         ;; `macher--system-replace-placeholder' result, i.e. treat this exactly as if we appended
+         ;; an "anonymous" placeholder at the end and then committed it.  This seems like the most
+         ;; consistent way to handle things.
+         (let ((content (macher--system-prompt-content)))
            (concat
-            system
-            macher-system-prompt-marker-start
-            context-string
-            macher-system-prompt-marker-end)))
+            system macher-system-prompt-marker-start content macher-system-prompt-marker-end)))
         (t
          system)))
       (function
        ;; Note - it'd be nice if we didn't have to actually wrap the function if we already know it
-       ;; contains the context string. As-is, this will overwrite functional user directives with a
+       ;; contains the content. As-is, this will overwrite functional user directives with a
        ;; lambda - this is functionally fine, but may look weird in gptel's directives UI.
        (lambda ()
          ;; By definition this lambda is being called in whatever buffer functional system prompts are
@@ -4043,17 +4084,17 @@ If both `macher-system-prompt-placeholder' AND
   "Inject macher context into the SYSTEM prompt.
 
 Replaces any instances of the `macher-system-prompt-placeholder' with
-the current result of `macher-system-prompt-function', surrounded by
+the current rendering of `macher-system-prompt-sections', surrounded by
 `macher-system-prompt-marker-start' and
 `macher-system-prompt-marker-end'.  Returns the result.
 
-If BUFFER is non-nil, switch to it while generating the context string
+If BUFFER is non-nil, switch to it while generating the content
 and while evaluating function directives.  Otherwise, just use the
 current buffer.
 
 If `macher-system-prompt-placeholder' is nil, returns SYSTEM unchanged.
 
-If the `macher-system-prompt-function' is or returns nil, replaces the
+If `macher-system-prompt-sections' renders to nothing, replaces the
 placeholder with empty markers (i.e. start marker immediately followed
 by end marker).  This is for consistency on repeated applications of
 things like \"@macher-system\" and \"@macher-system-commit\" - we don't
@@ -4065,7 +4106,7 @@ SYSTEM can be nil, a string, a function, or a list:
 - nil: No system message.  Returned unchanged.
 
 - String: The most common case.  We search for the placeholder and
-  replace it with the demarcated context string.
+  replace it with the demarcated content.
 
 - Function: A dynamic directive.  We call `macher--parse-directive' to
   evaluate it and get the actual string, then recursively process the
@@ -4088,18 +4129,15 @@ built-in contexts like `gptel-context--wrap-in-buffer' (though note
       ;; Must precede the `list' case, which nil also matches.
       (null nil)
       (string
-       (let* ((context-string
+       (let* ((content
                (with-current-buffer (or buffer (current-buffer))
-                 (when macher-system-prompt-function
-                   (funcall macher-system-prompt-function))))
-              (demarcated-context-string
+                 (macher--system-prompt-content)))
+              (demarcated-content
                (concat
-                macher-system-prompt-marker-start
-                (or context-string "")
-                macher-system-prompt-marker-end)))
+                macher-system-prompt-marker-start (or content "") macher-system-prompt-marker-end)))
          (if (string-match-p (regexp-quote macher-system-prompt-placeholder) system)
              (replace-regexp-in-string
-              (regexp-quote macher-system-prompt-placeholder) demarcated-context-string system
+              (regexp-quote macher-system-prompt-placeholder) demarcated-content system
               t t)
            system)))
       (function
@@ -4114,7 +4152,7 @@ built-in contexts like `gptel-context--wrap-in-buffer' (though note
       (list (cons (macher--system-replace-placeholder (car system) buffer) (cdr system))))))
 
 (defun macher--transform-system-replace-placeholder (callback fsm)
-  "A prompt transform to inject the macher context string in the system prompt.
+  "A prompt transform to inject macher's content into the system prompt.
 
 Uses `macher--system-replace-placeholder' to perform the
 replacement, invoked in the request buffer.
@@ -4128,7 +4166,7 @@ CALLBACK and FSM are as described in the
               (buffer (plist-get info :buffer))
               ((buffer-live-p buffer)))
     ;; The system message needs to be set in the temporary buffer where this prompt transform is
-    ;; being invoked, but the context string needs to be generated in the buffer where the request
+    ;; being invoked, but the content needs to be generated in the buffer where the request
     ;; is actually being sent.  Pass the request buffer to the replace function.
     (setq gptel-system-prompt (macher--system-replace-placeholder gptel-system-prompt buffer)))
   (funcall callback))
@@ -4577,8 +4615,8 @@ the following for outgoing gptel requests:
   itself.
 
 - Replace instances of the `macher-system-prompt-placeholder' in the
-  system prompt with the current result of the
-  `macher-system-prompt-function'.  This won't modify your system
+  system prompt with the current rendering of
+  `macher-system-prompt-sections'.  This won't modify your system
   prompt in any other way; if the outgoing prompt doesn't already
   contain the `macher-system-prompt-placeholder', it won't be modified.
   You can also disable this transform entirely by setting
@@ -4586,7 +4624,7 @@ the following for outgoing gptel requests:
 
 These transforms will run on every gptel request, though they should
 effectively be no-ops for requests that don't use macher tools or the
-context-string placeholder.
+system prompt placeholder.
 
 In case you're wary of adding these transforms globally, you have some
 alternatives:
@@ -4595,7 +4633,7 @@ alternatives:
   direct applications of built-in presets.
 
 - You can also just make sure to apply \"@macher-base\" in places where
-  you're using macher tools or context-string placeholders without
+  you're using macher tools or system prompt placeholders without
   explicitly applying a preset, e.g. in restored gptel buffers."
   (gptel--apply-preset macher-preset-base))
 
