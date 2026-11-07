@@ -97,7 +97,7 @@ Built-in presets:
 
 - **`@macher-tools`**: Tools only. Enables all macher tools without modifying the system prompt. The
   tool descriptions only briefly mention the workspace, so you're responsible for explaining it in
-  your own system prompt, e.g. with the text from `macher-system-prompt-instructions`.
+  your own system prompt, e.g. with the text from `macher-system-prompt-section-instructions`.
 
 - **`@macher-system`**: Ensure the system prompt includes macher's content (by default,
   instructions for the tools and the project name). See `macher-system-prompt-placeholder` and
@@ -182,7 +182,7 @@ or add info about the current project to any gptel request.
 
 Each element of `macher-system-prompt-sections` is a string, or a function that takes the current
 workspace and returns one. Add your own, or reuse the built-in ones (e.g.
-`macher-system-prompt-workspace`) in your own directives.
+`macher-system-prompt-section-workspace`) in your own directives.
 
 ## Advanced usage
 

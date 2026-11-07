@@ -610,7 +610,7 @@ system transforms in the future."
   :group 'macher-workspace)
 
 (defcustom macher-system-prompt-sections
-  '(macher-system-prompt-instructions macher-system-prompt-workspace)
+  '(macher-system-prompt-section-instructions macher-system-prompt-section-workspace)
   "Sections of macher's content in the system prompt.
 
 Each element is either a string, or a function that takes the current
@@ -627,7 +627,7 @@ For compatibility with the obsolete `macher-context-string-function',
 functions that take no arguments are called without the workspace.
 
 The macher tools' descriptions only briefly mention the workspace, and
-rely on `macher-system-prompt-instructions' to explain it.  If you
+rely on `macher-system-prompt-section-instructions' to explain it.  If you
 replace the default sections, keep that function in the list, or explain
 the workspace to the model elsewhere in your system prompt.
 
@@ -1556,7 +1556,7 @@ Returns a list of absolute file paths."
                (expand-file-name f root-path)))
            files))))))
 
-(defun macher-system-prompt-instructions (workspace)
+(defun macher-system-prompt-section-instructions (workspace)
   "Explain how macher's tools work, for the system prompt.
 
 This is a default element of `macher-system-prompt-sections'.  The tool
@@ -1583,14 +1583,15 @@ is the same for every workspace."
      "- The workspace is cleared every time the user sends a request. Between requests, the user "
      "may apply all, some, or none of your changes, and may make additional edits.\n")))
 
-(defun macher-system-prompt-workspace (workspace)
-  "Name WORKSPACE for the system prompt.
+(defun macher-system-prompt-section-workspace (workspace)
+  "Briefly describe WORKSPACE for the system prompt.
 
 This is a default element of `macher-system-prompt-sections'.  Returns
 nil if WORKSPACE is nil.
 
-This gives only the workspace's name, not its root, so that the user's
-filesystem paths aren't sent to the model by default."
+The description never includes filesystem paths, so it's safe to send
+by default.  Its exact content may change; currently it's the
+workspace's name."
   (when workspace
     (format "The user is currently working on a project named: \"%s\"\n"
             (macher--workspace-name workspace))))

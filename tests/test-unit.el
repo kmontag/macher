@@ -3133,26 +3133,26 @@
                               (mapcan (lambda (form) (list "--eval" (format "%S" form))) forms))))
                   (cons exit-code (buffer-string)))))))
 
-    (describe "macher-system-prompt-instructions"
+    (describe "macher-system-prompt-section-instructions"
       (it "returns nil without a workspace"
-        (expect (macher-system-prompt-instructions nil) :to-be nil))
+        (expect (macher-system-prompt-section-instructions nil) :to-be nil))
 
       (it "names every tool"
-        (let ((text (macher-system-prompt-instructions '(project . "/some/project/"))))
+        (let ((text (macher-system-prompt-section-instructions '(project . "/some/project/"))))
           (dolist (tool macher-tools)
             (expect (format "`%s`" (plist-get tool :name)) :to-appear-once-in text))))
 
       (it "doesn't depend on the workspace"
-        (expect (macher-system-prompt-instructions '(project . "/a/"))
-                :to-equal (macher-system-prompt-instructions '(file . "/b/c.txt")))))
+        (expect (macher-system-prompt-section-instructions '(project . "/a/"))
+                :to-equal (macher-system-prompt-section-instructions '(file . "/b/c.txt")))))
 
-    (describe "macher-system-prompt-workspace"
+    (describe "macher-system-prompt-section-workspace"
       (it "returns nil without a workspace"
-        (expect (macher-system-prompt-workspace nil) :to-be nil))
+        (expect (macher-system-prompt-section-workspace nil) :to-be nil))
 
       (it "names the workspace without revealing its path"
         (spy-on 'macher--workspace-files :and-call-through)
-        (let ((result (macher-system-prompt-workspace '(file . "/some/dir/file.txt"))))
+        (let ((result (macher-system-prompt-section-workspace '(file . "/some/dir/file.txt"))))
           (expect result
                   :to-equal "The user is currently working on a project named: \"file.txt\"\n")
           (expect result :not :to-match "/some/dir"))
@@ -3170,7 +3170,9 @@
           (expect (macher--system-prompt-content) :to-equal "First.\n\nSecond.\n\n\nThird.")))
 
       (it "follows the newline convention in the built-in sections"
-        (dolist (section '(macher-system-prompt-instructions macher-system-prompt-workspace))
+        (dolist (section
+                 '(macher-system-prompt-section-instructions
+                   macher-system-prompt-section-workspace))
           (let ((text (funcall section '(project . "/some/project/"))))
             (expect text :to-match "[^\n]\n\\'"))))
 
