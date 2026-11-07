@@ -95,11 +95,13 @@ Built-in presets:
 - **`@macher-ro`**: Read-only access. Adds tools to read and search files,
   but no editing tools. Also inherits `@macher-system`.
 
-- **`@macher-tools`**: Tools only. Enables all macher tools without modifying the system prompt.
+- **`@macher-tools`**: Tools only. Enables all macher tools without modifying the system prompt. The
+  tool descriptions only briefly mention the workspace, so you're responsible for explaining it in
+  your own system prompt, e.g. with the text from `macher-system-prompt-section-instructions`.
 
-- **`@macher-system`**: Ensure system prompt includes workspace context (project name and files
-  list). Useful when you want the LLM to understand your project structure but don't need file
-  access. See `macher-context-string-placeholder` and `macher-context-string-function`.
+- **`@macher-system`**: Ensure the system prompt includes macher's content (by default,
+  instructions for the tools and the project name). See `macher-system-prompt-placeholder` and
+  `macher-system-prompt-sections`.
 
 - **`@macher-system-commit`**: Commits the current workspace context into the system prompt,
   replacing the dynamic placeholder with a static snapshot. Useful to avoid cache churn in long
@@ -110,7 +112,7 @@ Built-in presets:
   `macher-enable`, if you want to use macher tools and/or dynamic context in more generic contexts.
   This adds transforms that run on every outgoing request, which:
     - provide macher tools with a shared editing environment
-    - replace instances of the `macher-context-string-placeholder` in the system prompt
+    - replace instances of the `macher-system-prompt-placeholder` in the system prompt
 
     This preset shouldn't have any effect on requests that don't use macher tools or include the
     placeholder.
@@ -162,22 +164,25 @@ You can define custom actions in `macher-actions-alist`.
 By default, actions run in a single ephemeral buffer per workspace. To send them somewhere else,
 e.g. a file, set `macher-action-buffer-function`.
 
-### Workspace context
+### System prompt
 
-macher can add information about the current workspace (by default, its name) to your system
-prompt.
+macher can add content to your system prompt, built from `macher-system-prompt-sections`. By
+default this explains how macher's tools and workspace work, and gives the name of the current
+workspace.
 
 If you've called `(macher-enable)` and/or activated `@macher-base`, any instances of the
-`macher-context-string-placeholder` (default: `"[macher_placeholder]"`) in your system prompt will
-be replaced with a description of the request buffer's workspace.
+`macher-system-prompt-placeholder` (default: `"[macher_placeholder]"`) in your system prompt will
+be replaced with that content, rendered in the request buffer.
 
 The `@macher`, `@macher-ro`, and `@macher-system` presets will append the placeholder automatically
 to your system prompt (unless it's already there).
 
-You can also use the `macher-context-string-placeholder` in your own directives to control placement
+You can also use the `macher-system-prompt-placeholder` in your own directives to control placement
 or add info about the current project to any gptel request.
 
-The workspace description can be customized by setting the `macher-context-string-function`.
+Each element of `macher-system-prompt-sections` is a string, or a function that takes the current
+workspace and returns one. Add your own, or reuse the built-in ones (e.g.
+`macher-system-prompt-section-workspace`) in your own directives.
 
 ## Advanced usage
 
@@ -267,14 +272,14 @@ You can see customizable variables/sub-groups with `M-x customize-group RET mach
 
 ### Workspace
 
-| Variable                             | Description                                                    |
-| ------------------------------------ | -------------------------------------------------------------- |
-| `macher-workspace-functions`         | Functions to determine the workspace for a buffer              |
-| `macher-workspace-types-alist`       | Defines workspace types (project, file, etc.)                  |
-| `macher-context-string-function`     | Generates workspace context information for requests           |
-| `macher-context-string-placeholder`  | System prompt placeholder string for dynamic context injection |
-| `macher-context-string-marker-start` | Start marker for context in system prompt                      |
-| `macher-context-string-marker-end`   | End marker for context in system prompt                        |
+| Variable                            | Description                                                    |
+| ----------------------------------- | -------------------------------------------------------------- |
+| `macher-workspace-functions`        | Functions to determine the workspace for a buffer              |
+| `macher-workspace-types-alist`      | Defines workspace types (project, file, etc.)                  |
+| `macher-system-prompt-sections`     | Sections of macher's content in the system prompt              |
+| `macher-system-prompt-placeholder`  | System prompt placeholder string for dynamic context injection |
+| `macher-system-prompt-marker-start` | Start marker for context in system prompt                      |
+| `macher-system-prompt-marker-end`   | End marker for context in system prompt                        |
 
 ### Processing
 
