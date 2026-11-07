@@ -1654,7 +1654,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               (let ((system-content
                      (mapconcat (lambda (msg) (plist-get msg :content)) system-messages " ")))
                 ;; The workspace context marker should appear exactly once.
-                (expect macher-context-string-marker-start :to-appear-once-in system-content)
+                (expect macher-system-prompt-marker-start :to-appear-once-in system-content)
                 ;; The workspace description should appear exactly once.
                 (expect "The user is currently working on a project named:"
                         :to-appear-once-in system-content))))))))
@@ -1700,7 +1700,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (expect messages :to-be-truthy)
             (expect (> (length messages) 0) :to-be-truthy)
             ;; Should contain the empty context markers with nothing in between.
-            (expect (concat macher-context-string-marker-start macher-context-string-marker-end)
+            (expect (concat macher-system-prompt-marker-start macher-system-prompt-marker-end)
                     :to-appear-once-in system-content))))
       (delete-directory non-project-dir t)))
 
@@ -2240,7 +2240,7 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
             (gptel-system-prompt
              (list
               (concat
-               "SYSTEM_WITH_PLACEHOLDER" macher-context-string-placeholder "END_MARKER")
+               "SYSTEM_WITH_PLACEHOLDER" macher-system-prompt-placeholder "END_MARKER")
               "Few-shot user" "Few-shot assistant")))
 
         (with-temp-buffer
@@ -2278,13 +2278,11 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
               ;; Content after placeholder should appear.
               (expect system-content :to-match "END_MARKER")
               ;; Placeholder should be replaced with actual context.
-              (expect system-content
-                      :not
-                      :to-match (regexp-quote macher-context-string-placeholder))
+              (expect system-content :not :to-match (regexp-quote macher-system-prompt-placeholder))
               ;; macher workspace context should appear between them.
               (expect system-content :to-match "The user is currently working on a project named:")
               ;; Context marker should appear exactly once.
-              (expect macher-context-string-marker-start :to-appear-once-in system-content))))))
+              (expect macher-system-prompt-marker-start :to-appear-once-in system-content))))))
 
     (it "handles function directive with nested function call"
       ;; A function directive that itself calls another function should work correctly.

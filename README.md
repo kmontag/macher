@@ -99,7 +99,7 @@ Built-in presets:
 
 - **`@macher-system`**: Ensure system prompt includes workspace context (project name and files
   list). Useful when you want the LLM to understand your project structure but don't need file
-  access. See `macher-context-string-placeholder` and `macher-context-string-function`.
+  access. See `macher-system-prompt-placeholder` and `macher-system-prompt-function`.
 
 - **`@macher-system-commit`**: Commits the current workspace context into the system prompt,
   replacing the dynamic placeholder with a static snapshot. Useful to avoid cache churn in long
@@ -110,7 +110,7 @@ Built-in presets:
   `macher-enable`, if you want to use macher tools and/or dynamic context in more generic contexts.
   This adds transforms that run on every outgoing request, which:
     - provide macher tools with a shared editing environment
-    - replace instances of the `macher-context-string-placeholder` in the system prompt
+    - replace instances of the `macher-system-prompt-placeholder` in the system prompt
 
     This preset shouldn't have any effect on requests that don't use macher tools or include the
     placeholder.
@@ -168,16 +168,16 @@ macher can add information about the current workspace (by default, its name) to
 prompt.
 
 If you've called `(macher-enable)` and/or activated `@macher-base`, any instances of the
-`macher-context-string-placeholder` (default: `"[macher_placeholder]"`) in your system prompt will
+`macher-system-prompt-placeholder` (default: `"[macher_placeholder]"`) in your system prompt will
 be replaced with a description of the request buffer's workspace.
 
 The `@macher`, `@macher-ro`, and `@macher-system` presets will append the placeholder automatically
 to your system prompt (unless it's already there).
 
-You can also use the `macher-context-string-placeholder` in your own directives to control placement
+You can also use the `macher-system-prompt-placeholder` in your own directives to control placement
 or add info about the current project to any gptel request.
 
-The workspace description can be customized by setting the `macher-context-string-function`.
+The workspace description can be customized by setting the `macher-system-prompt-function`.
 
 ## Advanced usage
 
@@ -267,14 +267,14 @@ You can see customizable variables/sub-groups with `M-x customize-group RET mach
 
 ### Workspace
 
-| Variable                             | Description                                                    |
-| ------------------------------------ | -------------------------------------------------------------- |
-| `macher-workspace-functions`         | Functions to determine the workspace for a buffer              |
-| `macher-workspace-types-alist`       | Defines workspace types (project, file, etc.)                  |
-| `macher-context-string-function`     | Generates workspace context information for requests           |
-| `macher-context-string-placeholder`  | System prompt placeholder string for dynamic context injection |
-| `macher-context-string-marker-start` | Start marker for context in system prompt                      |
-| `macher-context-string-marker-end`   | End marker for context in system prompt                        |
+| Variable                            | Description                                                    |
+| ----------------------------------- | -------------------------------------------------------------- |
+| `macher-workspace-functions`        | Functions to determine the workspace for a buffer              |
+| `macher-workspace-types-alist`      | Defines workspace types (project, file, etc.)                  |
+| `macher-system-prompt-function`     | Generates workspace context information for requests           |
+| `macher-system-prompt-placeholder`  | System prompt placeholder string for dynamic context injection |
+| `macher-system-prompt-marker-start` | Start marker for context in system prompt                      |
+| `macher-system-prompt-marker-end`   | End marker for context in system prompt                        |
 
 ### Processing
 

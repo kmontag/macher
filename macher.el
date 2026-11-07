@@ -115,7 +115,7 @@ the \"@macher-base\" preset from the gptel menu.
 
 Without this preset (or a preset inheriting from it), macher tools won't
 work (they'll just respond with an error), and the
-`macher-context-string-placeholder' won't be replaced in the system
+`macher-system-prompt-placeholder' won't be replaced in the system
 prompt.
 
 If you're making your own presets involving macher tools, the easiest
@@ -123,22 +123,22 @@ way to make them work robustly is to add this preset as a parent.
 
 This preset should be safe to apply globally and/or repeatedly.  It
 won't change anything about the content of your outgoing requests, other
-than replacing the `macher-context-string-placeholder' in the system
+than replacing the `macher-system-prompt-placeholder' in the system
 prompt if present.")
 
 (defconst macher-preset-system
   `(:description
     "Add macher workspace info to the system prompt (if not already present)"
     :parents (,macher--preset-system-transform)
-    :system (:function macher--system-ensure-placeholder-or-context-string))
+    :system (:function macher--system-ensure-placeholder-or-content))
   "Preset spec to ensure the macher workspace context appears in the system prompt.
 
 If the system prompt already contains the
-`macher-context-string-placeholder' OR the
-`macher-context-string-marker-start' (i.e. if the context has been
+`macher-system-prompt-placeholder' OR the
+`macher-system-prompt-marker-start' (i.e. if the context has been
 commiitted), this preset is a no-op.
 
-Otherwise, this preset appends the `macher-context-string-placeholder'
+Otherwise, this preset appends the `macher-system-prompt-placeholder'
 to the end of the system prompt.
 
 This preset also pulls in the prompt transform to replace the
@@ -150,12 +150,12 @@ placeholder in the system prompt at request-time.")
     :system (:function macher--system-replace-placeholder))
   "Preset spec to commit the current macher workspace context in the system prompt.
 
-Replaces all instances of the `macher-context-string-placeholder' in the
+Replaces all instances of the `macher-system-prompt-placeholder' in the
 system prompt with the current result of the
-`macher-context-string-function'.
+`macher-system-prompt-function'.
 
 This preset is a no-op unless the system prompt contains the
-`macher-context-string-placeholder'.
+`macher-system-prompt-placeholder'.
 
 This might be useful, for example, if you want to avoid cache churn.
 
@@ -576,7 +576,18 @@ Call function `macher-focus-string' interactively to yank this value."
   :type '(choice (function :tag "Function to call") (sexp :tag "Form to evaluate"))
   :group 'macher-actions)
 
-(defcustom macher-context-string-placeholder "\n[macher_placeholder]\n"
+;; The aliases must precede the defcustoms, so that values set under the old names before macher is
+;; loaded carry over.
+(define-obsolete-variable-alias
+  'macher-context-string-placeholder 'macher-system-prompt-placeholder "0.6.0")
+(define-obsolete-variable-alias
+  'macher-context-string-marker-start 'macher-system-prompt-marker-start "0.6.0")
+(define-obsolete-variable-alias
+  'macher-context-string-marker-end 'macher-system-prompt-marker-end "0.6.0")
+(define-obsolete-variable-alias
+  'macher-context-string-function 'macher-system-prompt-function "0.6.0")
+
+(defcustom macher-system-prompt-placeholder "\n[macher_placeholder]\n"
   "A placeholder in the system prompt for the macher context string.
 
 This gets inserted (if not already present) into the gptel system
@@ -586,20 +597,20 @@ directives if you want finer control over placement.
 
 At request time, as long as you've activated the \"@macher-base\"
 preset (or are using one of the other built-in presets), this will be
-replaced with the current result of the `macher-context-string-function'
+replaced with the current result of the `macher-system-prompt-function'
 in your system prompt.
 
 Setting this to nil will disable request-time modification of the
 outgoing system prompt.  Note, though, that in that case
 \"@macher-system\" etc. will still insert the _current_ result of
-`macher-context-string-function' (if not already present) directly into
+`macher-system-prompt-function' (if not already present) directly into
 the system prompt when applied.  If you want to disable macher's
 interaction with the system prompt entirely, you can set both this and
-`macher-context-string-function' to nil."
+`macher-system-prompt-function' to nil."
   :type '(choice (string :tag "Placeholder string") (const :tag "Disabled" nil))
   :group 'macher-workspace)
 
-(defcustom macher-context-string-marker-start "\n<current-project>\n"
+(defcustom macher-system-prompt-marker-start "\n<current-project>\n"
   "A marker for the start of the macher context string in the system prompt.
 
 You should avoid using this exact string elsewhere in your system
@@ -608,7 +619,7 @@ macher requests."
   :type 'string
   :group 'macher-workspace)
 
-(defcustom macher-context-string-marker-end "\n</current-project>\n"
+(defcustom macher-system-prompt-marker-end "\n</current-project>\n"
   "A marker for the end of the macher context string in the system prompt.
 
 For now this is purely cosmetic, but you should avoid using this exact
@@ -617,7 +628,7 @@ system transforms in the future."
   :type 'string
   :group 'macher-workspace)
 
-(defcustom macher-context-string-function #'macher--context-string
+(defcustom macher-system-prompt-function #'macher--system-prompt-default
   "Function for generating workspace information strings during macher requests.
 
 This function will be called from the buffer where the request is being
@@ -628,14 +639,14 @@ The function should return a workspace information string that can be
 included in the system prompt.
 
 As long as `macher-preset-base' is applied, any instances of the
-`macher-context-string-placeholder' in the system prompt will be
+`macher-system-prompt-placeholder' in the system prompt will be
 replaced with the result of this function.
 
 Set this to nil to disable workspace context injection.  Note that in
 that case, \"@macher-system\" etc. will still insert the
-`macher-context-string-placeholder' into the raw system prompt.  If you
+`macher-system-prompt-placeholder' into the raw system prompt.  If you
 want to disable macher's interaction with the system prompt entirely,
-you can set both this and `macher-context-string-placeholder' to nil."
+you can set both this and `macher-system-prompt-placeholder' to nil."
   :type '(function :tag "Workspace string function")
   :group 'macher-workspace)
 
@@ -1536,7 +1547,7 @@ Returns a list of absolute file paths."
                (expand-file-name f root-path)))
            files))))))
 
-(defun macher--context-string ()
+(defun macher--system-prompt-default ()
   "Generate workspace information string for the current workspace.
 
 Returns a workspace information string to be added to the request.
@@ -3952,13 +3963,13 @@ methods."
          (function (macher--parse-directive (funcall directive)))
          (cons directive))))
 
-(defun macher--system-ensure-placeholder-or-context-string (system)
+(defun macher--system-ensure-placeholder-or-content (system)
   "Ensure there's a macher placeholder or actual context string in SYSTEM prompt.
 
-If the system prompt already contains the `macher-context-string-placeholder'
-or the `macher-context-string-marker-start', this is a no-op.
+If the system prompt already contains the `macher-system-prompt-placeholder'
+or the `macher-system-prompt-marker-start', this is a no-op.
 
-Otherwise, appends the `macher-context-string-placeholder' to the end of
+Otherwise, appends the `macher-system-prompt-placeholder' to the end of
 the system prompt.
 
 SYSTEM can be nil, a string, a function, or a list:
@@ -3979,42 +3990,42 @@ SYSTEM can be nil, a string, a function, or a list:
   request time.  We return a wrapper that evaluates this directive and
   then handles the result as with other strings/lists.
 
-If `macher-context-string-placeholder' is nil, simply appends the
-current result of `macher-context-string-function' (if no start marker
+If `macher-system-prompt-placeholder' is nil, simply appends the
+current result of `macher-system-prompt-function' (if no start marker
 already present), i.e. goes straight to the \"@macher-system-commit\"
 state.
 
-If both `macher-context-string-placeholder' AND
-`macher-context-string-function' are nil, does nothing."
+If both `macher-system-prompt-placeholder' AND
+`macher-system-prompt-function' are nil, does nothing."
   ;; No placeholder to append or context function to call. Treat this as a special case, bail
   ;; immediately.
-  (if (not (or macher-context-string-function macher-context-string-placeholder))
+  (if (not (or macher-system-prompt-function macher-system-prompt-placeholder))
       system
     (cl-etypecase system
       ;; Must precede the `list' case, which nil also matches.
-      (null (macher--system-ensure-placeholder-or-context-string ""))
+      (null (macher--system-ensure-placeholder-or-content ""))
       (string
        (cond
         ;; Already has marker-start, nothing to do.
-        ((string-match-p (regexp-quote macher-context-string-marker-start) system)
+        ((string-match-p (regexp-quote macher-system-prompt-marker-start) system)
          system)
         ;; Placeholder is set and not already in string, append it.
-        ((and macher-context-string-placeholder
-              (not (string-match-p (regexp-quote macher-context-string-placeholder) system)))
-         (concat system macher-context-string-placeholder))
+        ((and macher-system-prompt-placeholder
+              (not (string-match-p (regexp-quote macher-system-prompt-placeholder) system)))
+         (concat system macher-system-prompt-placeholder))
         ;; Placeholder is nil, append demarcated context directly.
-        ((not macher-context-string-placeholder)
-         ;; Note the `macher-context-string-function' can't be nil at this point, due to the first
+        ((not macher-system-prompt-placeholder)
+         ;; Note the `macher-system-prompt-function' can't be nil at this point, due to the first
          ;; bail check.  Also note that even if the context string is nil, we render this block it
          ;; for parity with the `macher--system-replace-placeholder' result, i.e. treat this exactly
          ;; as if we appended an "anonymous" placeholder at the end and then committed it.  This seems
          ;; like the most consistent way to handle things.
-         (let ((context-string (funcall macher-context-string-function)))
+         (let ((context-string (funcall macher-system-prompt-function)))
            (concat
             system
-            macher-context-string-marker-start
+            macher-system-prompt-marker-start
             context-string
-            macher-context-string-marker-end)))
+            macher-system-prompt-marker-end)))
         (t
          system)))
       (function
@@ -4025,25 +4036,24 @@ If both `macher-context-string-placeholder' AND
          ;; By definition this lambda is being called in whatever buffer functional system prompts are
          ;; supposed to be run.  So it should be fine not to worry about changing buffers or anything
          ;; before resolving the system message.
-         (macher--system-ensure-placeholder-or-context-string (macher--parse-directive system))))
-      (list
-       (cons (macher--system-ensure-placeholder-or-context-string (car system)) (cdr system))))))
+         (macher--system-ensure-placeholder-or-content (macher--parse-directive system))))
+      (list (cons (macher--system-ensure-placeholder-or-content (car system)) (cdr system))))))
 
 (defun macher--system-replace-placeholder (system &optional buffer)
   "Inject macher context into the SYSTEM prompt.
 
-Replaces any instances of the `macher-context-string-placeholder' with
-the current result of `macher-context-string-function', surrounded by
-`macher-context-string-marker-start' and
-`macher-context-string-marker-end'.  Returns the result.
+Replaces any instances of the `macher-system-prompt-placeholder' with
+the current result of `macher-system-prompt-function', surrounded by
+`macher-system-prompt-marker-start' and
+`macher-system-prompt-marker-end'.  Returns the result.
 
 If BUFFER is non-nil, switch to it while generating the context string
 and while evaluating function directives.  Otherwise, just use the
 current buffer.
 
-If `macher-context-string-placeholder' is nil, returns SYSTEM unchanged.
+If `macher-system-prompt-placeholder' is nil, returns SYSTEM unchanged.
 
-If the `macher-context-string-function' is or returns nil, replaces the
+If the `macher-system-prompt-function' is or returns nil, replaces the
 placeholder with empty markers (i.e. start marker immediately followed
 by end marker).  This is for consistency on repeated applications of
 things like \"@macher-system\" and \"@macher-system-commit\" - we don't
@@ -4072,7 +4082,7 @@ This function should be called in the prompt transform buffer for a
 gptel request.  That's where dynamic directives are evaluated in
 built-in contexts like `gptel-context--wrap-in-buffer' (though note
 `macher-request' seems to evaluate them in the request buffer)."
-  (if (not macher-context-string-placeholder)
+  (if (not macher-system-prompt-placeholder)
       system
     (cl-etypecase system
       ;; Must precede the `list' case, which nil also matches.
@@ -4080,16 +4090,16 @@ built-in contexts like `gptel-context--wrap-in-buffer' (though note
       (string
        (let* ((context-string
                (with-current-buffer (or buffer (current-buffer))
-                 (when macher-context-string-function
-                   (funcall macher-context-string-function))))
+                 (when macher-system-prompt-function
+                   (funcall macher-system-prompt-function))))
               (demarcated-context-string
                (concat
-                macher-context-string-marker-start
+                macher-system-prompt-marker-start
                 (or context-string "")
-                macher-context-string-marker-end)))
-         (if (string-match-p (regexp-quote macher-context-string-placeholder) system)
+                macher-system-prompt-marker-end)))
+         (if (string-match-p (regexp-quote macher-system-prompt-placeholder) system)
              (replace-regexp-in-string
-              (regexp-quote macher-context-string-placeholder) demarcated-context-string system
+              (regexp-quote macher-system-prompt-placeholder) demarcated-context-string system
               t t)
            system)))
       (function
@@ -4109,7 +4119,7 @@ built-in contexts like `gptel-context--wrap-in-buffer' (though note
 Uses `macher--system-replace-placeholder' to perform the
 replacement, invoked in the request buffer.
 
-If the `macher-context-string-placeholder' is nil, or if it doesn't
+If the `macher-system-prompt-placeholder' is nil, or if it doesn't
 appear in the system prompt for the current request, this is a no-op.
 
 CALLBACK and FSM are as described in the
@@ -4566,13 +4576,13 @@ the following for outgoing gptel requests:
   end.  This is a purely internal step and doesn't affect the request
   itself.
 
-- Replace instances of the `macher-context-string-placeholder' in the
+- Replace instances of the `macher-system-prompt-placeholder' in the
   system prompt with the current result of the
-  `macher-context-string-function'.  This won't modify your system
+  `macher-system-prompt-function'.  This won't modify your system
   prompt in any other way; if the outgoing prompt doesn't already
-  contain the `macher-context-string-placeholder', it won't be modified.
+  contain the `macher-system-prompt-placeholder', it won't be modified.
   You can also disable this transform entirely by setting
-  `macher-context-string-placeholder' to nil.
+  `macher-system-prompt-placeholder' to nil.
 
 These transforms will run on every gptel request, though they should
 effectively be no-ops for requests that don't use macher tools or the
