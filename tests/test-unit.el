@@ -2919,6 +2919,57 @@
       (let ((macher-tool-output-max-length 5))
         (expect (macher--tool-search-helper context "hello") :to-throw 'error)))
 
+    (describe "matches in files that can't be shown"
+      :var (grep-text-alist)
+
+      (before-each
+        ;; A search template that treats binary files as text, like `grep -a' or `rg --text'.
+        (require 'xref)
+        (setq grep-text-alist
+              (cons '(grep . "xargs -0 grep <C> --null -snHaE -e <R>") xref-search-program-alist))
+        (let ((coding-system-for-write 'binary))
+          (write-region
+           (concat "hello binary\n" (unibyte-string 0 #xff) "hello\xfe raw\n")
+           nil
+           (expand-file-name "blob.dat" temp-dir))))
+
+      (it "are left out and noted, when the search program reports them"
+        (let* ((xref-search-program 'grep)
+               (xref-search-program-alist grep-text-alist)
+               (result (macher--tool-search-helper context "hello" :mode "content")))
+          (expect result :to-match "file1\\.txt:hello world")
+          (expect result :not :to-match "blob\\.dat:")
+          (expect result :to-match "\n\nMatches in binary files not shown: blob\\.dat\\'")
+          (expect (json-serialize (list :result result)) :to-be-truthy)))
+
+      (it "keep the note when the output is cut by head-limit"
+        (let* ((xref-search-program 'grep)
+               (xref-search-program-alist grep-text-alist)
+               (result (macher--tool-search-helper context "hello" :head-limit 1)))
+          (expect result :to-match "Matches in binary files not shown: blob\\.dat")))
+
+      (it "don't break search when a binary file is already in the context"
+        ;; A refused read still loads the file into the context.
+        (ignore-errors
+          (macher--tool-read-file context "blob.dat"))
+        (expect (macher--tool-search-helper context "hello") :to-match "file1\\.txt")
+        (let ((xref-search-program 'grep)
+              (xref-search-program-alist grep-text-alist))
+          (expect (macher--tool-search-helper context "hello")
+                  :to-match "Matches in binary files not shown: blob\\.dat")))
+
+      (it "note files too large to read"
+        (let ((macher-max-file-size 30))
+          (write-region
+           (concat "hello\n" (make-string 40 ?x)) nil (expand-file-name "big.txt" temp-dir))
+          (let ((result (macher--tool-search-helper context "hello")))
+            (expect result :to-match "file1\\.txt")
+            (expect result :to-match "Matches in files that can't be read not shown: big\\.txt"))))
+
+      (it "add no note when nothing is left out"
+        (delete-file (expand-file-name "blob.dat" temp-dir))
+        (expect (macher--tool-search-helper context "hello") :not :to-match "not shown")))
+
     (it "search handles nonexistent files in workspace gracefully"
       ;; When workspace-files includes a file that doesn't exist on disk,
       ;; search should still work, treating the missing file as empty.

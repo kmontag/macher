@@ -3063,7 +3063,8 @@ changes."
                                   editable-content nil))
                                t))
 
-(cl-defun macher--search-get-xref-matches (context pattern &key path file-regexp case-insensitive)
+(cl-defun macher--search-get-xref-matches
+    (context pattern &key path file-regexp case-insensitive on-skip)
   "Get raw xref matches as an alist of ((filename . matches)).
 
 CONTEXT is the macher-context, which will be taken into account when
@@ -3083,6 +3084,12 @@ Returns an alist containing `xref-match-item' structs for each file,
 with structure:
 
  ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)
+
+ON-SKIP, if non-nil, is called with (REL-PATH REASON) for each match
+that's left out of the results because its file can't be shown as text.
+REASON is `binary' for binary files, or `unreadable' for files that
+macher refuses to read (see `macher--check-readable-file').  Whether
+binary files produce matches at all depends on the search program.
 
 The search will be performed using `xref-matches-in-files', which uses
 the `xref-search-program' to perform the search."
@@ -3183,7 +3190,13 @@ the `xref-search-program' to perform the search."
                             (new-content (cdr contents)))
                        (if new-content
                            ;; Create temp file with modified content.
-                           (let ((temp-file (make-temp-file "macher-search")))
+                           (let ((temp-file (make-temp-file "macher-search"))
+                                 ;; Write binary content as-is, rather than prompting for a
+                                 ;; coding system.  Any matches in it are left out below.
+                                 (coding-system-for-write
+                                  (if (macher--binary-string-p new-content)
+                                      'no-conversion
+                                    coding-system-for-write)))
                              (with-temp-buffer
                                (insert new-content)
                                (write-region (point-min) (point-max) temp-file nil 'silent))
@@ -3210,8 +3223,17 @@ the `xref-search-program' to perform the search."
                        ;; Map temp file back to original file.
                        (original-file (or (cdr (assoc file-path temp-files-alist)) file-path))
                        ;; Ensure matched files are loaded into the macher-context, so their contents
-                       ;; won't change before they're accessed.
-                       (_ (macher-context--contents-for-file original-file context))
+                       ;; won't change before they're accessed.  Matches in files that can't be
+                       ;; shown as text are left out.
+                       (skip-reason
+                        (condition-case nil
+                            (when (macher--binary-string-p
+                                   (or (cdr
+                                        (macher-context--contents-for-file original-file context))
+                                       ""))
+                              'binary)
+                          (error
+                           'unreadable)))
                        ;; Always show results relative to workspace root (like grep relative to
                        ;; cwd).  Special case: if path points to a single file, show the original
                        ;; path parameter.
@@ -3234,13 +3256,18 @@ the `xref-search-program' to perform the search."
 
                     ;; Group results by file for proper formatting.
                     (let ((file-entry (assoc rel-path results)))
-                      (if file-entry
-                          ;; Add to the existing file's match list - file-entry structure is
-                          ;; (rel-path . xref-match-item-list).
-                          (setcdr file-entry (append (cdr file-entry) (list match)))
+                      (cond
+                       (skip-reason
+                        (when on-skip
+                          (funcall on-skip rel-path skip-reason)))
+                       (file-entry
+                        ;; Add to the existing file's match list - file-entry structure is
+                        ;; (rel-path . xref-match-item-list).
+                        (setcdr file-entry (append (cdr file-entry) (list match))))
+                       (t
                         ;; Create new file entry - structure is (rel-path . xref-match-item-list).
                         ;; Note this pushes to the beginning of the list.
-                        (push (cons rel-path (list match)) results)))))))
+                        (push (cons rel-path (list match)) results))))))))
 
             ;; Return the results - temp files are cleaned up in the unwind-protect.  Each entry was
             ;; prepended to the results array, so we need to use `reverse' to restore the original
@@ -3519,13 +3546,17 @@ piping the results through `head -N`."
               (round head-limit))))
 
       ;; Get raw xref matches.
-      (let* ((matches-alist
+      (let* ((skipped '())
+             (matches-alist
               (macher--search-get-xref-matches
-               context
-               pattern
+               context pattern
                :path path
                :file-regexp file-regexp
-               :case-insensitive case-insensitive))
+               :case-insensitive case-insensitive
+               :on-skip
+               (lambda (rel-path reason)
+                 (unless (member (cons rel-path reason) skipped)
+                   (push (cons rel-path reason) skipped)))))
              (output "No matches found."))
 
         ;; Check if any matches were found.
@@ -3548,6 +3579,17 @@ piping the results through `head -N`."
           (let ((lines (split-string output "\n")))
             (when (> (length lines) parsed-head-limit)
               (setq output (string-join (seq-take lines parsed-head-limit) "\n")))))
+        ;; Mention matches that were left out, so the model knows those files exist.
+        (pcase-dolist (`(,reason . ,label)
+                       '((binary . "binary files") (unreadable . "files that can't be read")))
+          (when-let* ((files
+                       (nreverse
+                        (mapcar #'car (seq-filter (lambda (e) (eq (cdr e) reason)) skipped)))))
+            (setq output
+                  (format "%s\n\nMatches in %s not shown: %s"
+                          (string-trim-right output)
+                          label
+                          (string-join files ", ")))))
         (macher--check-output-length output "Search output")
         output))))
 
