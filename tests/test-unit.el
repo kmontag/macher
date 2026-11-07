@@ -3162,7 +3162,7 @@
     (describe "macher--system-prompt-content"
       (it "joins sections with blank lines, skipping nil and empty ones"
         (let ((macher-system-prompt-sections
-               (list "First.\n" (lambda () nil) (lambda () "") (lambda () "Second.\n") "")))
+               (list "First.\n" (lambda (_) nil) (lambda (_) "") (lambda (_) "Second.\n") "")))
           (expect (macher--system-prompt-content) :to-equal "First.\n\nSecond.\n")))
 
       (it "uses section text as-is"
@@ -3177,11 +3177,11 @@
             (expect text :to-match "[^\n]\n\\'"))))
 
       (it "accepts a single function"
-        (let ((macher-system-prompt-sections (lambda () "Only.")))
+        (let ((macher-system-prompt-sections (lambda (_workspace) "Only.")))
           (expect (macher--system-prompt-content) :to-equal "Only.")))
 
       (it "accepts a single function written as a list"
-        (let ((macher-system-prompt-sections '(lambda () "Only.")))
+        (let ((macher-system-prompt-sections '(lambda (_workspace) "Only.")))
           (expect (macher--system-prompt-content) :to-equal "Only.")))
 
       (it "accepts a single string"
@@ -3191,7 +3191,7 @@
       (it "returns nil when there's nothing to render"
         (let ((macher-system-prompt-sections nil))
           (expect (macher--system-prompt-content) :to-be nil))
-        (let ((macher-system-prompt-sections (list (lambda () nil) "")))
+        (let ((macher-system-prompt-sections (list (lambda (_workspace) nil) "")))
           (expect (macher--system-prompt-content) :to-be nil)))
 
       (it "passes the current workspace to functions"
@@ -3203,18 +3203,11 @@
               (macher-system-prompt-sections (list (lambda (workspace) (format "%S" workspace)))))
           (expect (macher--system-prompt-content) :to-equal "nil")))
 
-      (it "calls functions that take no arguments without the workspace"
-        (let ((macher-system-prompt-sections
-               (list (lambda () "None.\n") (lambda (&optional workspace) (format "%S" workspace)))))
-          (with-temp-buffer
-            (setq-local macher--workspace '(project . "/some/project/"))
-            (expect (macher--system-prompt-content)
-                    :to-equal "None.\n\n(project . \"/some/project/\")"))))
-
       (it "calls functions in the current buffer"
         (with-temp-buffer
           (setq-local fill-column 1234)
-          (let ((macher-system-prompt-sections (list (lambda () (format "%d" fill-column)))))
+          (let ((macher-system-prompt-sections
+                 (list (lambda (_workspace) (format "%d" fill-column)))))
             (expect (macher--system-prompt-content) :to-equal "1234"))))
 
       (it "signals an error for elements that are neither strings nor functions"
@@ -3274,16 +3267,13 @@
                         (list
                          macher-system-prompt-placeholder
                          macher-system-prompt-marker-start
-                         macher-system-prompt-marker-end
-                         macher-system-prompt-sections))))
-        (setq expected (format "VALUES: %S" '("[p]" "<s>" "</s>" ignore))))
+                         macher-system-prompt-marker-end))))
+        (setq expected (format "VALUES: %S" '("[p]" "<s>" "</s>"))))
 
       (it "are marked obsolete"
         (dolist (name
                  '(macher-context-string-placeholder
-                   macher-context-string-marker-start
-                   macher-context-string-marker-end
-                   macher-context-string-function))
+                   macher-context-string-marker-start macher-context-string-marker-end))
           (expect (get name 'byte-obsolete-variable) :to-be-truthy)))
 
       (it "carry over values set with setq before macher is loaded"
@@ -3292,7 +3282,6 @@
                         '(setq macher-context-string-placeholder "[p]")
                         '(setq macher-context-string-marker-start "<s>")
                         '(setq macher-context-string-marker-end "</s>")
-                        '(setq macher-context-string-function 'ignore)
                         '(require 'macher)
                         print-values)))
           (expect (car result) :to-equal 0)
@@ -3304,8 +3293,7 @@
                         '(custom-set-variables
                           '(macher-context-string-placeholder "[p]")
                           '(macher-context-string-marker-start "<s>")
-                          '(macher-context-string-marker-end "</s>")
-                          '(macher-context-string-function 'ignore))
+                          '(macher-context-string-marker-end "</s>"))
                         '(require 'macher) print-values)))
           (expect (car result) :to-equal 0)
           (expect (cdr result) :to-match (regexp-quote expected))))
@@ -3321,8 +3309,7 @@
                           :custom
                           (macher-context-string-placeholder "[p]")
                           (macher-context-string-marker-start "<s>")
-                          (macher-context-string-marker-end "</s>")
-                          (macher-context-string-function 'ignore))
+                          (macher-context-string-marker-end "</s>"))
                         print-values)))
           (expect (car result) :to-equal 0)
           (expect (cdr result) :to-match (regexp-quote expected))))
@@ -3334,11 +3321,79 @@
                         '(setopt
                           macher-context-string-placeholder "[p]"
                           macher-context-string-marker-start "<s>"
-                          macher-context-string-marker-end "</s>"
-                          macher-context-string-function 'ignore)
+                          macher-context-string-marker-end "</s>")
                         print-values)))
           (expect (car result) :to-equal 0)
           (expect (cdr result) :to-match (regexp-quote expected))))))
+
+  (describe "obsolete macher-context-string-function fallback"
+    :var (warnings)
+
+    (before-each
+      (setq warnings nil)
+      (setq macher--context-string-function-warned nil)
+      (spy-on 'display-warning :and-call-fake (lambda (&rest args) (push args warnings))))
+
+    (after-each
+      (setq macher--context-string-function-warned nil))
+
+    (it "is marked obsolete"
+      (expect (get 'macher-context-string-function 'byte-obsolete-variable) :to-be-truthy))
+
+    (it "uses the sections, without warning, when left at its default"
+      (let ((macher-system-prompt-sections (list "Section.\n")))
+        (expect (macher--system-prompt-content) :to-equal "Section.\n")
+        (expect warnings :to-be nil)))
+
+    (it "renders the sections when its default value is called"
+      (let ((macher-system-prompt-sections (list "Section.\n")))
+        (expect (funcall macher-context-string-function) :to-equal "Section.\n")))
+
+    (it "replaces the sections and warns once when customized"
+      (let ((macher-system-prompt-sections (list "Section.\n"))
+            (macher-context-string-function (lambda () "Legacy.\n")))
+        (expect (macher--system-prompt-content) :to-equal "Legacy.\n")
+        (expect (macher--system-prompt-content) :to-equal "Legacy.\n")
+        (expect (length warnings) :to-equal 1)
+        (expect (cadr (car warnings)) :to-match "macher-context-string-function")))
+
+    (it "can wrap its default value"
+      (let* ((macher-system-prompt-sections (list "Section.\n"))
+             (orig macher-context-string-function)
+             (macher-context-string-function (lambda () (concat (funcall orig) "Extra.\n"))))
+        (expect (macher--system-prompt-content) :to-equal "Section.\nExtra.\n")))
+
+    (it "disables the content and warns once when nil"
+      (let ((macher-system-prompt-sections (list "Section.\n"))
+            (macher-context-string-function nil)
+            (macher-system-prompt-placeholder nil))
+        (expect (macher--system-prompt-content) :to-be nil)
+        (expect (macher--system-ensure-placeholder-or-content "System.") :to-equal "System.")
+        (expect (length warnings) :to-equal 1)
+        (expect (cadr (car warnings)) :to-match "macher-context-string-function")
+        (expect (cadr (car warnings)) :to-match "set `macher-system-prompt-sections' to nil")))
+
+    (it "is used when set before macher is loaded"
+      (with-temp-buffer
+        (let ((exit-code
+               (call-process
+                (expand-file-name invocation-name invocation-directory)
+                nil
+                t
+                nil
+                "-Q"
+                "--batch"
+                "--eval"
+                (format "(setq load-path '%S)" load-path)
+                "--eval"
+                "(setq macher-context-string-function (lambda () \"Legacy.\\n\"))"
+                "--eval"
+                "(require 'macher)"
+                "--eval"
+                "(princ (format \"CONTENT: %S\\n\" (macher--system-prompt-content)))")))
+          (expect exit-code :to-equal 0)
+          (expect (buffer-string) :to-match (regexp-quote "CONTENT: \"Legacy.\n\""))
+          (expect (buffer-string) :to-match "Warning (macher)")))))
 
   (describe "Workspace detection functions"
     (before-each
@@ -4126,7 +4181,7 @@
       (it "replaces placeholder in system prompt with current context string"
         (with-temp-buffer
           (find-file project-file)
-          (let ((macher-system-prompt-sections (lambda () "foobar"))
+          (let ((macher-system-prompt-sections (lambda (_workspace) "foobar"))
                 (gptel-system-prompt (concat "System prompt" macher-system-prompt-placeholder)))
             (macher--with-preset
              'macher-system-commit
@@ -7268,7 +7323,7 @@
 
       (it "appends demarcated context when placeholder is nil"
         (let ((macher-system-prompt-placeholder nil)
-              (macher-system-prompt-sections (lambda () "PROJECT CONTEXT"))
+              (macher-system-prompt-sections (lambda (_workspace) "PROJECT CONTEXT"))
               (system "You are a helpful assistant."))
           (let ((result (macher--system-ensure-placeholder-or-content system)))
             (expect result
@@ -7281,7 +7336,7 @@
 
       (it "appends empty markers when placeholder is nil and context-fn returns nil"
         (let ((macher-system-prompt-placeholder nil)
-              (macher-system-prompt-sections (lambda () nil))
+              (macher-system-prompt-sections (lambda (_workspace) nil))
               (system "You are a helpful assistant."))
           (let ((result (macher--system-ensure-placeholder-or-content system)))
             (expect result
@@ -7298,7 +7353,7 @@
 
       (it "returns string unchanged when placeholder is nil but marker already present"
         (let* ((macher-system-prompt-placeholder nil)
-               (macher-system-prompt-sections (lambda () "NEW CONTEXT"))
+               (macher-system-prompt-sections (lambda (_workspace) "NEW CONTEXT"))
                (system
                 (concat
                  "You are a helpful assistant."
@@ -7335,7 +7390,7 @@
 
       (it "returns demarcated context when placeholder is nil"
         (let ((macher-system-prompt-placeholder nil)
-              (macher-system-prompt-sections (lambda () "PROJECT CONTEXT")))
+              (macher-system-prompt-sections (lambda (_workspace) "PROJECT CONTEXT")))
           (expect (macher--system-ensure-placeholder-or-content nil)
                   :to-equal
                   (concat
@@ -7378,7 +7433,7 @@
 
       (it "appends demarcated context to first element when placeholder is nil"
         (let ((macher-system-prompt-placeholder nil)
-              (macher-system-prompt-sections (lambda () "PROJECT CONTEXT"))
+              (macher-system-prompt-sections (lambda (_workspace) "PROJECT CONTEXT"))
               (system '("System message" "user message")))
           (let ((result (macher--system-ensure-placeholder-or-content system)))
             (expect (car result)
@@ -7392,7 +7447,7 @@
 
       (it "appends empty markers to first element when placeholder is nil and context-fn returns nil"
         (let ((macher-system-prompt-placeholder nil)
-              (macher-system-prompt-sections (lambda () nil))
+              (macher-system-prompt-sections (lambda (_workspace) nil))
               (system '("System message" "user message")))
           (let ((result (macher--system-ensure-placeholder-or-content system)))
             (expect (car result)
@@ -7405,7 +7460,7 @@
 
       (it "returns list unchanged when placeholder is nil but marker already in first element"
         (let* ((macher-system-prompt-placeholder nil)
-               (macher-system-prompt-sections (lambda () "NEW CONTEXT"))
+               (macher-system-prompt-sections (lambda (_workspace) "NEW CONTEXT"))
                (first-elem
                 (concat
                  "System message"
@@ -7508,7 +7563,7 @@
 
     (describe "string input"
       (it "replaces placeholder with demarcated context string"
-        (let* ((macher-system-prompt-sections (lambda () "WORKSPACE CONTEXT HERE"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "WORKSPACE CONTEXT HERE"))
                (system (concat "You are helpful." macher-system-prompt-placeholder))
                (result (macher--system-replace-placeholder system)))
           (expect result :to-match "You are helpful.")
@@ -7518,7 +7573,7 @@
           (expect result :not :to-match (regexp-quote macher-system-prompt-placeholder))))
 
       (it "replaces placeholder with empty markers when context function returns nil"
-        (let* ((macher-system-prompt-sections (lambda () nil))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) nil))
                (system (concat "You are helpful." macher-system-prompt-placeholder))
                (result (macher--system-replace-placeholder system)))
           (expect result
@@ -7542,19 +7597,19 @@
 
       (it "returns string unchanged when placeholder is nil"
         (let* ((macher-system-prompt-placeholder nil)
-               (macher-system-prompt-sections (lambda () "context"))
+               (macher-system-prompt-sections (lambda (_workspace) "context"))
                (system "You are helpful."))
           (let ((result (macher--system-replace-placeholder system)))
             (expect result :to-equal system))))
 
       (it "returns string unchanged when no placeholder present"
-        (let* ((macher-system-prompt-sections (lambda () "context"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "context"))
                (system "You are helpful."))
           (let ((result (macher--system-replace-placeholder system)))
             (expect result :to-equal system))))
 
       (it "replaces multiple placeholders"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (system
                 (concat
                  "Start"
@@ -7574,7 +7629,7 @@
             (expect marker-count :to-equal 2))))
 
       (it "handles placeholder at beginning of string"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (system (concat macher-system-prompt-placeholder "Rest of message"))
                (result (macher--system-replace-placeholder system)))
           ;; Result should contain CTX and "Rest of message" (with possible newlines between).
@@ -7583,7 +7638,7 @@
           (expect result :not :to-match (regexp-quote macher-system-prompt-placeholder))))
 
       (it "handles placeholder at end of string"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (system (concat "Message" macher-system-prompt-placeholder))
                (result (macher--system-replace-placeholder system)))
           ;; Result should contain both "Message" and "CTX".
@@ -7592,7 +7647,7 @@
           (expect result :not :to-match (regexp-quote macher-system-prompt-placeholder))))
 
       (it "handles empty string"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (system "")
                (result (macher--system-replace-placeholder system)))
           (expect result :to-equal "")))
@@ -7600,7 +7655,7 @@
       (it "evaluates context function in correct buffer"
         (let* ((captured-buffer nil)
                (macher-system-prompt-sections
-                (lambda ()
+                (lambda (_workspace)
                   (setq captured-buffer (current-buffer))
                   "CTX"))
                (system (concat "Message" macher-system-prompt-placeholder)))
@@ -7618,7 +7673,7 @@
 
     (describe "list input"
       (it "replaces placeholder in first element only"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (system (list (concat "System" macher-system-prompt-placeholder) "user" "assistant"))
                (result (macher--system-replace-placeholder system)))
           (expect (car result) :to-match "CTX")
@@ -7627,7 +7682,7 @@
           (expect (nth 2 result) :to-equal "assistant")))
 
       (it "does not mutate original list"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (original-first (concat "System" macher-system-prompt-placeholder))
                (system (list original-first "user"))
                (result (macher--system-replace-placeholder system)))
@@ -7635,14 +7690,14 @@
           (expect result :not :to-be system)))
 
       (it "handles single-element list"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (system (list (concat "System" macher-system-prompt-placeholder)))
                (result (macher--system-replace-placeholder system)))
           (expect (car result) :to-match "CTX")
           (expect (cdr result) :to-be nil)))
 
       (it "returns list unchanged when first element has no placeholder"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (system '("System message" "user"))
                (result (macher--system-replace-placeholder system)))
           (expect (car result) :to-equal "System message")
@@ -7650,7 +7705,7 @@
 
     (describe "function input"
       (it "evaluates function and processes result"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (fn (lambda () (concat "Dynamic" macher-system-prompt-placeholder)))
                (result (macher--system-replace-placeholder fn))
                (result-system (car result)))
@@ -7660,7 +7715,7 @@
           (expect result-system :not :to-match (regexp-quote macher-system-prompt-placeholder))))
 
       (it "handles function returning list"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (fn (lambda () (list (concat "System" macher-system-prompt-placeholder) "user"))))
           (let ((result (macher--system-replace-placeholder fn)))
             (expect (listp result) :to-be-truthy)
@@ -7669,7 +7724,7 @@
 
     (describe "idempotency and double-injection prevention"
       (it "calling twice produces same result as calling once"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (system (concat "Message" macher-system-prompt-placeholder))
                (result1 (macher--system-replace-placeholder system))
                (result2 (macher--system-replace-placeholder result1)))
@@ -7677,7 +7732,7 @@
           (expect result1 :to-equal result2)))
 
       (it "does not inject into already-injected content"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (already-injected
                 (concat
                  "Message"
@@ -7689,7 +7744,7 @@
           (expect result :to-equal already-injected)))
 
       (it "handles mixed placeholder and already-injected content"
-        (let* ((macher-system-prompt-sections (lambda () "NEW CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "NEW CTX"))
                (system
                 (concat
                  "Start"
@@ -7707,7 +7762,7 @@
       (it "is safe to call in a loop"
         (let* ((call-count 0)
                (macher-system-prompt-sections
-                (lambda ()
+                (lambda (_workspace)
                   (setq call-count (1+ call-count))
                   (format "CTX-%d" call-count)))
                (system (concat "Message" macher-system-prompt-placeholder))
@@ -7737,7 +7792,7 @@
       (setq macher-system-prompt-sections original-context-fn))
 
     (it "replaces placeholder in gptel-system-prompt"
-      (let* ((macher-system-prompt-sections (lambda () "INJECTED CONTEXT"))
+      (let* ((macher-system-prompt-sections (lambda (_workspace) "INJECTED CONTEXT"))
              (gptel-system-prompt (concat "You are helpful." macher-system-prompt-placeholder))
              (callback-called nil)
              (callback (lambda () (setq callback-called t)))
@@ -7753,7 +7808,7 @@
                     :to-match (regexp-quote macher-system-prompt-placeholder))))))
 
     (it "always calls callback even when no replacement needed"
-      (let* ((macher-system-prompt-sections (lambda () "CTX"))
+      (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
              (gptel-system-prompt "No placeholder here")
              (callback-called nil)
              (callback (lambda () (setq callback-called t)))
@@ -7796,7 +7851,7 @@
     (it "evaluates context function in request buffer not transform buffer"
       (let* ((captured-buffer nil)
              (macher-system-prompt-sections
-              (lambda ()
+              (lambda (_workspace)
                 (setq captured-buffer (current-buffer))
                 "CTX"))
              (gptel-system-prompt (concat "Message" macher-system-prompt-placeholder))
@@ -7811,7 +7866,7 @@
             (expect captured-buffer :to-be request-buffer)))))
 
     (it "modifies gptel-system-prompt in transform buffer"
-      (let* ((macher-system-prompt-sections (lambda () "CTX"))
+      (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
              (gptel-system-prompt (concat "Original" macher-system-prompt-placeholder))
              (callback (lambda ()))
              (fsm (gptel-make-fsm)))
@@ -7825,7 +7880,7 @@
       (it "is safe to call multiple times"
         (let* ((call-count 0)
                (macher-system-prompt-sections
-                (lambda ()
+                (lambda (_workspace)
                   (setq call-count (1+ call-count))
                   "CTX"))
                (gptel-system-prompt (concat "Message" macher-system-prompt-placeholder))
@@ -7845,7 +7900,7 @@
                     :to-match (regexp-quote macher-system-prompt-placeholder)))))
 
       (it "does not accumulate context strings when called multiple times"
-        (let* ((macher-system-prompt-sections (lambda () "CTX"))
+        (let* ((macher-system-prompt-sections (lambda (_workspace) "CTX"))
                (gptel-system-prompt (concat "Message" macher-system-prompt-placeholder))
                (callback (lambda ()))
                (fsm (gptel-make-fsm)))

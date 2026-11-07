@@ -563,8 +563,6 @@ Call function `macher-focus-string' interactively to yank this value."
   'macher-context-string-marker-start 'macher-system-prompt-marker-start "0.6.0")
 (define-obsolete-variable-alias
   'macher-context-string-marker-end 'macher-system-prompt-marker-end "0.6.0")
-(define-obsolete-variable-alias
-  'macher-context-string-function 'macher-system-prompt-sections "0.6.0")
 
 (defcustom macher-system-prompt-placeholder "\n[macher_placeholder]\n"
   "A placeholder in the system prompt for macher's content.
@@ -622,9 +620,6 @@ Sections that come out nil or empty are skipped.
 By convention, each section ends with a single newline.  Sections are
 joined with one more newline, so conforming sections are separated by a
 blank line.  Section text is used as-is; nothing is added or trimmed.
-
-For compatibility with the obsolete `macher-context-string-function',
-functions that take no arguments are called without the workspace.
 
 The macher tools' descriptions only briefly mention the workspace, and
 rely on `macher-system-prompt-section-instructions' to explain it.  If you
@@ -1596,12 +1591,12 @@ workspace's name."
     (format "The user is currently working on a project named: \"%s\"\n"
             (macher--workspace-name workspace))))
 
-(defun macher--system-prompt-content ()
-  "Render `macher-system-prompt-sections' in the current buffer.
+(defun macher--system-prompt-render (sections)
+  "Render SECTIONS, a value of `macher-system-prompt-sections'.
 
-Returns nil if no section produces any text."
+Functions are called in the current buffer.  Returns nil if no section
+produces any text."
   (let* ((workspace (macher-workspace))
-         (sections macher-system-prompt-sections)
          ;; Check `functionp' first, since a lambda is also a list.
          (sections
           (if (or (functionp sections) (stringp sections))
@@ -1617,9 +1612,7 @@ Returns nil if no section produces any text."
                       ((stringp section)
                        section)
                       ((functionp section)
-                       (if (eql (cdr (func-arity section)) 0)
-                           (funcall section)
-                         (funcall section workspace)))
+                       (funcall section workspace))
                       (t
                        (error "Invalid element in `macher-system-prompt-sections': %S" section)))))
                 (unless (or (null text) (string-empty-p text))
@@ -1627,6 +1620,67 @@ Returns nil if no section produces any text."
             sections))))
     (when texts
       (string-join texts "\n"))))
+
+(defun macher--system-prompt-content ()
+  "Render macher's content for the system prompt in the current buffer.
+
+Returns nil if there's nothing to render."
+  (macher--system-prompt-render (macher--system-prompt-effective-sections)))
+
+;;;; Deprecated: `macher-context-string-function'
+;;
+;; Fallback for configurations that still set the obsolete option.  To remove it, delete this
+;; block and make `macher--system-prompt-effective-sections' return `macher-system-prompt-sections'.
+
+(defun macher--context-string-function-default ()
+  "Render `macher-system-prompt-sections' in the current buffer.
+
+This is the default value of the obsolete
+`macher-context-string-function', so code that calls that function
+still gets macher's content."
+  (macher--system-prompt-render macher-system-prompt-sections))
+
+(defcustom macher-context-string-function #'macher--context-string-function-default
+  "Obsolete; use `macher-system-prompt-sections' instead.
+
+If set to anything other than its default, this function (called with
+no arguments) replaces all of `macher-system-prompt-sections',
+including the instructions that explain macher's tools.  Setting it to
+nil disables macher's system prompt content.  Either way, a warning is
+shown."
+  :type '(choice (function :tag "Function to call") (const :tag "Disabled" nil))
+  :group 'macher-workspace)
+(make-obsolete-variable 'macher-context-string-function 'macher-system-prompt-sections "0.6.0")
+
+(defvar macher--context-string-function-warned nil
+  "Non-nil once the obsolete `macher-context-string-function' warning was shown.")
+
+(defun macher--system-prompt-effective-sections ()
+  "Return the sections to render for macher's system prompt content.
+
+This is `macher-system-prompt-sections', unless the obsolete
+`macher-context-string-function' has been customized, in which case
+that function is used alone."
+  (let ((fn macher-context-string-function))
+    (if (eq fn #'macher--context-string-function-default)
+        macher-system-prompt-sections
+      (unless macher--context-string-function-warned
+        (setq macher--context-string-function-warned t)
+        (display-warning
+         'macher
+         (if fn
+             (concat
+              "`macher-context-string-function' is obsolete, and replaces all of "
+              "`macher-system-prompt-sections', including the instructions that explain macher's "
+              "tools.  Use `macher-system-prompt-sections' instead.")
+           (concat
+            "`macher-context-string-function' is obsolete.  It's set to nil, which disables "
+            "macher's system prompt content; set `macher-system-prompt-sections' to nil "
+            "instead."))))
+      (when fn
+        (list (lambda (_workspace) (funcall fn)))))))
+
+;;;; End of deprecated `macher-context-string-function' handling
 
 (defun macher--workspace-hash (workspace &optional length)
   "Generate a unique hash for WORKSPACE.
@@ -4106,7 +4160,7 @@ If both `macher-system-prompt-placeholder' AND
 `macher-system-prompt-sections' are nil, does nothing."
   ;; No placeholder to append or sections to render. Treat this as a special case, bail
   ;; immediately.
-  (if (not (or macher-system-prompt-sections macher-system-prompt-placeholder))
+  (if (not (or (macher--system-prompt-effective-sections) macher-system-prompt-placeholder))
       system
     (cl-etypecase system
       ;; Must precede the `list' case, which nil also matches.
