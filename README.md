@@ -95,7 +95,9 @@ Built-in presets:
 - **`@macher-ro`**: Read-only access. Adds tools to read and search files,
   but no editing tools. Also inherits `@macher-system`.
 
-- **`@macher-tools`**: Tools only. Enables all macher tools without modifying the system prompt.
+- **`@macher-tools`**: Tools only. Enables all macher tools without modifying the system prompt. The
+  tool descriptions only briefly mention the workspace, so you're responsible for explaining it in
+  your own system prompt, e.g. with the text from `macher-system-prompt-instructions`.
 
 - **`@macher-system`**: Ensure the system prompt includes macher's content (by default, the
   workspace root). See `macher-system-prompt-placeholder` and `macher-system-prompt-sections`.
@@ -164,7 +166,8 @@ e.g. a file, set `macher-action-buffer-function`.
 ### System prompt
 
 macher can add content to your system prompt, built from `macher-system-prompt-sections`. By
-default this is the root of the current workspace.
+default this explains how macher's tools and workspace work, and gives the root of the current
+workspace.
 
 If you've called `(macher-enable)` and/or activated `@macher-base`, any instances of the
 `macher-system-prompt-placeholder` (default: `"[macher_placeholder]"`) in your system prompt will

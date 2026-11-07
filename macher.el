@@ -280,27 +280,6 @@ All workspace detection functions now use the `macher-workspace-' prefix.")
   "Renamed to `macher-workspace-file' for a consistent public API.
 All workspace detection functions now use the `macher-workspace-' prefix.")
 
-(defconst macher--workspace-postfix
-  (concat
-   "\n\n"
-   "WORKSPACE DEFINITION:\n"
-   "The \"workspace\" is a purely in-memory editing environment containing a snapshot of files from "
-   "the user's current project. When you use these tools:\n"
-   "- You are reading from and modifying this in-memory snapshot, NOT the actual files on disk\n"
-   "- Changes you make will NOT be saved directly to the filesystem\n"
-   "- Instead, all changes are tracked and will be presented to the user as a patch for review\n"
-   "- The user can then decide whether to apply your proposed changes to their actual files\n"
-   "- Any CLI commands or file-reading operations you suggest to the user will NOT see your workspace changes\n"
-   "- The contents of \"files\" in the workspace will be captured the first time you access them, so subsequent "
-   "filesystem changes by other processes will NOT be reflected in the workspace\n"
-   "- The workspace is cleared every time the user sends a request\n"
-   "- Between requests, the user may apply all, some, or none of your changes, and may make additional edits")
-  "Description of the workspace concept for tool descriptions.
-
-This text is appended to tool descriptions to clarify that workspace
-tools operate on an in-memory editing environment, not directly on the
-filesystem.")
-
 ;;; Customization
 
 (defgroup macher nil
@@ -628,7 +607,8 @@ system transforms in the future."
   :type 'string
   :group 'macher-workspace)
 
-(defcustom macher-system-prompt-sections '(macher-system-prompt-workspace)
+(defcustom macher-system-prompt-sections
+  '(macher-system-prompt-instructions macher-system-prompt-workspace)
   "Sections of macher's content in the system prompt.
 
 Each element is either a string, or a function that takes the current
@@ -640,6 +620,11 @@ with blank lines.
 
 For compatibility with the obsolete `macher-context-string-function',
 functions that take no arguments are called without the workspace.
+
+The macher tools' descriptions only briefly mention the workspace, and
+rely on `macher-system-prompt-instructions' to explain it.  If you
+replace the default sections, keep that function in the list, or explain
+the workspace to the model elsewhere in your system prompt.
 
 The value can also be a single function or string, which is treated as
 a list of one.  `add-to-list' and friends need an actual list, though.
@@ -844,7 +829,8 @@ adding tools to this category directly; instead, customize
        "\n"
        "Returns file contents on success. Fails if the file is not found in the workspace "
        "or if the content exceeds the maximum tool output length."
-       macher--workspace-postfix)
+       "\n\nReads from the in-memory workspace, which includes your pending changes, "
+       "not from the files on disk.")
      :confirm nil
      :include nil
      :args
@@ -888,7 +874,8 @@ adding tools to this category directly; instead, customize
        "\n"
        "Returns formatted directory listing on success. Fails if the directory is not found in "
        "the workspace."
-       macher--workspace-postfix)
+       "\n\nLists the in-memory workspace, which includes your pending changes, "
+       "not the files on disk.")
      :confirm nil
      :include nil
      :args
@@ -918,7 +905,8 @@ adding tools to this category directly; instead, customize
        "\n"
        "Returns formatted search results on success. Fails if pattern is empty or if parameters "
        "are invalid."
-       macher--workspace-postfix)
+       "\n\nSearches the in-memory workspace, which includes your pending changes, "
+       "not the files on disk.")
      :confirm nil
      :include nil
      :args
@@ -988,7 +976,8 @@ adding tools to this category directly; instead, customize
        "Returns a summary of the change (lines added/deleted) on success. Fails if the file is not "
        "found, if the text to replace is not found, or if multiple matches exist when replace_all "
        "is false."
-       macher--workspace-postfix)
+       "\n\nChanges are made in the in-memory workspace only, NOT on disk; they are shown "
+       "to the user as a patch to review.")
      :confirm nil
      :include nil
      :args
@@ -1020,7 +1009,8 @@ adding tools to this category directly; instead, customize
        "Returns a summary of the change (lines added/deleted) on success. Fails if the file is not "
        "found or if any individual edit fails (text not found, multiple matches without "
        "replace_all, etc.)."
-       macher--workspace-postfix)
+       "\n\nChanges are made in the in-memory workspace only, NOT on disk; they are shown "
+       "to the user as a patch to review.")
      :confirm nil
      :include nil
      :args
@@ -1058,7 +1048,8 @@ adding tools to this category directly; instead, customize
        "\n"
        "Returns a summary of the change (lines added/deleted) on success. Fails if the path is "
        "invalid or outside the workspace."
-       macher--workspace-postfix)
+       "\n\nChanges are made in the in-memory workspace only, NOT on disk; they are shown "
+       "to the user as a patch to review.")
      :confirm nil
      :include nil
      :args
@@ -1078,7 +1069,8 @@ adding tools to this category directly; instead, customize
        "Fails if destination already exists.\n"
        "\n"
        "Returns a summary of the move on success."
-       macher--workspace-postfix)
+       "\n\nChanges are made in the in-memory workspace only, NOT on disk; they are shown "
+       "to the user as a patch to review.")
      :confirm nil
      :include nil
      :args
@@ -1101,7 +1093,8 @@ adding tools to this category directly; instead, customize
        "Fails if file doesn't exist.\n"
        "\n"
        "Returns a summary of the deletion on success."
-       macher--workspace-postfix)
+       "\n\nChanges are made in the in-memory workspace only, NOT on disk; they are shown "
+       "to the user as a patch to review.")
      :confirm nil
      :include nil
      :args
@@ -1187,7 +1180,7 @@ model has a small context window."
      ,(macher--tools-preset
        ;; Include all macher tools.
        (lambda (_) t)
-       :description "Enable macher tools only"))
+       :description "Enable macher tools only, without changing the system prompt"))
     ;; Add dynamic contextual info about the current workspace to the system prompt.
     (macher-system . ,macher-preset-system)
     ;; Commit current system prompt with contextual info (i.e. make it non-dynamic) - may be useful
@@ -1557,6 +1550,33 @@ Returns a list of absolute file paths."
                  f
                (expand-file-name f root-path)))
            files))))))
+
+(defun macher-system-prompt-instructions (workspace)
+  "Explain how macher's tools work, for the system prompt.
+
+This is a default element of `macher-system-prompt-sections'.  The tool
+descriptions themselves only carry a one-line reminder, so without this
+section (or your own equivalent), models get much less guidance about
+the workspace.
+
+The tools are named from `macher-tools'.  Returns nil if WORKSPACE is
+nil, since the tools don't work outside a workspace.  Otherwise the text
+is the same for every workspace."
+  (when workspace
+    (concat
+     "The following tools, if available to you, operate on the workspace: "
+     (mapconcat (lambda (tool) (format "`%s`" (plist-get tool :name))) macher-tools ", ")
+     ".\n\n"
+     "The workspace is an in-memory snapshot of files from the user's current project.\n"
+     "- You read from and modify this snapshot, NOT the actual files on disk. Reads and searches "
+     "include your pending changes.\n"
+     "- Your changes are NOT saved to the filesystem. They are presented to the user as a patch, "
+     "which they may apply in full, in part, or not at all.\n"
+     "- CLI commands or file-reading operations you suggest to the user will NOT see your changes.\n"
+     "- A file's contents are captured the first time you access it, so later changes on disk by "
+     "other processes are NOT reflected in the workspace.\n"
+     "- The workspace is cleared every time the user sends a request. Between requests, the user "
+     "may apply all, some, or none of your changes, and may make additional edits.")))
 
 (defun macher-system-prompt-workspace (workspace)
   "Describe WORKSPACE for the system prompt.

@@ -1478,6 +1478,55 @@ SILENT and INHIBIT-COOKIES are ignored in this mock implementation."
           (when (file-exists-p temp-file)
             (delete-file temp-file)))))
 
+    (describe "workspace instructions"
+      :var (send)
+
+      (before-each
+        ;; Send PROMPT with PRESET from a project file, and return the request that was sent.
+        (setq send
+              (lambda (preset)
+                (funcall setup-backend '("Test response"))
+                (funcall setup-project "instructions" '(("src/main.el" . "main content")))
+                (let ((callback-called nil))
+                  (with-temp-buffer
+                    (set-visited-file-name project-file)
+                    (macher-test--send
+                     preset "Test prompt"
+                     (macher-test--make-once-only-callback
+                      (lambda (_exit-code _fsm) (setq callback-called t))))
+                    (let ((timeout 0))
+                      (while (and (not callback-called) (< timeout 100))
+                        (sleep-for 0.1)
+                        (setq timeout (1+ timeout))))
+                    (expect callback-called :to-be-truthy)
+                    (car (funcall received-requests)))))))
+
+      (it "appear once in the system prompt, and not in the tool descriptions"
+        (let* ((request (funcall send 'macher))
+               (contents
+                (mapconcat (lambda (msg) (plist-get msg :content)) (plist-get request :messages)
+                           " "))
+               (descriptions
+                (mapcar
+                 (lambda (tool)
+                   (plist-get (plist-get tool :function) :description))
+                 (plist-get request :tools))))
+          (expect "operate on the workspace:" :to-appear-once-in contents)
+          (expect (length descriptions) :to-equal (length macher-tools))
+          (dolist (description descriptions)
+            ;; Each tool keeps a one-line reminder, but not the full explanation.
+            (expect description :to-match "in-memory workspace")
+            (expect description :not :to-match "in-memory snapshot"))))
+
+      (it "are left out by @macher-tools"
+        (let* ((request (funcall send 'macher-tools))
+               (contents
+                (mapconcat
+                 (lambda (msg) (format "%s" (plist-get msg :content))) (plist-get request :messages)
+                 " ")))
+          (expect (length (plist-get request :tools)) :to-equal (length macher-tools))
+          (expect contents :not :to-match "operate on the workspace:"))))
+
     ;; Anthropic expects an input_schema parameter, which contains a valid JSON schema describing
     ;; the tool arguments. This parameter gets added in the custom `gptel--parse-tools'
     ;; implementation for Anthropic backends.

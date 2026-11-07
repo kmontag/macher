@@ -3133,6 +3133,19 @@
                               (mapcan (lambda (form) (list "--eval" (format "%S" form))) forms))))
                   (cons exit-code (buffer-string)))))))
 
+    (describe "macher-system-prompt-instructions"
+      (it "returns nil without a workspace"
+        (expect (macher-system-prompt-instructions nil) :to-be nil))
+
+      (it "names every tool"
+        (let ((text (macher-system-prompt-instructions '(project . "/some/project/"))))
+          (dolist (tool macher-tools)
+            (expect (format "`%s`" (plist-get tool :name)) :to-appear-once-in text))))
+
+      (it "doesn't depend on the workspace"
+        (expect (macher-system-prompt-instructions '(project . "/a/"))
+                :to-equal (macher-system-prompt-instructions '(file . "/b/c.txt")))))
+
     (describe "macher-system-prompt-workspace"
       (it "returns nil without a workspace"
         (expect (macher-system-prompt-workspace nil) :to-be nil))
