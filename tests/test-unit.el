@@ -3119,6 +3119,50 @@
       (it "still allows writing a new file"
         (expect (macher--tool-write-file context "new.txt" "text\n") :to-match "created")))
 
+    (describe "file size and type"
+      (it "refuses files larger than macher-max-file-size"
+        (write-region "0123456789" nil (expand-file-name "big.txt" temp-dir))
+        (let ((macher-max-file-size 9))
+          (expect (condition-case e
+                      (macher--tool-read-file context "big.txt")
+                    (error
+                     (error-message-string e)))
+                  :to-match "File .big\\.txt. is too large")
+          (expect (macher--tool-edit-file context "big.txt" "0" "X" nil) :to-throw 'error)))
+
+      (it "reads files at the limit, or with no limit"
+        (write-region "0123456789" nil (expand-file-name "big.txt" temp-dir))
+        (let ((macher-max-file-size 10))
+          (expect (macher--tool-read-file context "big.txt") :to-equal "0123456789"))
+        (let ((macher-max-file-size nil)
+              (context (macher--make-context :workspace (macher-context-workspace context))))
+          (expect (macher--tool-read-file context "big.txt") :to-equal "0123456789")))
+
+      (it "refuses a FIFO instead of blocking on it"
+        (let ((fifo (expand-file-name "pipe" temp-dir)))
+          (expect (call-process "mkfifo" nil nil nil fifo) :to-equal 0)
+          (spy-on 'macher--workspace-files :and-return-value (list fifo))
+          (expect (condition-case e
+                      (macher--tool-read-file context "pipe")
+                    (error
+                     (error-message-string e)))
+                  :to-match "pipe. is not a regular file")))
+
+      (it "checks what a symlink points to"
+        (let ((fifo (expand-file-name "pipe" temp-dir))
+              (link (expand-file-name "link" temp-dir)))
+          (expect (call-process "mkfifo" nil nil nil fifo) :to-equal 0)
+          (make-symbolic-link fifo link)
+          (expect (macher--check-readable-file link) :to-throw 'error)
+          (write-region "text" nil (expand-file-name "target.txt" temp-dir))
+          (delete-file link)
+          (make-symbolic-link (expand-file-name "target.txt" temp-dir) link)
+          (expect (macher--check-readable-file link) :to-be-truthy)))
+
+      (it "treats a missing file as missing"
+        (expect (macher--check-readable-file (expand-file-name "nope" temp-dir)) :to-be nil)
+        (expect (macher--tool-write-file context "nope.txt" "new\n") :to-match "created")))
+
     (describe "macher--binary-string-p"
       (it "is nil for text"
         (dolist (text '("" "plain ascii\n" "héllo wörld ✓ 😀" "tabs\tand\r\nnewlines"))

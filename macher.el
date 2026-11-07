@@ -1146,6 +1146,14 @@ Set to nil to disable the limit entirely."
   :type '(choice (natnum :tag "Maximum number of characters") (const :tag "No limit" nil))
   :group 'macher-tools)
 
+(defcustom macher-max-file-size (* 100 1024 1024)
+  "Maximum size in bytes of a file that macher tools will read.
+
+Tools read a file into memory in full before using it, so larger files
+are refused instead.  Set to nil to disable the limit."
+  :type '(choice (natnum :tag "Maximum size in bytes") (const :tag "No limit" nil))
+  :group 'macher-tools)
+
 (defcustom macher-tool-output-max-length (* 1024 1024)
   "Maximum number of characters any macher tool may return to the LLM.
 
@@ -3790,6 +3798,29 @@ Updates the CONTEXT's :contents alist with the new content mapping."
                (assoc-delete-all normalized-path context-contents)))
         content-pair))))
 
+(defun macher--check-readable-file (path)
+  "Signal an error if PATH shouldn't be read into memory.
+
+Returns non-nil if PATH exists and can be read, nil if it doesn't
+exist.  Refuses anything that isn't a regular file (reading a FIFO, for
+example, could block forever), and files larger than
+`macher-max-file-size'."
+  (let ((attrs (file-attributes path)))
+    ;; Check what a symlink points to, since that's what would be read.  Only symlinks pay for
+    ;; the extra lookup.
+    (when (stringp (file-attribute-type attrs))
+      (setq attrs (file-attributes (file-truename path))))
+    (when attrs
+      (unless (eq ?- (aref (file-attribute-modes attrs) 0))
+        (error "'%s' is not a regular file" (file-name-nondirectory path)))
+      (let ((size (file-attribute-size attrs)))
+        (when (and macher-max-file-size (> size macher-max-file-size))
+          (error "File '%s' is too large (%s, limit %s)"
+                 (file-name-nondirectory path)
+                 (file-size-human-readable size)
+                 (file-size-human-readable macher-max-file-size))))
+      t)))
+
 (defun macher-context--contents-for-file (path context)
   "Get or create content strings for PATH in the macher CONTEXT.
 
@@ -3813,17 +3844,18 @@ otherwise returns (nil . nil)."
     (if existing-contents
         ;; Return the existing contents.
         (cdr existing-contents)
-      ;; Try to load the file content, treating a missing file as (nil . nil) rather than
-      ;; doing a separate `file-exists-p' round-trip over TRAMP before the actual read.  Only
-      ;; catch `file-missing' — broader `file-error' signals (permission denied, TRAMP
-      ;; connection failure, etc.) should propagate so the caller sees the real problem.
+      ;; Check the file before reading it, since the whole file ends up in memory.  A missing
+      ;; file is stored as (nil . nil).  Still catch `file-missing' in case the file disappears
+      ;; in between, but let broader `file-error' signals (permission denied, TRAMP connection
+      ;; failure, etc.) propagate so the caller sees the real problem.
       (let* ((file-content
-              (condition-case nil
-                  (with-temp-buffer
-                    (insert-file-contents normalized-path)
-                    (buffer-substring-no-properties (point-min) (point-max)))
-                (file-missing
-                 nil)))
+              (when (macher--check-readable-file normalized-path)
+                (condition-case nil
+                    (with-temp-buffer
+                      (insert-file-contents normalized-path)
+                      (buffer-substring-no-properties (point-min) (point-max)))
+                  (file-missing
+                   nil))))
              ;; For non-existent files, store (nil . nil); for existing files, the original and
              ;; new content start as the same.
              (content-pair
