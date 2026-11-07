@@ -2502,6 +2502,15 @@ Returns a short string with the number of lines added and deleted."
      (t
       (format "%s: +%d -%d" rel-path added deleted)))))
 
+(defun macher--check-not-symlink (full-path path)
+  "Signal an error if FULL-PATH is a symlink, including a broken one.
+
+PATH is the path to show in the error.  Patches are plain text diffs,
+which can't change a link itself, only its target's content under the
+link's name."
+  (when (file-symlink-p full-path)
+    (error "Can't change symlink '%s'" path)))
+
 (defun macher--with-workspace-file (context path callback &optional set-dirty-p workspace-files)
   "Helper function to execute CALLBACK with workspace file content.
 
@@ -2521,6 +2530,7 @@ list itself.  Useful for callers that already have the list, to avoid
 a redundant computation over a remote connection."
   (let* ((workspace (macher-context-workspace context))
          (full-path (macher--resolve-workspace-path workspace path workspace-files))
+         (_ (macher--check-not-symlink full-path path))
          (contents (macher-context--contents-for-file full-path context))
          (new-content (cdr contents)))
     ;; Check if the file exists for editing.
@@ -2987,6 +2997,7 @@ the context to indicate changes."
   (let* ((workspace (macher-context-workspace context))
          (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
          (full-path (funcall resolve-workspace-path path))
+         (_ (macher--check-not-symlink full-path path))
          ;; Capture the pre-write content, so the result can describe what this call changed.
          (prev-content (cdr (macher-context--contents-for-file full-path context))))
     ;; Patches are plain text diffs, which can't carry binary content.
@@ -3021,6 +3032,7 @@ flag on the context to indicate changes."
          (workspace-files (macher--workspace-files workspace))
          (dest-full-path
           (macher--resolve-workspace-path workspace destination-path workspace-files)))
+    (macher--check-not-symlink dest-full-path destination-path)
     ;; Check if destination already exists.
     (let ((dest-contents (macher-context--contents-for-file dest-full-path context)))
       (when (cdr dest-contents)

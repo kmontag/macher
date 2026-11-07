@@ -3214,6 +3214,63 @@
         (expect (macher--check-readable-file (expand-file-name "nope" temp-dir)) :to-be nil)
         (expect (macher--tool-write-file context "nope.txt" "new\n") :to-match "created")))
 
+    (describe "changing symlinks"
+      :var (target link broken)
+
+      (before-each
+        (setq target (expand-file-name "target.txt" temp-dir))
+        (setq link (expand-file-name "link.txt" temp-dir))
+        (setq broken (expand-file-name "broken.txt" temp-dir))
+        (write-region "target content\n" nil target)
+        (make-symbolic-link target link)
+        (make-symbolic-link (expand-file-name "missing.txt" temp-dir) broken)
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (append (macher--project-files (cdr workspace)) (list link broken)))))
+
+      (it "is refused by every tool that changes files, before anything is read or changed"
+        (dolist (case
+                 (list
+                  (cons
+                   "link.txt"
+                   (lambda () (macher--tool-edit-file context "link.txt" "target" "x" nil)))
+                  (cons
+                   "link.txt"
+                   (lambda ()
+                     (macher--tool-multi-edit-file
+                      context "link.txt"
+                      [(:old_text "target" :new_text "x")])))
+                  (cons "link.txt" (lambda () (macher--tool-write-file context "link.txt" "new\n")))
+                  (cons
+                   "broken.txt" (lambda () (macher--tool-write-file context "broken.txt" "new\n")))
+                  (cons "link.txt" (lambda () (macher--tool-delete-file context "link.txt")))
+                  (cons
+                   "link.txt" (lambda () (macher--tool-move-file context "link.txt" "moved.txt")))
+                  (cons
+                   "broken.txt"
+                   (lambda () (macher--tool-move-file context "target.txt" "broken.txt")))))
+          (let ((ctx (macher--make-context :workspace (macher-context-workspace context))))
+            (setq context ctx)
+            (expect (condition-case e
+                        (progn
+                          (funcall (cdr case))
+                          nil)
+                      (error
+                       (error-message-string e)))
+                    :to-match (format "\\`Can.t change symlink .%s.\\'" (regexp-quote (car case))))
+            (expect (macher-context-dirty-p ctx) :to-be nil)
+            ;; Nothing was changed, and no symlink target was read.
+            (expect (seq-filter
+                     (lambda (entry) (or (cadr entry) (cddr entry))) (macher-context-contents ctx))
+                    :to-be nil))))
+
+      (it "still reads the link's target, and still changes the target directly"
+        (expect (macher--tool-read-file context "link.txt")
+                :to-equal (format "Symlink target: %s" target))
+        (expect (macher--tool-edit-file context "target.txt" "target" "changed" nil)
+                :to-match "target\\.txt")))
+
     (describe "macher--binary-string-p"
       (it "is nil for text"
         (dolist (text '("" "plain ascii\n" "héllo wörld ✓ 😀" "tabs\tand\r\nnewlines"))
