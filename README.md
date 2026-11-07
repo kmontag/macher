@@ -300,6 +300,7 @@ You can see customizable variables/sub-groups with `M-x customize-group RET mach
 | `macher-tool-category`          | Category for macher tools in gptel registry                        |
 | `macher-match-max-columns`      | Max line length for search results                                 |
 | `macher-tool-output-max-length` | Max characters any macher tool may return (errors out if exceeded) |
+| `macher-max-file-size`          | Max size of a file macher tools will read                          |
 
 ## FAQ
 

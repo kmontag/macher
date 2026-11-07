@@ -2919,6 +2919,57 @@
       (let ((macher-tool-output-max-length 5))
         (expect (macher--tool-search-helper context "hello") :to-throw 'error)))
 
+    (describe "matches in files that can't be shown"
+      :var (grep-text-alist)
+
+      (before-each
+        ;; A search template that treats binary files as text, like `grep -a' or `rg --text'.
+        (require 'xref)
+        (setq grep-text-alist
+              (cons '(grep . "xargs -0 grep <C> --null -snHaE -e <R>") xref-search-program-alist))
+        (let ((coding-system-for-write 'binary))
+          (write-region
+           (concat "hello binary\n" (unibyte-string 0 #xff) "hello\xfe raw\n")
+           nil
+           (expand-file-name "blob.dat" temp-dir))))
+
+      (it "are left out and noted, when the search program reports them"
+        (let* ((xref-search-program 'grep)
+               (xref-search-program-alist grep-text-alist)
+               (result (macher--tool-search-helper context "hello" :mode "content")))
+          (expect result :to-match "file1\\.txt:hello world")
+          (expect result :not :to-match "blob\\.dat:")
+          (expect result :to-match "\n\nMatches in binary files not shown: blob\\.dat\\'")
+          (expect (json-serialize (list :result result)) :to-be-truthy)))
+
+      (it "keep the note when the output is cut by head-limit"
+        (let* ((xref-search-program 'grep)
+               (xref-search-program-alist grep-text-alist)
+               (result (macher--tool-search-helper context "hello" :head-limit 1)))
+          (expect result :to-match "Matches in binary files not shown: blob\\.dat")))
+
+      (it "don't break search when a binary file is already in the context"
+        ;; A refused read still loads the file into the context.
+        (ignore-errors
+          (macher--tool-read-file context "blob.dat"))
+        (expect (macher--tool-search-helper context "hello") :to-match "file1\\.txt")
+        (let ((xref-search-program 'grep)
+              (xref-search-program-alist grep-text-alist))
+          (expect (macher--tool-search-helper context "hello")
+                  :to-match "Matches in binary files not shown: blob\\.dat")))
+
+      (it "note files too large to read"
+        (let ((macher-max-file-size 30))
+          (write-region
+           (concat "hello\n" (make-string 40 ?x)) nil (expand-file-name "big.txt" temp-dir))
+          (let ((result (macher--tool-search-helper context "hello")))
+            (expect result :to-match "file1\\.txt")
+            (expect result :to-match "Matches in files that can't be read not shown: big\\.txt"))))
+
+      (it "add no note when nothing is left out"
+        (delete-file (expand-file-name "blob.dat" temp-dir))
+        (expect (macher--tool-search-helper context "hello") :not :to-match "not shown")))
+
     (it "search handles nonexistent files in workspace gracefully"
       ;; When workspace-files includes a file that doesn't exist on disk,
       ;; search should still work, treating the missing file as empty.
@@ -3002,6 +3053,235 @@
 
     (it "signals error for non-existent files"
       (expect (macher--tool-read-file context "nonexistent.txt") :to-throw))
+
+    (describe "binary files"
+      :var (write-bytes)
+
+      (before-each
+        (setq write-bytes
+              (lambda (name bytes)
+                (let ((coding-system-for-write 'binary))
+                  (write-region
+                   (apply #'unibyte-string bytes) nil (expand-file-name name temp-dir))))))
+
+      (it "signals a JSON-safe error for undecodable bytes"
+        (funcall write-bytes "image.png" '(#x89 ?P ?N ?G 13 10 #x1a 10 #xff #xfe))
+        (let ((err
+               (condition-case e
+                   (macher--tool-read-file context "image.png")
+                 (error
+                  e))))
+          (expect (error-message-string err) :to-match "Can.t read binary file")
+          ;; The error is what reaches the model, so it must survive the request encoding.
+          (expect (json-serialize (list :result (error-message-string err))) :to-be-truthy)))
+
+      (it "signals an error for files containing NUL"
+        (funcall write-bytes "data.dat" '(?a 0 ?b))
+        (expect (condition-case e
+                    (macher--tool-read-file context "data.dat")
+                  (error
+                   (error-message-string e)))
+                :to-match "Can.t read binary file"))
+
+      (it "signals an error for common binary formats"
+        ;; Named .dat so that neither project.el's ignores nor `auto-compression-mode' get involved.
+        (dolist (file
+                 '(("gzip.dat" . (#x1f #x8b 8 0 0 0 0 0 0 3))
+                   ("elf.dat" . (#x7f ?E ?L ?F 2 1 1 0))
+                   ("jpeg.dat" . (#xff #xd8 #xff #xe0 0 16 ?J ?F ?I ?F))
+                   ("zip.dat" . (?P ?K 3 4 20 0 0 0 8 0))))
+          (funcall write-bytes (car file) (cdr file))
+          (expect (condition-case e
+                      (macher--tool-read-file context (car file))
+                    (error
+                     (error-message-string e)))
+                  :to-match "Can.t read binary file")))
+
+      (it "signals an error regardless of offset, limit and line numbers"
+        ;; A slice of a binary file could happen to contain only text, but the whole file is still
+        ;; refused, so the model gets a consistent answer.
+        (funcall write-bytes "mostly-text.dat" `(,@ (string-to-list "line one\nline two\n") 0 10))
+        (expect (macher--tool-read-file context "mostly-text.dat" 1 1) :to-throw 'error)
+        (expect (macher--tool-read-file context "mostly-text.dat" nil nil t) :to-throw 'error))
+
+      (it "reads non-ASCII text"
+        (let ((coding-system-for-write 'utf-8))
+          (write-region "héllo wörld ✓" nil (expand-file-name "unicode.txt" temp-dir)))
+        (expect (macher--tool-read-file context "unicode.txt") :to-equal "héllo wörld ✓"))
+
+      (it "reads text in other encodings that Emacs can decode"
+        (dolist (file
+                 `(("latin1.txt" ,(encode-coding-string "café\n" 'iso-latin-1) "café\n")
+                   ("utf16.txt"
+                    ,(encode-coding-string "hi there\n" 'utf-16le-with-signature)
+                    "hi there\n")
+                   ("bom.txt" ,(encode-coding-string "hi\n" 'utf-8-with-signature) "hi\n")
+                   ("crlf.txt" "a\r\nb\r\n" "a\nb\n")
+                   ("empty.txt" "" "")))
+          (funcall write-bytes (nth 0 file) (string-to-list (nth 1 file)))
+          (let ((result (macher--tool-read-file context (nth 0 file))))
+            (expect result :to-equal (nth 2 file))
+            (expect (json-serialize (list :result result)) :to-be-truthy))))
+
+      (it "reads text with stray invalid UTF-8 as JSON-safe text"
+        ;; Emacs falls back to a single-byte encoding for such files, so this decodes (as
+        ;; mojibake) rather than being refused.
+        (funcall write-bytes
+                 "stray.txt"
+                 (append (string-to-list (encode-coding-string "héllo\n" 'utf-8)) '(#xff ?x 10)))
+        (let ((result (macher--tool-read-file context "stray.txt")))
+          (expect result :to-match "llo\n")
+          (expect (json-serialize (list :result result)) :to-be-truthy))))
+
+    (describe "changing binary files"
+      (before-each
+        (let ((coding-system-for-write 'binary))
+          (write-region
+           (unibyte-string #x89 ?P ?N ?G 13 10 0 #xff #xfe 10 ?x)
+           nil
+           (expand-file-name "image.dat" temp-dir))))
+
+      (it "is refused by every tool that changes files, before anything is changed"
+        (dolist (op
+                 (list
+                  (lambda () (macher--tool-edit-file context "image.dat" "PNG" "GIF" nil))
+                  (lambda ()
+                    (macher--tool-multi-edit-file
+                     context "image.dat" [(:old_text "PNG" :new_text "GIF")]))
+                  (lambda () (macher--tool-write-file context "image.dat" "text\n"))
+                  (lambda () (macher--tool-move-file context "image.dat" "moved.dat"))
+                  (lambda () (macher--tool-delete-file context "image.dat"))))
+          (let ((ctx (macher--make-context :workspace (macher-context-workspace context))))
+            (setq context ctx)
+            (expect (condition-case e
+                        (progn
+                          (funcall op)
+                          nil)
+                      (error
+                       (error-message-string e)))
+                    :to-match "Can.t change binary file .image\\.dat.")
+            (expect (macher-context-dirty-p ctx) :to-be nil)
+            ;; Nothing for the patch to diff, so no coding system prompt either.
+            (expect (seq-filter
+                     (lambda (entry) (not (equal (cadr entry) (cddr entry))))
+                     (macher-context-contents ctx))
+                    :to-be nil))))
+
+      (it "still allows writing a new file"
+        (expect (macher--tool-write-file context "new.txt" "text\n") :to-match "created")))
+
+    (describe "file size and type"
+      (it "refuses files larger than macher-max-file-size"
+        (write-region "0123456789" nil (expand-file-name "big.txt" temp-dir))
+        (let ((macher-max-file-size 9))
+          (expect (condition-case e
+                      (macher--tool-read-file context "big.txt")
+                    (error
+                     (error-message-string e)))
+                  :to-match "File .big\\.txt. is too large")
+          (expect (macher--tool-edit-file context "big.txt" "0" "X" nil) :to-throw 'error)))
+
+      (it "reads files at the limit, or with no limit"
+        (write-region "0123456789" nil (expand-file-name "big.txt" temp-dir))
+        (let ((macher-max-file-size 10))
+          (expect (macher--tool-read-file context "big.txt") :to-equal "0123456789"))
+        (let ((macher-max-file-size nil)
+              (context (macher--make-context :workspace (macher-context-workspace context))))
+          (expect (macher--tool-read-file context "big.txt") :to-equal "0123456789")))
+
+      (it "refuses a FIFO instead of blocking on it"
+        (let ((fifo (expand-file-name "pipe" temp-dir)))
+          (expect (call-process "mkfifo" nil nil nil fifo) :to-equal 0)
+          (spy-on 'macher--workspace-files :and-return-value (list fifo))
+          (expect (condition-case e
+                      (macher--tool-read-file context "pipe")
+                    (error
+                     (error-message-string e)))
+                  :to-match "pipe. is not a regular file")))
+
+      (it "checks what a symlink points to"
+        (let ((fifo (expand-file-name "pipe" temp-dir))
+              (link (expand-file-name "link" temp-dir)))
+          (expect (call-process "mkfifo" nil nil nil fifo) :to-equal 0)
+          (make-symbolic-link fifo link)
+          (expect (macher--check-readable-file link) :to-throw 'error)
+          (write-region "text" nil (expand-file-name "target.txt" temp-dir))
+          (delete-file link)
+          (make-symbolic-link (expand-file-name "target.txt" temp-dir) link)
+          (expect (macher--check-readable-file link) :to-be-truthy)))
+
+      (it "treats a missing file as missing"
+        (expect (macher--check-readable-file (expand-file-name "nope" temp-dir)) :to-be nil)
+        (expect (macher--tool-write-file context "nope.txt" "new\n") :to-match "created")))
+
+    (describe "changing symlinks"
+      :var (target link broken)
+
+      (before-each
+        (setq target (expand-file-name "target.txt" temp-dir))
+        (setq link (expand-file-name "link.txt" temp-dir))
+        (setq broken (expand-file-name "broken.txt" temp-dir))
+        (write-region "target content\n" nil target)
+        (make-symbolic-link target link)
+        (make-symbolic-link (expand-file-name "missing.txt" temp-dir) broken)
+        (spy-on 'macher--workspace-files
+                :and-call-fake
+                (lambda (workspace)
+                  (append (macher--project-files (cdr workspace)) (list link broken)))))
+
+      (it "is refused by every tool that changes files, before anything is read or changed"
+        (dolist (case
+                 (list
+                  (cons
+                   "link.txt"
+                   (lambda () (macher--tool-edit-file context "link.txt" "target" "x" nil)))
+                  (cons
+                   "link.txt"
+                   (lambda ()
+                     (macher--tool-multi-edit-file
+                      context "link.txt"
+                      [(:old_text "target" :new_text "x")])))
+                  (cons "link.txt" (lambda () (macher--tool-write-file context "link.txt" "new\n")))
+                  (cons
+                   "broken.txt" (lambda () (macher--tool-write-file context "broken.txt" "new\n")))
+                  (cons "link.txt" (lambda () (macher--tool-delete-file context "link.txt")))
+                  (cons
+                   "link.txt" (lambda () (macher--tool-move-file context "link.txt" "moved.txt")))
+                  (cons
+                   "broken.txt"
+                   (lambda () (macher--tool-move-file context "target.txt" "broken.txt")))))
+          (let ((ctx (macher--make-context :workspace (macher-context-workspace context))))
+            (setq context ctx)
+            (expect (condition-case e
+                        (progn
+                          (funcall (cdr case))
+                          nil)
+                      (error
+                       (error-message-string e)))
+                    :to-match (format "\\`Can.t change symlink .%s.\\'" (regexp-quote (car case))))
+            (expect (macher-context-dirty-p ctx) :to-be nil)
+            ;; Nothing was changed, and no symlink target was read.
+            (expect (seq-filter
+                     (lambda (entry) (or (cadr entry) (cddr entry))) (macher-context-contents ctx))
+                    :to-be nil))))
+
+      (it "still reads the link's target, and still changes the target directly"
+        (expect (macher--tool-read-file context "link.txt")
+                :to-equal (format "Symlink target: %s" target))
+        (expect (macher--tool-edit-file context "target.txt" "target" "changed" nil)
+                :to-match "target\\.txt")))
+
+    (describe "macher--binary-string-p"
+      (it "is nil for text"
+        (dolist (text '("" "plain ascii\n" "héllo wörld ✓ 😀" "tabs\tand\r\nnewlines"))
+          (expect (macher--binary-string-p text) :to-be nil)))
+
+      (it "is non-nil for NUL characters"
+        (expect (macher--binary-string-p "a\0b") :to-be-truthy))
+
+      (it "is non-nil for raw bytes"
+        (expect (macher--binary-string-p (string ?a (unibyte-char-to-multibyte #xff)))
+                :to-be-truthy)))
 
     (it "errors when workspace-files includes a file not on disk"
       ;; When a custom workspace type's :get-files returns stale entries,

@@ -1146,6 +1146,14 @@ Set to nil to disable the limit entirely."
   :type '(choice (natnum :tag "Maximum number of characters") (const :tag "No limit" nil))
   :group 'macher-tools)
 
+(defcustom macher-max-file-size (* 100 1024 1024)
+  "Maximum size in bytes of a file that macher tools will read.
+
+Tools read a file into memory in full before using it, so larger files
+are refused instead.  Set to nil to disable the limit."
+  :type '(choice (natnum :tag "Maximum size in bytes") (const :tag "No limit" nil))
+  :group 'macher-tools)
+
 (defcustom macher-tool-output-max-length (* 1024 1024)
   "Maximum number of characters any macher tool may return to the LLM.
 
@@ -2494,6 +2502,15 @@ Returns a short string with the number of lines added and deleted."
      (t
       (format "%s: +%d -%d" rel-path added deleted)))))
 
+(defun macher--check-not-symlink (full-path path)
+  "Signal an error if FULL-PATH is a symlink, including a broken one.
+
+PATH is the path to show in the error.  Patches are plain text diffs,
+which can't change a link itself, only its target's content under the
+link's name."
+  (when (file-symlink-p full-path)
+    (error "Can't change symlink '%s'" path)))
+
 (defun macher--with-workspace-file (context path callback &optional set-dirty-p workspace-files)
   "Helper function to execute CALLBACK with workspace file content.
 
@@ -2513,16 +2530,22 @@ list itself.  Useful for callers that already have the list, to avoid
 a redundant computation over a remote connection."
   (let* ((workspace (macher-context-workspace context))
          (full-path (macher--resolve-workspace-path workspace path workspace-files))
+         (_ (macher--check-not-symlink full-path path))
          (contents (macher-context--contents-for-file full-path context))
          (new-content (cdr contents)))
     ;; Check if the file exists for editing.
-    (if (not new-content)
-        (error "File '%s' not found in workspace" path)
+    (cond
+     ((not new-content)
+      (error "File '%s' not found in workspace" path))
+     ;; Patches are plain text diffs, which can't carry binary content.
+     ((macher--binary-string-p new-content)
+      (error "Can't change binary file '%s'" path))
+     (t
       ;; Set the dirty flag to indicate changes are being made if requested.
       (when set-dirty-p
         (setf (macher-context-dirty-p context) t))
       ;; Call the callback with the file content.
-      (funcall callback full-path new-content))))
+      (funcall callback full-path new-content)))))
 
 ;; The workspace tools are somewhat inspired by the reference filesystem MCP.  See
 ;; https://github.com/modelcontextprotocol/servers/blob/main/src/filesystem/README.md.
@@ -2574,8 +2597,14 @@ found in the workspace."
         ;; would resolve the path a second time.
         (let* ((contents (macher-context--contents-for-file full-path context))
                (new-content (cdr contents)))
-          (if (not new-content)
-              (error "File '%s' not found in workspace" path)
+          (cond
+           ((not new-content)
+            (error "File '%s' not found in workspace" path))
+           ;; Binary content can't be returned to the model: raw bytes aren't valid JSON, and the
+           ;; request fails before the model sees any error.
+           ((macher--binary-string-p new-content)
+            (error "Can't read binary file '%s'" path))
+           (t
             ;; Some LLMs (for example qwen3-coder at time of writing) seem to have trouble
             ;; invoking tools with integer inputs - they'll always pass e.g. '1.0' instead of
             ;; '1'.  Therefore we need to support float inputs, which in general we handle by
@@ -2589,7 +2618,14 @@ found in the workspace."
                    (processed-content
                     (macher--read-string new-content parsed-offset parsed-limit show-line-numbers)))
               (macher--check-output-length processed-content "File content")
-              processed-content)))))))
+              processed-content))))))))
+
+(defun macher--binary-string-p (string)
+  "Return non-nil if STRING looks like binary rather than text content.
+
+That is, if it contains raw bytes that weren't decoded into characters,
+or a NUL character (the heuristic git uses)."
+  (or (string-search "\0" string) (memq 'eight-bit (find-charset-string string))))
 
 (defun macher--tool-list-directory (context path &optional recursive sizes)
   "List directory contents at PATH within the workspace.
@@ -2961,8 +2997,12 @@ the context to indicate changes."
   (let* ((workspace (macher-context-workspace context))
          (resolve-workspace-path (apply-partially #'macher--resolve-workspace-path workspace))
          (full-path (funcall resolve-workspace-path path))
+         (_ (macher--check-not-symlink full-path path))
          ;; Capture the pre-write content, so the result can describe what this call changed.
          (prev-content (cdr (macher-context--contents-for-file full-path context))))
+    ;; Patches are plain text diffs, which can't carry binary content.
+    (when (and prev-content (macher--binary-string-p prev-content))
+      (error "Can't change binary file '%s'" path))
     ;; Set the dirty flag to indicate changes are being made.
     (setf (macher-context-dirty-p context) t)
     ;; Set the new content in the context (this will create the entry if needed).
@@ -2992,6 +3032,7 @@ flag on the context to indicate changes."
          (workspace-files (macher--workspace-files workspace))
          (dest-full-path
           (macher--resolve-workspace-path workspace destination-path workspace-files)))
+    (macher--check-not-symlink dest-full-path destination-path)
     ;; Check if destination already exists.
     (let ((dest-contents (macher-context--contents-for-file dest-full-path context)))
       (when (cdr dest-contents)
@@ -3034,7 +3075,8 @@ changes."
                                   editable-content nil))
                                t))
 
-(cl-defun macher--search-get-xref-matches (context pattern &key path file-regexp case-insensitive)
+(cl-defun macher--search-get-xref-matches
+    (context pattern &key path file-regexp case-insensitive on-skip)
   "Get raw xref matches as an alist of ((filename . matches)).
 
 CONTEXT is the macher-context, which will be taken into account when
@@ -3054,6 +3096,12 @@ Returns an alist containing `xref-match-item' structs for each file,
 with structure:
 
  ((rel-path . (xref-match-item1 xref-match-item2 ...)) ...)
+
+ON-SKIP, if non-nil, is called with (REL-PATH REASON) for each match
+that's left out of the results because its file can't be shown as text.
+REASON is `binary' for binary files, or `unreadable' for files that
+macher refuses to read (see `macher--check-readable-file').  Whether
+binary files produce matches at all depends on the search program.
 
 The search will be performed using `xref-matches-in-files', which uses
 the `xref-search-program' to perform the search."
@@ -3154,7 +3202,13 @@ the `xref-search-program' to perform the search."
                             (new-content (cdr contents)))
                        (if new-content
                            ;; Create temp file with modified content.
-                           (let ((temp-file (make-temp-file "macher-search")))
+                           (let ((temp-file (make-temp-file "macher-search"))
+                                 ;; Write binary content as-is, rather than prompting for a
+                                 ;; coding system.  Any matches in it are left out below.
+                                 (coding-system-for-write
+                                  (if (macher--binary-string-p new-content)
+                                      'no-conversion
+                                    coding-system-for-write)))
                              (with-temp-buffer
                                (insert new-content)
                                (write-region (point-min) (point-max) temp-file nil 'silent))
@@ -3181,8 +3235,17 @@ the `xref-search-program' to perform the search."
                        ;; Map temp file back to original file.
                        (original-file (or (cdr (assoc file-path temp-files-alist)) file-path))
                        ;; Ensure matched files are loaded into the macher-context, so their contents
-                       ;; won't change before they're accessed.
-                       (_ (macher-context--contents-for-file original-file context))
+                       ;; won't change before they're accessed.  Matches in files that can't be
+                       ;; shown as text are left out.
+                       (skip-reason
+                        (condition-case nil
+                            (when (macher--binary-string-p
+                                   (or (cdr
+                                        (macher-context--contents-for-file original-file context))
+                                       ""))
+                              'binary)
+                          (error
+                           'unreadable)))
                        ;; Always show results relative to workspace root (like grep relative to
                        ;; cwd).  Special case: if path points to a single file, show the original
                        ;; path parameter.
@@ -3205,13 +3268,18 @@ the `xref-search-program' to perform the search."
 
                     ;; Group results by file for proper formatting.
                     (let ((file-entry (assoc rel-path results)))
-                      (if file-entry
-                          ;; Add to the existing file's match list - file-entry structure is
-                          ;; (rel-path . xref-match-item-list).
-                          (setcdr file-entry (append (cdr file-entry) (list match)))
+                      (cond
+                       (skip-reason
+                        (when on-skip
+                          (funcall on-skip rel-path skip-reason)))
+                       (file-entry
+                        ;; Add to the existing file's match list - file-entry structure is
+                        ;; (rel-path . xref-match-item-list).
+                        (setcdr file-entry (append (cdr file-entry) (list match))))
+                       (t
                         ;; Create new file entry - structure is (rel-path . xref-match-item-list).
                         ;; Note this pushes to the beginning of the list.
-                        (push (cons rel-path (list match)) results)))))))
+                        (push (cons rel-path (list match)) results))))))))
 
             ;; Return the results - temp files are cleaned up in the unwind-protect.  Each entry was
             ;; prepended to the results array, so we need to use `reverse' to restore the original
@@ -3490,13 +3558,17 @@ piping the results through `head -N`."
               (round head-limit))))
 
       ;; Get raw xref matches.
-      (let* ((matches-alist
+      (let* ((skipped '())
+             (matches-alist
               (macher--search-get-xref-matches
-               context
-               pattern
+               context pattern
                :path path
                :file-regexp file-regexp
-               :case-insensitive case-insensitive))
+               :case-insensitive case-insensitive
+               :on-skip
+               (lambda (rel-path reason)
+                 (unless (member (cons rel-path reason) skipped)
+                   (push (cons rel-path reason) skipped)))))
              (output "No matches found."))
 
         ;; Check if any matches were found.
@@ -3519,6 +3591,17 @@ piping the results through `head -N`."
           (let ((lines (split-string output "\n")))
             (when (> (length lines) parsed-head-limit)
               (setq output (string-join (seq-take lines parsed-head-limit) "\n")))))
+        ;; Mention matches that were left out, so the model knows those files exist.
+        (pcase-dolist (`(,reason . ,label)
+                       '((binary . "binary files") (unreadable . "files that can't be read")))
+          (when-let* ((files
+                       (nreverse
+                        (mapcar #'car (seq-filter (lambda (e) (eq (cdr e) reason)) skipped)))))
+            (setq output
+                  (format "%s\n\nMatches in %s not shown: %s"
+                          (string-trim-right output)
+                          label
+                          (string-join files ", ")))))
         (macher--check-output-length output "Search output")
         output))))
 
@@ -3769,6 +3852,29 @@ Updates the CONTEXT's :contents alist with the new content mapping."
                (assoc-delete-all normalized-path context-contents)))
         content-pair))))
 
+(defun macher--check-readable-file (path)
+  "Signal an error if PATH shouldn't be read into memory.
+
+Returns non-nil if PATH exists and can be read, nil if it doesn't
+exist.  Refuses anything that isn't a regular file (reading a FIFO, for
+example, could block forever), and files larger than
+`macher-max-file-size'."
+  (let ((attrs (file-attributes path)))
+    ;; Check what a symlink points to, since that's what would be read.  Only symlinks pay for
+    ;; the extra lookup.
+    (when (stringp (file-attribute-type attrs))
+      (setq attrs (file-attributes (file-truename path))))
+    (when attrs
+      (unless (eq ?- (aref (file-attribute-modes attrs) 0))
+        (error "'%s' is not a regular file" (file-name-nondirectory path)))
+      (let ((size (file-attribute-size attrs)))
+        (when (and macher-max-file-size (> size macher-max-file-size))
+          (error "File '%s' is too large (%s, limit %s)"
+                 (file-name-nondirectory path)
+                 (file-size-human-readable size)
+                 (file-size-human-readable macher-max-file-size))))
+      t)))
+
 (defun macher-context--contents-for-file (path context)
   "Get or create content strings for PATH in the macher CONTEXT.
 
@@ -3792,17 +3898,18 @@ otherwise returns (nil . nil)."
     (if existing-contents
         ;; Return the existing contents.
         (cdr existing-contents)
-      ;; Try to load the file content, treating a missing file as (nil . nil) rather than
-      ;; doing a separate `file-exists-p' round-trip over TRAMP before the actual read.  Only
-      ;; catch `file-missing' — broader `file-error' signals (permission denied, TRAMP
-      ;; connection failure, etc.) should propagate so the caller sees the real problem.
+      ;; Check the file before reading it, since the whole file ends up in memory.  A missing
+      ;; file is stored as (nil . nil).  Still catch `file-missing' in case the file disappears
+      ;; in between, but let broader `file-error' signals (permission denied, TRAMP connection
+      ;; failure, etc.) propagate so the caller sees the real problem.
       (let* ((file-content
-              (condition-case nil
-                  (with-temp-buffer
-                    (insert-file-contents normalized-path)
-                    (buffer-substring-no-properties (point-min) (point-max)))
-                (file-missing
-                 nil)))
+              (when (macher--check-readable-file normalized-path)
+                (condition-case nil
+                    (with-temp-buffer
+                      (insert-file-contents normalized-path)
+                      (buffer-substring-no-properties (point-min) (point-max)))
+                  (file-missing
+                   nil))))
              ;; For non-existent files, store (nil . nil); for existing files, the original and
              ;; new content start as the same.
              (content-pair
