@@ -2516,13 +2516,18 @@ a redundant computation over a remote connection."
          (contents (macher-context--contents-for-file full-path context))
          (new-content (cdr contents)))
     ;; Check if the file exists for editing.
-    (if (not new-content)
-        (error "File '%s' not found in workspace" path)
+    (cond
+     ((not new-content)
+      (error "File '%s' not found in workspace" path))
+     ;; Patches are plain text diffs, which can't carry binary content.
+     ((macher--binary-string-p new-content)
+      (error "Can't change binary file '%s'" path))
+     (t
       ;; Set the dirty flag to indicate changes are being made if requested.
       (when set-dirty-p
         (setf (macher-context-dirty-p context) t))
       ;; Call the callback with the file content.
-      (funcall callback full-path new-content))))
+      (funcall callback full-path new-content)))))
 
 ;; The workspace tools are somewhat inspired by the reference filesystem MCP.  See
 ;; https://github.com/modelcontextprotocol/servers/blob/main/src/filesystem/README.md.
@@ -2580,7 +2585,7 @@ found in the workspace."
            ;; Binary content can't be returned to the model: raw bytes aren't valid JSON, and the
            ;; request fails before the model sees any error.
            ((macher--binary-string-p new-content)
-            (error "File '%s' looks like a binary file, and can't be read as text" path))
+            (error "Can't read binary file '%s'" path))
            (t
             ;; Some LLMs (for example qwen3-coder at time of writing) seem to have trouble
             ;; invoking tools with integer inputs - they'll always pass e.g. '1.0' instead of
@@ -2976,6 +2981,9 @@ the context to indicate changes."
          (full-path (funcall resolve-workspace-path path))
          ;; Capture the pre-write content, so the result can describe what this call changed.
          (prev-content (cdr (macher-context--contents-for-file full-path context))))
+    ;; Patches are plain text diffs, which can't carry binary content.
+    (when (and prev-content (macher--binary-string-p prev-content))
+      (error "Can't change binary file '%s'" path))
     ;; Set the dirty flag to indicate changes are being made.
     (setf (macher-context-dirty-p context) t)
     ;; Set the new content in the context (this will create the entry if needed).

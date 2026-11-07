@@ -3020,7 +3020,7 @@
                    (macher--tool-read-file context "image.png")
                  (error
                   e))))
-          (expect (error-message-string err) :to-match "looks like a binary file")
+          (expect (error-message-string err) :to-match "Can.t read binary file")
           ;; The error is what reaches the model, so it must survive the request encoding.
           (expect (json-serialize (list :result (error-message-string err))) :to-be-truthy)))
 
@@ -3030,7 +3030,7 @@
                     (macher--tool-read-file context "data.dat")
                   (error
                    (error-message-string e)))
-                :to-match "looks like a binary file"))
+                :to-match "Can.t read binary file"))
 
       (it "signals an error for common binary formats"
         ;; Named .dat so that neither project.el's ignores nor `auto-compression-mode' get involved.
@@ -3044,7 +3044,7 @@
                       (macher--tool-read-file context (car file))
                     (error
                      (error-message-string e)))
-                  :to-match "looks like a binary file")))
+                  :to-match "Can.t read binary file")))
 
       (it "signals an error regardless of offset, limit and line numbers"
         ;; A slice of a binary file could happen to contain only text, but the whole file is still
@@ -3081,6 +3081,43 @@
         (let ((result (macher--tool-read-file context "stray.txt")))
           (expect result :to-match "llo\n")
           (expect (json-serialize (list :result result)) :to-be-truthy))))
+
+    (describe "changing binary files"
+      (before-each
+        (let ((coding-system-for-write 'binary))
+          (write-region
+           (unibyte-string #x89 ?P ?N ?G 13 10 0 #xff #xfe 10 ?x)
+           nil
+           (expand-file-name "image.dat" temp-dir))))
+
+      (it "is refused by every tool that changes files, before anything is changed"
+        (dolist (op
+                 (list
+                  (lambda () (macher--tool-edit-file context "image.dat" "PNG" "GIF" nil))
+                  (lambda ()
+                    (macher--tool-multi-edit-file
+                     context "image.dat" [(:old_text "PNG" :new_text "GIF")]))
+                  (lambda () (macher--tool-write-file context "image.dat" "text\n"))
+                  (lambda () (macher--tool-move-file context "image.dat" "moved.dat"))
+                  (lambda () (macher--tool-delete-file context "image.dat"))))
+          (let ((ctx (macher--make-context :workspace (macher-context-workspace context))))
+            (setq context ctx)
+            (expect (condition-case e
+                        (progn
+                          (funcall op)
+                          nil)
+                      (error
+                       (error-message-string e)))
+                    :to-match "Can.t change binary file .image\\.dat.")
+            (expect (macher-context-dirty-p ctx) :to-be nil)
+            ;; Nothing for the patch to diff, so no coding system prompt either.
+            (expect (seq-filter
+                     (lambda (entry) (not (equal (cadr entry) (cddr entry))))
+                     (macher-context-contents ctx))
+                    :to-be nil))))
+
+      (it "still allows writing a new file"
+        (expect (macher--tool-write-file context "new.txt" "text\n") :to-match "created")))
 
     (describe "macher--binary-string-p"
       (it "is nil for text"
