@@ -5457,7 +5457,42 @@
             (macher--before-action-insert-prompt execution)
             (let ((content (buffer-substring-no-properties (point-min) (point-max))))
               ;; The source name is rendered in the heading before the summary.
-              (expect content :to-match "^\\* source\\.el: Do the thing :implement:$")))))))
+              (expect content :to-match "^\\* source\\.el: Do the thing :implement:$")))))
+
+      (it "omits a blank summary from the heading and topic"
+        ;; A draft started without a region (e.g. `C-u M-x macher-implement') has an empty summary.
+        (dolist (summary '("" "  \n "))
+          (with-temp-buffer
+            (org-mode)
+            (gptel-mode 1)
+            (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+            (let ((execution
+                   (macher--make-action-execution
+                    :action 'implement
+                    :prompt ""
+                    :summary summary
+                    :buffer (current-buffer)
+                    :source source)))
+              (macher--before-action-insert-prompt execution)
+              (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+                (expect content :to-match "^\\* source\\.el :implement:$")
+                (expect content :to-match ":GPTEL_TOPIC: macher-implement-[0-9]\\{14\\}$"))))))
+
+      (it "omits a blank summary from the heading when source is not set"
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'implement
+                  :prompt ""
+                  :summary ""
+                  :buffer (current-buffer))))
+            (macher--before-action-insert-prompt execution)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect content :to-match "^\\* :implement:$")
+              (expect content :to-match ":GPTEL_TOPIC: macher-implement-[0-9]\\{14\\}$")))))))
 
   (describe "macher--action-source-name"
     (it "returns nil when the execution has no source buffer"

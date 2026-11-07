@@ -1748,25 +1748,36 @@ This is added buffer-locally to `macher-before-action-functions' by
       (unless (bobp)
         (insert "\n"))
       (let* ((name (macher--action-source-name execution))
-             (header-prefix
-              (if name
-                  (format "* %s: " name)
-                "* "))
-             (header-postfix (format " :%s:" action))
              (summary (macher-action-execution-summary execution))
-             ;; Extract the first non-whitespace line from the summary and truncate to fill-column.
+             ;; The first non-whitespace line of the summary, or nil if there is none, e.g. for a
+             ;; draft started without a region.
+             (first-line (car (split-string (or summary "") "[\r\n]+" t "[[:space:]]*")))
+             (header-prefix
+              (cond
+               ((and name first-line)
+                (format "* %s: " name))
+               (name
+                (format "* %s" name))
+               (first-line
+                "* ")
+               ;; The postfix supplies the space after the stars.
+               (t
+                "*")))
+             (header-postfix (format " :%s:" action))
              (truncated-summary
-              (let* ((lines (split-string summary "[\r\n]+" t "[[:space:]]*"))
-                     (first-line (or (car lines) ""))
-                     ;; Calculate available space: total fill-column minus prefix and postfix.
-                     (used-length (+ (length header-prefix) (length header-postfix)))
-                     (available-length (max 10 (- (or fill-column 70) used-length))))
-                (truncate-string-to-width first-line available-length nil nil "...")))
+              (if first-line
+                  ;; Truncate to fit within fill-column along with the prefix and postfix.
+                  (let* ((used-length (+ (length header-prefix) (length header-postfix)))
+                         (available-length (max 10 (- (or fill-column 70) used-length))))
+                    (truncate-string-to-width first-line available-length nil nil "..."))
+                ""))
              (topic
-              (format "macher-%s-%s-%s"
-                      action
-                      (format-time-string "%Y%m%d%H%M%S" (current-time))
-                      (replace-regexp-in-string "[[:space:]]+" "-" (downcase truncated-summary)))))
+              (concat
+               (format "macher-%s-%s" action (format-time-string "%Y%m%d%H%M%S" (current-time)))
+               (when first-line
+                 (concat
+                  "-"
+                  (replace-regexp-in-string "[[:space:]]+" "-" (downcase truncated-summary)))))))
         ;; Use the 'ignore property to omit the header from requests sent via normal gptel
         ;; conversational methods.
         (insert
